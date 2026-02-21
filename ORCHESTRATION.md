@@ -559,3 +559,5 @@ Do not surface the reminder more than once per session after the threshold is cr
 **Coder prompt size limit**: Keep coder prompts under 2000 tokens. Include: todo descriptions, write-target paths, read-only paths, and a Pitfalls section. Omit: full file contents (the coder reads them), architecture explanations the coder can find in CLAUDE.md, and verbose rationale. Link to CLAUDE.md sections by name instead of repeating them.
 
 **CSS-only stories** (no JS/JSX changes): always use Haiku, skip testing, skip diff gate file restoration (CSS files can't break tests). Only run `npm run build` to verify no syntax errors.
+
+**Inline parallelism**: Bash commands that don't gate the next write (build verification, lint, diff checks, git status) must run with `run_in_background: true` when there is other independent work to do in parallel. Never block on a build while the next file read is already known. Read the background result only when the next decision requires it.
