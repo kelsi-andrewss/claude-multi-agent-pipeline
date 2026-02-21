@@ -1,6 +1,6 @@
 # Claude Multi-Agent Development Pipeline
 
-A structured multi-agent workflow for software development using Claude Code. Epics group related stories, each story gets an isolated worktree branched off the epic feature branch, and specialized agents handle each pipeline stage.
+A structured multi-agent workflow for software development using Claude Code. Epics group related stories, each story gets an isolated worktree branched off the epic feature branch, and specialized agents handle each pipeline stage. In-session tracking uses Claude's built-in `TaskCreate`/`TaskList`/`TaskUpdate` tools; cross-session recovery relies on `epics.json` + git state.
 
 ---
 
@@ -8,34 +8,34 @@ A structured multi-agent workflow for software development using Claude Code. Ep
 
 ```
 User Request
-     │
-     ▼
-┌─────────────┐
-│ Orchestrator│  ← classify, plan, group todos
-│  (Haiku)    │
-└──────┬──────┘
-       │ staging payload
-       ▼
-┌─────────────┐
-│ Main Session│  ← validate, write files, trigger run
-└──────┬──────┘
-       │ run trigger
-       ▼
-┌──────────────────────────────────────┐
-│           Epic Feature Branch        │
-│         epic/<epic-slug>             │
-│                                      │
-│  ┌──────────┐    ┌──────────┐        │
-│  │ Story A  │    │ Story B  │  ...   │
-│  │ worktree │    │ worktree │        │
-│  └────┬─────┘    └────┬─────┘        │
-│       │ merge          │ merge        │
-│       └────────┬───────┘             │
-│                ▼                     │
-│        epic branch HEAD              │
-└──────────────────┬───────────────────┘
-                   │ epic PR (when ready)
-                   ▼
+     |
+     v
++--------------+
+| Orchestrator |  <-- classify, plan, group todos
+|   (Haiku)    |
++------+-------+
+       | staging payload
+       v
++--------------+
+| Main Session |  <-- validate, create TaskCreate entries, trigger run
++------+-------+
+       | run trigger
+       v
++--------------------------------------+
+|           Epic Feature Branch        |
+|         epic/<epic-slug>             |
+|                                      |
+|  +----------+    +----------+        |
+|  | Story A  |    | Story B  |  ...   |
+|  | worktree |    | worktree |        |
+|  +----+-----+    +----+-----+        |
+|       | merge          | merge       |
+|       +--------+-------+            |
+|                v                     |
+|        epic branch HEAD              |
++------------------+-------------------+
+                   | epic PR (when ready)
+                   v
                  main
 ```
 
@@ -43,11 +43,13 @@ User Request
 
 ## Hierarchy
 
-| Level | Unit | Lives In |
-|-------|------|----------|
-| **Epic** | Broad theme (e.g. "UI Polish") | `.claude/epics.json` |
-| **Story** | Scoped deliverable, owns a branch + worktree | `.claude/epics.json` |
-| **Todo** | Atomic task under a story | `.claude/todo-tracking.json` |
+| Level | Unit | Persistence |
+|-------|------|-------------|
+| **Epic** | Broad theme (e.g. "UI Polish") | `.claude/epics.json` (on disk) |
+| **Story** | Scoped deliverable, owns a branch + worktree | `.claude/epics.json` (on disk) |
+| **Todo** | Atomic task under a story | `TaskCreate`/`TaskList` (in-session only) |
+
+Todos are **session-scoped** -- tracked via Claude's built-in task tools during the session, not persisted to disk. Cross-session recovery uses `epics.json` + git worktree/branch state.
 
 ---
 
@@ -55,7 +57,7 @@ User Request
 
 | Agent | Model | Role |
 |-------|-------|------|
-| `todo-orchestrator` | Haiku (default) | Research, classify, group todos → staging payload. Never writes code. |
+| `todo-orchestrator` | Haiku (default) | Research, classify, group todos -> staging payload. Never writes code. |
 | `quick-fixer` | Haiku/Sonnet | Clear-scope fixes, style tweaks, mechanical changes |
 | `architect` | Sonnet/Opus | Ambiguous scope, schema changes, new patterns |
 | `reviewer` | Haiku | On-demand code review of diffs |
@@ -64,11 +66,11 @@ User Request
 ### Model Selection
 
 ```
-orchestrator  → Haiku  (bump to Sonnet/Opus if architecturally complex)
-quick-fixer   → Haiku (trivial) | Sonnet (standard) | Opus (escalation)
-architect     → Sonnet (standard) | Opus (high-risk, escalation)
-reviewer      → Haiku  (Sonnet only if coder was Opus)
-unit-tester   → Haiku  always
+orchestrator  -> Haiku  (bump to Sonnet/Opus if architecturally complex)
+quick-fixer   -> Haiku (trivial) | Sonnet (standard) | Opus (escalation)
+architect     -> Sonnet (standard) | Opus (high-risk, escalation)
+reviewer      -> Haiku  (Sonnet only if coder was Opus)
+unit-tester   -> Haiku  always
 ```
 
 ---
@@ -77,44 +79,44 @@ unit-tester   → Haiku  always
 
 ```
 main
- │
- ├─── epic/ui-polish  ──────────────────────────────────────┐
- │         │                                                  │
- │         ├── story/ghost-placement  (worktree)             │
- │         │      └── [coder] → [diff gate] → merge ──►     │
- │         │                                                  │
- │         ├── story/zoom-controls  (worktree)               │
- │         │      └── [coder] → [diff gate] → merge ──►     │
- │         │                                                  │
- │         └── story/text-readability  (worktree)            │
- │                └── [coder] → [diff gate] → merge ──►     │
- │                                                            │
- │         [epic PR created after first story merges]        │
- │         [epic PR updated as each story merges]            │
- │                                                            │
- └── ◄── squash merge when user says "merge epic" ──────────┘
+ |
+ +--- epic/ui-polish  ------------------------------------------+
+ |         |                                                     |
+ |         +-- story/ghost-placement  (worktree)                |
+ |         |      +-- [coder] -> [diff gate] -> merge -->       |
+ |         |                                                     |
+ |         +-- story/zoom-controls  (worktree)                  |
+ |         |      +-- [coder] -> [diff gate] -> merge -->       |
+ |         |                                                     |
+ |         +-- story/text-readability  (worktree)               |
+ |                +-- [coder] -> [diff gate] -> merge -->       |
+ |                                                               |
+ |         [epic PR created after first story merges]           |
+ |         [epic PR updated as each story merges]               |
+ |                                                               |
+ +-- <-- squash merge when user says "merge epic" -------------+
 ```
 
 ### Key Rules
 
-- **Epic branch** — `epic/<slug>`, created off `origin/main` when first story runs
-- **Epic branch is persistent** — not deleted after merge to main; stays for follow-up stories
-- **Story branches** — `story/<slug>`, created off the epic branch (not main)
-- **Stories merge without PRs** — directly into the epic branch via fast-forward or merge commit
-- **Epic PR** — created after the first story merges (so the PR has content); updated as more stories land
-- **Cross-epic sync** — before creating a story worktree, the epic branch rebases onto `origin/main`
+- **Epic branch** -- `epic/<slug>`, created off `origin/main` when first story runs
+- **Epic branch is persistent** -- not deleted after merge to main; stays for follow-up stories
+- **Story branches** -- `story/<slug>`, created off the epic branch (not main)
+- **Stories merge without PRs** -- directly into the epic branch via fast-forward or merge commit
+- **Epic PR** -- created after the first story merges (so the PR has content); updated as more stories land
+- **Cross-epic sync** -- before creating a story worktree, the epic branch rebases onto `origin/main`
 
 ---
 
 ## Story Pipeline
 
 ```
-filling ──► running ──► [testing] ──► merging ──► closed
-               │            │
-               │       (FAIL: back to running)
-               │
-               └──► reviewing (on-demand only)
-                        │
+filling --> running --> [testing] --> merging --> closed
+               |            |
+               |       (FAIL: back to running)
+               |
+               +--> reviewing (on-demand only)
+                        |
                    (PASS: merging)
                    (BLOCK: back to running)
 ```
@@ -124,13 +126,13 @@ filling ──► running ──► [testing] ──► merging ──► closed
 | From | To | Trigger |
 |------|----|---------|
 | `filling` | `running` | User says "run story-X" |
-| `running` | `merging` | All coder groups done (default — no tests) |
+| `running` | `merging` | All coder tasks done (default -- no tests) |
 | `running` | `testing` | All coders done + `needsTesting: true` |
 | `testing` | `merging` | Unit-tester PASS |
-| `testing` | `running` | Unit-tester FAIL → back to coder |
+| `testing` | `running` | Unit-tester FAIL -> back to coder |
 | `running` | `reviewing` | User requests or `needsReview: true` |
 | `reviewing` | `merging` | Reviewer PASS |
-| `reviewing` | `running` | Reviewer BLOCKING → back to coder |
+| `reviewing` | `running` | Reviewer BLOCKING -> back to coder |
 | `merging` | `closed` | Merged into epic branch |
 | `any` | `blocked` | 2 reviewer retries still blocking (Opus escalation) |
 
@@ -140,68 +142,114 @@ filling ──► running ──► [testing] ──► merging ──► closed
 
 ```
 User: "run story-X"
-       │
-       ▼
-1. Read queued todos, check blockedBy ordering
-       │
-       ▼
+       |
+       v
+1. Read story from epics.json, create TaskCreate entries for todos
+       |
+       v
 2. Create/update epic branch
-   ├── No branch yet → create epic/<slug> from origin/main, push
-   └── Branch exists → fetch + rebase onto origin/main
-       │
-       ▼
+   +-- No branch yet -> create epic/<slug> from origin/main, push
+   +-- Branch exists -> fetch + rebase onto origin/main
+       |
+       v
 3. Create story worktree from epic branch
    git worktree add .claude/worktrees/story/<slug> -b story/<slug> epic/<epic-slug>
    ln -sf <root>/.env + node_modules
-       │
-       ▼
-4. Build coderGroups from staging payload
-       │
-       ▼
-5. Launch wave-1 coder groups (background, parallel)
-       │
-       ▼
-6. Wait for all coder groups → done
-       │
-       ▼
+       |
+       v
+4. Launch coder tasks (background, parallel where possible)
+   Track progress via TaskUpdate
+       |
+       v
+5. Check in every 3 minutes (TaskOutput block: false)
+   Stalled after 6 min (2 missed check-ins) -> stop + re-split
+       |
+       v
+6. Wait for all coder tasks -> done
+       |
+       v
 7. MANDATORY DIFF GATE (inline, ~5 seconds)
    git -C <worktree> rebase epic/<epic-slug>
    git -C <worktree> diff epic/<epic-slug>..HEAD --name-only
-   → restore any out-of-scope files, commit, verify
-       │
-       ▼
+   -> restore any out-of-scope files, commit, verify
+       |
+       v
 8. Testing? (needsTesting or write-targets include utils/hooks/testable files)
-   ├── YES → launch unit-tester (background)
-   │         ├── PASS → proceed
-   │         └── FAIL → fix inline or back to coder
-   └── NO  → skip
-       │
-       ▼
+   +-- YES -> launch unit-tester (background)
+   |         +-- PASS -> proceed
+   |         +-- FAIL -> fix inline or back to coder
+   +-- NO  -> skip
+       |
+       v
 9. Review? (user requested or needsReview: true)
-   ├── YES → launch reviewer (background)
-   │         ├── PASS → proceed
-   │         └── BLOCK → increment retries, back to coder (max 2)
-   └── NO  → skip
-       │
-       ▼
+   +-- YES -> launch reviewer (background)
+   |         +-- PASS -> proceed
+   |         +-- BLOCK -> back to coder (max 2 retries)
+   +-- NO  -> skip
+       |
+       v
 10. Merge into epic branch
     git -C <worktree> rebase epic/<epic-slug>
     git checkout epic/<epic-slug>
     git merge --ff-only story/<slug>
     git push origin epic/<epic-slug>
     git worktree remove + prune + branch -d
-       │
-       ▼
-11. Create/update epic PR
-    ├── First story → gh pr create --base main --head epic/<slug>
-    └── Subsequent → gh pr edit <prNumber> --body (append story)
-       │
-       ▼
-12. Check architectural findings → append novel ones to CLAUDE.md
-       │
-       ▼
-13. Story → closed. Check epic auto-close. /clear
+       |
+       v
+11. Write epics.json snapshot (story -> closed)
+       |
+       v
+12. Create/update epic PR
+    +-- First story -> gh pr create --base main --head epic/<slug>
+    +-- Subsequent -> gh pr edit <prNumber> --body (append story)
+       |
+       v
+13. Check architectural findings -> append novel ones to CLAUDE.md
+       |
+       v
+14. Story -> closed. Check epic auto-close. /clear
 ```
+
+---
+
+## In-Session Tracking
+
+Todos are tracked via Claude's built-in task tools during the session:
+
+```
+TaskCreate  -> register a new todo (from orchestrator staging payload)
+TaskUpdate  -> mark in_progress, completed, or blocked
+TaskList    -> see all todos and their status
+TaskOutput  -> check on background agents (block: false for non-blocking)
+```
+
+No JSON tracking files are written on every state change. `epics.json` is the sole persistent file, written only on story merge and state transitions.
+
+---
+
+## Cross-Session Recovery
+
+When a session ends (crash or normal exit), the next session reconstructs state from three sources:
+
+```
+1. epics.json on disk
+   -> Which stories are closed, running, or filling
+
+2. git worktree list
+   -> Which story worktrees still exist (in-flight work)
+
+3. git branch --list 'story/*' 'epic/*'
+   -> Which branches are active
+```
+
+**Recovery flow:**
+- If `epics.json` shows a story in `running` state:
+  1. Check if the story worktree still exists
+  2. Check for uncommitted changes
+  3. Report to user: "Story X was in-flight. Resume or discard?"
+  4. Do not auto-resume -- wait for user decision
+
+**What's lost on crash:** in-session todo progress and coder task status. Git state (branches, worktrees, commits) is the ground truth for anything in-flight.
 
 ---
 
@@ -213,39 +261,74 @@ The orchestrator assigns todos to parallel or sequential groups:
 For each todo in the story:
 
 1. agent == "architect"
-   └── solo group, always (architect never shares a group)
+   +-- solo group, always (architect never shares a group)
 
 2. agent == "quick-fixer", no overlap with architect
-   └── eligible for parallel grouping with other quick-fixers
+   +-- eligible for parallel grouping with other quick-fixers
 
 3. agent == "quick-fixer", overlaps an architect todo
-   └── dependsOn that architect group
+   +-- dependsOn that architect group
 
 4. Two quick-fixers share a write-target file
-   ├── Different sections → same group
-   └── Same section → separate groups, second dependsOn first
+   +-- Different sections -> same group
+   +-- Same section -> separate groups, second dependsOn first
 
 5. todo A has blockedBy: todo B (same story)
-   └── A's group gets dependsOn = B's group
+   +-- A's group gets dependsOn = B's group
 ```
+
+### Task Size Ceiling
+
+If a coder group's write-targets span **>5 files** or the estimated change is **>200 lines**, split into 2+ atomic sub-tasks. Two 5-minute tasks are faster and more recoverable than one 15-minute task. Each sub-task gets its own `TaskCreate` entry.
 
 ### Example: UI Polish Epic (4 stories, 2 parallel groups)
 
 ```
-Group A (sequential — share stageHandlers.js):
-  Story 1: ghost placement fix  →  Story 2: zoom controls
+Group A (sequential -- share stageHandlers.js):
+  Story 1: ghost placement fix  ->  Story 2: zoom controls
 
-Group B (sequential — share CSS files):
-  Story 3: text readability  →  Story 4: M3 contrast
+Group B (sequential -- share CSS files):
+  Story 3: text readability  ->  Story 4: M3 contrast
 
 Groups A and B run in parallel (no file overlap).
 ```
 
 ---
 
+## Simplified epics.json Schema
+
+### Epic entry
+```json
+{
+  "id": "epic-001",
+  "title": "UI Polish",
+  "branch": "epic/ui-polish",
+  "prNumber": 42,
+  "persistent": true
+}
+```
+
+### Story entry
+```json
+{
+  "id": "story-001",
+  "epicId": "epic-001",
+  "title": "Ghost placement accuracy",
+  "state": "closed",
+  "branch": "story/ghost-placement",
+  "writeFiles": ["src/handlers/stageHandlers.js"],
+  "needsTesting": false,
+  "needsReview": false
+}
+```
+
+Dropped from previous schema: `body`, `labels`, `worktree` (derivable from branch), `todos` (in TaskList), `coderGroups` (in TaskList), `reviewerRetries` (in-session only), `startedAt`, `stageStartedAt` (in-session only).
+
+---
+
 ## Protected Files
 
-### Tier 1 — Protected Konva Files (rendering layer)
+### Tier 1 -- Protected Konva Files (rendering layer)
 Agents cannot edit without explicit user permission granted in the current session.
 
 ```
@@ -259,8 +342,8 @@ src/components/Cursors.jsx
 
 **To unlock:** Say "I grant permission to edit [filename] for this story." The main session notes it in the coder prompt verbatim.
 
-### Tier 2 — Protected Testable Files (have test coverage)
-Editing any of these auto-enables `needsTesting: true`. Requires user approval (`testableFilesException: true`).
+### Tier 2 -- Protected Testable Files (have test coverage)
+Editing any of these auto-enables `needsTesting: true`. Requires user approval.
 
 ```
 src/hooks/useBoard.js          src/handlers/objectHandlers.js
@@ -278,7 +361,7 @@ src/utils/tooltipUtils.js      src/components/BoardSelector.jsx
 
 ## Diff Gate (Mandatory)
 
-Runs inline after all coder groups complete — before tester, reviewer, or merge:
+Runs inline after all coder tasks complete -- before tester, reviewer, or merge:
 
 ```bash
 git -C <worktree> fetch origin
@@ -311,7 +394,7 @@ git -C <worktree> checkout epic/<epic-slug> -- <extra-file>
 | Story touches frame system, Firestore schema, AI tools | Orchestrator flags `needsReview: true` |
 
 ### Diff-only review mode
-If the story diff is ≤75 lines, the reviewer reads the diff only — no full files opened. Saves ~80% of reviewer tokens for small stories.
+If the story diff is <=75 lines, the reviewer reads the diff only -- no full files opened. Saves ~80% of reviewer tokens for small stories.
 
 ---
 
@@ -320,8 +403,8 @@ If the story diff is ≤75 lines, the reviewer reads the diff only — no full f
 ```
 SUMMARY
 Todo: <one-line description>
-Story: <storyId> — <story title> [NEW if creating]
-Epic: <epicId> — <epic title> [NEW if creating]
+Story: <storyId> -- <story title> [NEW if creating]
+Epic: <epicId> -- <epic title> [NEW if creating]
 Agent: <quick-fixer|architect>
 Model: <haiku|sonnet|opus>
 Trivial: <yes|no>
@@ -332,8 +415,38 @@ Plan: <one sentence describing what the coder will do>
 Coder groups: <grouping decision>
 
 STAGING_PAYLOAD
-{ "todo": {...}, "storyUpdate": {...}, "epicUpdate": {...} }
+{ "storyUpdate": {...}, "epicUpdate": {...} }
 ```
+
+The main session creates `TaskCreate` entries from the orchestrator's plan -- not JSON file writes.
+
+---
+
+## Agent Check-In and Stall Detection
+
+```
+Every 3 minutes:
+  TaskOutput(agent_id, block: false)
+       |
+       +-- Agent making progress -> continue
+       +-- No new tool uses after 2 consecutive checks (6 min)
+              |
+              v
+           Stop agent
+           Re-split task into smaller pieces (<=5 files, <=200 lines each)
+           Re-launch sub-tasks
+```
+
+Previous stale detection was 30 minutes. Now 6 minutes (2 missed check-ins at 3-minute cadence).
+
+---
+
+## Ephemeral Plans
+
+Plans are working documents, not records:
+- Write to `$TMPDIR/plan-<story-id>.md`
+- Do not persist in `~/.claude/plans/`
+- Architecture decisions that survive sessions go in `CLAUDE.md`
 
 ---
 
@@ -341,10 +454,9 @@ STAGING_PAYLOAD
 
 Clear (`/clear`) at these mandatory checkpoints:
 
-1. **After fill phase** — after writing a todo and presenting summary
-2. **After a story merges** — before auto-launching any queued story
-3. **After reviewer + unit-tester both launch** — they wake the session when done
-4. **After any background agent completes with no immediate follow-up**
+1. **After a story merges** -- before auto-launching any queued story
+2. **After reviewer + unit-tester both launch** -- they wake the session when done
+3. **After any background agent completes with no immediate follow-up**
 
 Never clear if a background agent is running and its result is needed to proceed.
 
@@ -354,35 +466,38 @@ Never clear if a background agent is running and its result is needed to proceed
 
 | Optimization | Savings |
 |---|---|
-| **Epic-planned stories** — skip orchestrator when epic plan already specifies writeFiles/agent/model | ~2000 tokens/story |
-| **CSS-only stories** — always Haiku, skip testing, skip diff gate restoration | ~60% cost reduction |
-| **Coder prompt compression** — cap at 2000 tokens; omit full file contents, link CLAUDE.md by section name | ~30-40% token reduction |
-| **Diff-only review** — ≤75 line diffs reviewed from diff alone | ~80% reviewer token reduction |
-| **Parallel orchestrators** — multiple orchestrators can run simultaneously (read-only) | Wall-time reduction |
-| **Batch merge window** — 10-second window to batch same-epic story merges | Fewer rebase cycles |
+| **In-session TaskList** -- no JSON writes per state change | Eliminates ~15 file writes/story |
+| **Epic-planned stories** -- skip orchestrator when epic plan specifies writeFiles/agent/model | ~2000 tokens/story |
+| **CSS-only stories** -- always Haiku, skip testing, skip diff gate restoration | ~60% cost reduction |
+| **Coder prompt compression** -- cap at 2000 tokens; link CLAUDE.md by section name | ~30-40% token reduction |
+| **Diff-only review** -- <=75 line diffs reviewed from diff alone | ~80% reviewer token reduction |
+| **Parallel orchestrators** -- multiple orchestrators can run simultaneously (read-only) | Wall-time reduction |
+| **Batch merge window** -- 10-second window to batch same-epic story merges | Fewer rebase cycles |
+| **3-min check-in + 6-min stall detection** -- catch stuck agents early | Prevents wasted compute |
+| **Task size ceiling** -- split >5 files or >200 lines into sub-tasks | Faster recovery from failures |
 
 ---
 
 ## Escalation
 
-If `reviewerRetries` reaches 2 and the coder is still producing blocking findings:
+If reviewer retries reach 2 and the coder is still producing blocking findings:
 
 ```
-reviewerRetries == 2
-       │
-       ▼
+reviewer retries == 2
+       |
+       v
 Escalate coder to Opus (one more attempt)
-       │
-       ├── PASS → proceed to merge
-       └── Still BLOCKING → story.state = "blocked"
-                            blockedReason = reviewer findings
+       |
+       +-- PASS -> proceed to merge
+       +-- Still BLOCKING -> story.state = "blocked"
+                            Report findings to user
                             Leave worktree intact
                             Wait for user intervention
 ```
 
 ---
 
-## Architectural Findings → CLAUDE.md
+## Architectural Findings -> CLAUDE.md
 
 After each story merge, scan coder output + reviewer warnings + test failure log for novel findings:
 
@@ -397,28 +512,25 @@ After each story merge, scan coder output + reviewer warnings + test failure log
 
 ```
 ~/.claude/
-├── CLAUDE.md              # Global preferences (communication, code style, React, Firebase)
-├── ORCHESTRATION.md       # This pipeline (main session only)
-├── agents/
-│   ├── quick-fixer.md
-│   ├── architect.md
-│   ├── reviewer.md
-│   ├── unit-tester.md
-│   └── todo-orchestrator.md
-└── tracking/
-    └── key-prompts/       # High-signal prompt logs (YYYY-MM-DD.md)
++-- CLAUDE.md              # Global preferences (communication, code style, React, Firebase)
++-- ORCHESTRATION.md       # This pipeline (main session only)
++-- agents/
+|   +-- quick-fixer.md
+|   +-- architect.md
+|   +-- reviewer.md
+|   +-- unit-tester.md
+|   +-- todo-orchestrator.md
++-- tracking/
+    +-- key-prompts/       # High-signal prompt logs (YYYY-MM-DD.md)
 
 <project>/.claude/
-├── epics.json             # Epic + story state
-├── todo-tracking.json     # Todo state
-├── settings.local.json    # File deny rules (protected files)
-├── scripts/
-│   └── merge-story.sh     # (legacy) story merge script
-├── tracking/
-│   ├── key-prompts/
-│   ├── test-failure-log.md
-│   └── review-findings.md
-└── worktrees/             # Active story worktrees (cleaned up after merge)
++-- epics.json             # Epic + story state (sole persistent tracking file)
++-- settings.local.json    # File deny rules (protected files)
++-- tracking/
+|   +-- key-prompts/
+|   +-- test-failure-log.md
+|   +-- review-findings.md
++-- worktrees/             # Active story worktrees (cleaned up after merge)
 ```
 
 ---
@@ -427,16 +539,22 @@ After each story merge, scan coder output + reviewer warnings + test failure log
 
 ```
 New feature request
-  └── todo-orchestrator → staging payload → user approval → fill phase
+  +-- todo-orchestrator -> staging payload -> user approval
+      -> TaskCreate entries -> fill phase
 
 "run story-X"
-  └── epic branch created/updated → story worktree created → coders launched
+  +-- epic branch created/updated -> story worktree created
+      -> coder tasks launched (3-min check-ins)
 
 Coder done
-  └── diff gate → [unit-tester] → [reviewer] → merge into epic branch → epic PR updated
+  +-- diff gate -> [unit-tester] -> [reviewer]
+      -> merge into epic branch -> epics.json snapshot -> epic PR updated
 
 "merge epic X"
-  └── epic branch rebases main → gh pr merge --squash --delete-branch=false → main updated
+  +-- epic branch rebases main -> gh pr merge --squash
+      -> main updated (epic branch persists)
 
-Epic branch stays alive for follow-up stories.
+Session crash recovery
+  +-- epics.json + git worktree list + git branch --list
+      -> detect in-flight stories -> ask user: resume or discard?
 ```
