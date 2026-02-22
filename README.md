@@ -102,7 +102,7 @@ main
 ### Key Rules
 
 - **Epic branch** -- `epic/<slug>`, created off `origin/main` when first story runs
-- **Epic branch is persistent** -- not deleted after merge to main; stays for follow-up stories
+- **Epic branch is deleted after squash merge** -- `merge-epic.sh` passes `--delete-branch` to `gh pr merge --squash`; the remote ref is deleted immediately. Local ref is also deleted. Epic branches do not persist after merge to main.
 - **Story branches** -- `story/<slug>`, created off the epic branch (not main)
 - **Stories merge without PRs** -- directly into the epic branch via fast-forward or merge commit
 - **Epic PR** -- created after the first story merges (so the PR has content); updated as more stories land
@@ -190,12 +190,12 @@ User: "run story-X"
    +-- NO  -> skip
        |
        v
-10. Merge into epic branch
-    git -C <worktree> rebase epic/<epic-slug>
-    git checkout epic/<epic-slug>
-    git merge --ff-only story/<slug>
-    git push origin epic/<epic-slug>
-    git worktree remove + prune + branch -d
+10. Merge into epic branch (via merge-queue.sh)
+    One git-ops agent runs diff-gate + merge sequentially for all ready stories
+    -- Stories for same epic: one merge-queue.sh agent (sequential)
+    -- Stories for different epics: separate parallel agents (safe)
+    merge-queue.sh manifest per story: { storyBranch, storyTitle, epicSlug, epicTitle, prNumber, writeFiles }
+    Each story: diff-gate -> rebase -> git checkout epic/<slug> -> merge --ff-only -> push -> cleanup
        |
        v
 11. Write epics.json snapshot (story -> closed)
@@ -375,6 +375,68 @@ git -C <worktree> checkout epic/<epic-slug> -- <extra-file>
 # If files restored: commit "fix: restore out-of-scope files to epic branch state"
 # Re-run diff and verify matches writeFiles exactly
 ```
+
+---
+
+## Git Merge Strategy
+
+### The Problem: Concurrent Merge Agents Cause Git Checkout Races
+
+`merge-story.sh` checks out the epic branch on the **main worktree**:
+
+```bash
+git -C "$REPO_ROOT" checkout "${EPIC_BRANCH}"
+git -C "$REPO_ROOT" merge --ff-only "${STORY_BRANCH}"
+```
+
+Launching multiple merge agents simultaneously means multiple agents run `git checkout epic/...` on the same working directory -- they race, producing checkout conflicts and worktree cleanup failures.
+
+### The Solution: merge-queue.sh
+
+Instead of one agent per story, launch **one git-ops agent** with a JSON manifest of all stories to merge. The script processes them sequentially:
+
+```
+merge-queue.sh manifest:
+[
+  { storyBranch, storyTitle, epicSlug, epicTitle, prNumber, writeFiles },
+  { storyBranch, storyTitle, epicSlug, epicTitle, prNumber, writeFiles },
+  ...
+]
+```
+
+For each story in order:
+1. Run `diff-gate.sh` (rebase + scope check + restore out-of-scope files)
+2. Run `merge-story.sh` (merge into epic branch + update epic PR)
+3. Print `MERGED:<storyBranch>:PR_NUMBER=<n>` for the main session to update epics.json
+
+The PR number is threaded through automatically -- if the first story creates the epic PR, subsequent stories in the same manifest get that number applied.
+
+### Parallelism Rules
+
+```
+Stories targeting SAME epic branch:
+  -> One merge-queue.sh agent (sequential within agent)
+  -> Never two agents on same epic branch simultaneously
+
+Stories targeting DIFFERENT epic branches:
+  -> Separate merge-queue.sh agents (parallel is safe)
+  -> Epic branches are independent git refs
+```
+
+### Why Not Just Serial Individual Agents?
+
+A single background agent handles N stories sequentially with ~constant overhead -- one agent spinup, no context switching. Chaining N separate agents would require the main session to wait for each, read the result, then launch the next: O(N) round-trips through the main context. merge-queue.sh does it in O(1) round-trips.
+
+### Script Reference
+
+| Script | Purpose |
+|--------|---------|
+| `setup-story.sh` | Epic branch setup + story worktree creation |
+| `diff-gate.sh` | Post-coder fetch, rebase, scope check, out-of-scope file restoration |
+| `merge-story.sh` | Single story -> epic branch merge + PR create/update + worktree cleanup |
+| `merge-queue.sh` | **Preferred** -- sequential diff-gate + merge for a list of stories |
+| `merge-epic.sh` | Epic -> main squash merge via PR |
+| `update-epics.sh` | Read/write epics.json for state transitions and field updates |
 
 ---
 
@@ -731,11 +793,12 @@ New feature request (ambiguous)
 
 Coder done
   +-- diff gate -> [unit-tester (vitest --related)] -> [reviewer]
-      -> merge into epic branch -> epics.json snapshot -> epic PR updated
+      -> merge-queue.sh (one agent, sequential per epic branch)
+      -> epics.json snapshot -> epic PR updated
 
 "merge epic X"
   +-- epic branch rebases main -> gh pr merge --squash
-      -> main updated (epic branch persists)
+      -> main updated (epic branch deleted)
 
 Session crash recovery
   +-- epics.json + git worktree list + git branch --list
