@@ -474,6 +474,7 @@ If reviewer output contains `⚠ reviewer-learnings.md has N entries`, surface a
 ### After successful merge
 - Story state to `closed` in `epics.json`, check epic auto-close, unblock dependent stories.
 - **Architectural findings check**: Scan coder output, reviewer warnings, and test failure log for novel findings (unexpected API behaviors, new invariants, patterns to document). Novel = not already present as a bullet in CLAUDE.md (Grep for 3+ key terms before appending). If novel: append to appropriate CLAUDE.md section (one bullet, concise, actionable). Do NOT ask the user — append silently.
+- **Integration surface check**: If the merged story introduces a new registry, hook, or plugin API that other features must wire into, check whether the project CLAUDE.md has a corresponding entry in `## Integration surfaces`. If not, add one (surface name, owner file(s), registration pattern). Create the section if it doesn't exist yet.
 
 ---
 
@@ -671,6 +672,7 @@ User says `"plan epic: <description>"` or provides a requirements doc and asks t
 - Absolute path to project root (for Glob/Grep)
 - Output path: `$TMPDIR/epic-plan-<epic-slug>.md`
 - Instruction to deduplicate against existing stories before proposing new ones
+- Integration surface check block (§19.2) — always include; planner skips it if no `## Integration surfaces` section exists in CLAUDE.md
 
 ### Epic-planner output format
 The agent MUST write a file at the specified output path with this structure:
