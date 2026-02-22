@@ -61,7 +61,7 @@ Todos are **session-scoped** -- tracked via Claude's built-in task tools during 
 | `quick-fixer` | Haiku/Sonnet | Clear-scope fixes, style tweaks, mechanical changes |
 | `architect` | Sonnet/Opus | Ambiguous scope, schema changes, new patterns |
 | `reviewer` | Haiku | On-demand code review of diffs |
-| `unit-tester` | Haiku | Run tests + build; fix trivial failures inline |
+| `unit-tester` | Haiku | Discover relevant tests, run them, assert coverage, lint, build |
 
 ### Model Selection
 
@@ -175,9 +175,9 @@ User: "run story-X"
        |
        v
 8. Testing? (needsTesting or write-targets include utils/hooks/testable files)
-   +-- YES -> launch unit-tester (background)
+   +-- YES -> pass writeFiles list to unit-tester (background)
    |         +-- PASS -> proceed
-   |         +-- FAIL -> fix inline or back to coder
+   |         +-- FAIL (with root-cause diagnosis) -> fix inline or back to coder
    +-- NO  -> skip
        |
        v
@@ -376,6 +376,86 @@ git -C <worktree> checkout epic/<epic-slug> -- <extra-file>
 
 ---
 
+## Unit-Tester: How It Works
+
+The unit-tester is the most strictly defined agent in the pipeline. Its workflow is ordered and non-negotiable.
+
+### Step 1 — Discover Relevant Tests
+
+The main session passes the story's `writeFiles` list when launching the unit-tester. The agent uses Vitest's `--related` flag to find all test files that import or are imported by the changed source files:
+
+```bash
+npx vitest related --run <writeFile-1> <writeFile-2> ...
+```
+
+This scopes the run to tests that actually exercise the changed code — not the entire test suite. If `--related` finds no tests, the agent notes "no existing tests cover these files" and proceeds directly to writing new ones.
+
+### Step 2 — Run Only the Relevant Tests
+
+```bash
+npx vitest run <discovered-test-file-1> <discovered-test-file-2> ...
+```
+
+### Step 3 — Coverage Attestation (mandatory output)
+
+After the run, the agent emits a coverage attestation:
+
+```
+Coverage attestation:
+  src/utils/frameUtils.js: covered by frameUtils.test.js — tests: expandAncestors, findOpenSpot
+  src/handlers/stageHandlers.js: NO COVERAGE — no existing test exercises this file
+```
+
+Any `NO COVERAGE` entry on a write-target triggers new test writing.
+
+### Step 4 — Write New Tests
+
+New tests are written when any of the following is true:
+- A write-target has `NO COVERAGE` (mandatory)
+- The story is a feature (not just a fix)
+- The changed code path has no test that would have caught the original bug
+
+### Step 5 — Lint
+
+```bash
+npm run lint
+```
+
+Lint errors → FAIL (blocks merge). Lint warnings → log-only (surface in summary after merge, do not block).
+
+### Step 6 — Build
+
+```bash
+npm run build
+```
+
+Must pass before reporting PASS.
+
+### Failure Classification (non-trivial failures)
+
+The agent must classify every non-trivial failure before re-delegating to the coder. The coder receives a diagnosis, not a raw failure dump:
+
+```
+Root cause: <exactly one category>
+  - Careless mistake (wrong variable, off-by-one, typo)
+  - Scope too narrow (coder didn't read enough context)
+  - Prompt gap (plan was missing a critical detail)
+  - Framework/API misuse (wrong Konva/Firebase/React/Vitest API)
+  - Test environment issue (mock gap, timing, missing setup)
+
+Analysis: <2-3 sentences on what went wrong and why>
+Failing test: <test name and file>
+Error: <exact error message, truncated to ~300 chars>
+```
+
+The main session rejects any tester output that is missing classification — the agent is sent back to fill it out before re-delegation proceeds.
+
+### Konva Component Smoke Tests
+
+For stories with explicit permission to touch protected Konva components, the tester writes at minimum a smoke test: render with minimal props, assert it does not throw. `react-konva` and `konva` are mocked at the module boundary. No canvas pixel assertions.
+
+---
+
 ## On-Demand Testing and Review
 
 ### Unit-tester triggers (auto)
@@ -437,8 +517,6 @@ Every 3 minutes:
            Re-launch sub-tasks
 ```
 
-Previous stale detection was 30 minutes. Now 6 minutes (2 missed check-ins at 3-minute cadence).
-
 ---
 
 ## Ephemeral Plans
@@ -470,6 +548,7 @@ Never clear if a background agent is running and its result is needed to proceed
 | **Epic-planned stories** -- skip orchestrator when epic plan specifies writeFiles/agent/model | ~2000 tokens/story |
 | **CSS-only stories** -- always Haiku, skip testing, skip diff gate restoration | ~60% cost reduction |
 | **Coder prompt compression** -- cap at 2000 tokens; link CLAUDE.md by section name | ~30-40% token reduction |
+| **`vitest --related`** -- run only tests that exercise changed files | Eliminates full-suite noise |
 | **Diff-only review** -- <=75 line diffs reviewed from diff alone | ~80% reviewer token reduction |
 | **Parallel orchestrators** -- multiple orchestrators can run simultaneously (read-only) | Wall-time reduction |
 | **Batch merge window** -- 10-second window to batch same-epic story merges | Fewer rebase cycles |
@@ -494,6 +573,33 @@ Escalate coder to Opus (one more attempt)
                             Leave worktree intact
                             Wait for user intervention
 ```
+
+---
+
+## Test Failure Log
+
+When the unit-tester reports a non-trivial failure, the main session appends to `.claude/test-failure-log.md` before re-delegating. The tester is responsible for filling in root cause and analysis; the main session copies these verbatim.
+
+```
+## [ISO date] — [story id] — [one-line failure title]
+Coder agent: quick-fixer | architect
+Model: haiku | sonnet | opus
+Failing test(s): [test name(s) or file(s)]
+Error: [exact error message, truncated to ~300 chars]
+Root cause (exactly one, pre-filled by unit-tester):
+  - [ ] Careless mistake
+  - [ ] Scope too narrow
+  - [ ] Prompt gap
+  - [ ] Framework/API misuse
+  - [ ] Test environment issue
+Analysis: [2-3 sentences from unit-tester]
+Coverage gap: yes (no test existed) | no (existing test should have caught this)
+Resolution: re-delegated to coder | escalated to user
+```
+
+If the unit-tester output omits classification, the main session rejects it and sends the agent back to classify before re-delegating.
+
+Once the log reaches 5 entries, the main session surfaces: "test-failure-log.md has N entries — worth reviewing to improve coder prompts."
 
 ---
 
@@ -547,7 +653,7 @@ New feature request
       -> coder tasks launched (3-min check-ins)
 
 Coder done
-  +-- diff gate -> [unit-tester] -> [reviewer]
+  +-- diff gate -> [unit-tester (vitest --related)] -> [reviewer]
       -> merge into epic branch -> epics.json snapshot -> epic PR updated
 
 "merge epic X"
