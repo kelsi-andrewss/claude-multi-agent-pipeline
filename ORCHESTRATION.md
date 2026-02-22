@@ -40,7 +40,7 @@ These rules apply to the main Claude Code session only. Spawned agents (coders, 
 
 Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/write source files, run builds, run tests, commit, push. Model: Sonnet default; Opus if Complexity is "high", Touches includes "AI tools"/"Firestore schema", or Files explored > 10.
 
-**git-ops** — background-only git agent. Executes one pipeline script per invocation via Bash. MUST NEVER: edit or write source files (except `epics.json`), read source files, make architectural decisions, run builds, or run tests. Only permitted actions: Bash (git commands, the four pipeline scripts, and direct `epics.json` writes via node/python/jq or a dedicated update script). Always launched with `run_in_background: true`. Scripts live in `.claude/scripts/`:
+**git-ops** — registered subagent (`subagent_type: "git-ops"`). Executes one pipeline script per invocation via Bash. MUST NEVER: edit or write source files (except `epics.json`), read source files, make architectural decisions, run builds, or run tests. Only permitted actions: Bash (git commands, the six pipeline scripts, and direct `epics.json` writes via node/python/jq or a dedicated update script). Always launched with `run_in_background: true`. Scripts live in `.claude/scripts/`:
 - `setup-story.sh` — epic branch setup + story worktree creation (§9)
 - `diff-gate.sh` — post-coder fetch, rebase, and out-of-scope file restoration (§11)
 - `merge-story.sh` — story → epic branch merge + epic PR create/update + worktree cleanup (§12)

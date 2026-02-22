@@ -63,6 +63,7 @@ Todos are **session-scoped** -- tracked via Claude's built-in task tools during 
 | `architect` | Sonnet/Opus | Ambiguous scope, schema changes, new patterns |
 | `reviewer` | Haiku | On-demand code review of diffs |
 | `unit-tester` | Haiku | Discover relevant tests, run them, assert coverage, lint, build |
+| `git-ops` | Haiku | Background-only: runs pipeline scripts and git commands. Never reads or edits source files. |
 
 ### Model Selection
 
@@ -73,6 +74,7 @@ quick-fixer   -> Haiku (trivial) | Sonnet (standard) | Opus (escalation)
 architect     -> Sonnet (standard) | Opus (high-risk, escalation)
 reviewer      -> Haiku  (Sonnet only if coder was Opus)
 unit-tester   -> Haiku  always
+git-ops       -> Haiku  always (never escalated)
 ```
 
 ---
@@ -426,6 +428,14 @@ Stories targeting DIFFERENT epic branches:
 ### Why Not Just Serial Individual Agents?
 
 A single background agent handles N stories sequentially with ~constant overhead -- one agent spinup, no context switching. Chaining N separate agents would require the main session to wait for each, read the result, then launch the next: O(N) round-trips through the main context. merge-queue.sh does it in O(1) round-trips.
+
+### git-ops Agent
+
+All git pipeline work is delegated to the `git-ops` subagent (`subagent_type: "git-ops"`). It is always launched with `run_in_background: true` and executes exactly the script(s) specified in the prompt — nothing more.
+
+**Permitted:** Bash (git commands, the six pipeline scripts below, direct `epics.json` writes via node/python/jq when `update-epics.sh` is unavailable).
+
+**Forbidden:** reading or editing source files, architectural decisions, running builds or tests, committing or pushing without explicit instruction, force-deleting branches (`-D`).
 
 ### Script Reference
 
@@ -792,6 +802,7 @@ Without this step, parallel features built in separate worktrees silently miss e
 |   +-- unit-tester.md
 |   +-- todo-orchestrator.md
 |   +-- epic-planner.md    # Dual-mode: epic planning (background) + task planning (foreground)
+|   +-- git-ops.md         # Git pipeline executor: scripts, rules, forbidden actions
 +-- tracking/
     +-- key-prompts/       # High-signal prompt logs (YYYY-MM-DD.md)
 
