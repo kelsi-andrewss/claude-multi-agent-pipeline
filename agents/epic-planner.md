@@ -77,10 +77,16 @@ Triggered by "plan epic: ..." or when a requirements doc needs decomposition int
 1. Read `epics.json` and deduplicate against existing open stories before proposing new ones.
 2. Research the codebase to understand scope, patterns, and dependencies.
 3. Decompose the epic into stories. Each story should have clear write-targets and a one-sentence plan.
-4. Group stories by write-file overlap (same grouping logic as ORCHESTRATION.md ss10) and note dependencies.
+4. Group stories by write-file overlap (same grouping logic as ORCHESTRATION.md §10) and note dependencies.
 5. Flag any story that touches protected testable files (`needsTesting: true`) or protected Konva files (note: user permission required).
 6. Stay within the task size ceiling: if a logical unit spans >5 write-targets or >200 lines estimated, split into sub-stories.
-7. Write output to the specified output path.
+7. **Integration surface check** (run after all feature stories are drafted):
+   - Read the `## Integration surfaces` section of the project's CLAUDE.md if present.
+   - For each surface, check whether any story modifies the surface owner file AND any other story introduces a consumer feature without wiring into the surface.
+   - Apply the confidence heuristic (ORCHESTRATION.md §19.2): generate automatically when confident, ask via `AskUserQuestion` when uncertain, skip for infrastructure-only stories.
+   - For each gap found, append an integration story with `dependsOn: [story-A-id, story-B-id]`.
+   - If no `## Integration surfaces` section exists in CLAUDE.md, skip this step.
+8. Write output to the specified output path.
 
 ### Output format
 

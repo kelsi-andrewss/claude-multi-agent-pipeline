@@ -14,6 +14,8 @@ These rules apply to the main Claude Code session only. Spawned agents (coders, 
 
 **Corollary — read config before answering**: Before answering any workflow question — including hypotheticals — OR before acting on any code-changing prompt, read ORCHESTRATION.md and project CLAUDE.md first. Never answer from general knowledge when user-specific rules exist.
 
+**Corollary — epics.json is git-ops-only**: The main session MUST NEVER write `epics.json` directly (no Edit, Write, or inline Bash writes). All `epics.json` mutations — new story/epic staging, state transitions (`filling`→`running`, `running`→`closed`), branch assignment, prNumber recording — must be delegated to a git-ops agent (background) running `update-epics.sh`. The epic-planner remains read-only and MUST NOT write `epics.json` either.
+
 **Corollary — no pre-reading before delegation**: Do not read source files before launching a coder. The coder reads its own files. Your job is to set up the pipeline (story, worktree, prompt) and launch. Reading files first wastes tokens and blocks the user.
 
 ---
@@ -38,11 +40,13 @@ These rules apply to the main Claude Code session only. Spawned agents (coders, 
 
 Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/write source files, run builds, run tests, commit, push. Model: Sonnet default; Opus if Complexity is "high", Touches includes "AI tools"/"Firestore schema", or Files explored > 10.
 
-**git-ops** — background-only git agent. Executes one pipeline script per invocation via Bash. MUST NEVER: edit or write source files, read source files, make architectural decisions, run builds, or run tests. Only permitted actions: Bash (git commands and the four pipeline scripts). Always launched with `run_in_background: true`. Scripts live in `.claude/scripts/`:
+**git-ops** — background-only git agent. Executes one pipeline script per invocation via Bash. MUST NEVER: edit or write source files (except `epics.json`), read source files, make architectural decisions, run builds, or run tests. Only permitted actions: Bash (git commands, the four pipeline scripts, and direct `epics.json` writes via node/python/jq or a dedicated update script). Always launched with `run_in_background: true`. Scripts live in `.claude/scripts/`:
 - `setup-story.sh` — epic branch setup + story worktree creation (§9)
 - `diff-gate.sh` — post-coder fetch, rebase, and out-of-scope file restoration (§11)
 - `merge-story.sh` — story → epic branch merge + epic PR create/update + worktree cleanup (§12)
+- `merge-queue.sh` — sequential diff-gate + merge for a list of stories (§12) — preferred over individual merge-story.sh calls
 - `merge-epic.sh` — epic → main squash merge via PR (§13)
+- `update-epics.sh` — read/write `epics.json` for state transitions and field updates (§15.1)
 
 **Agent launch rule**: Coders, reviewer, unit-tester, and git-ops MUST ALWAYS be launched with `run_in_background: true`. No exceptions. Never use foreground mode for any of these agents. Do NOT launch them via Bash — always use the `Task` tool.
 
@@ -475,23 +479,43 @@ If reviewer output contains `⚠ reviewer-learnings.md has N entries`, surface a
 
 ## 12. STORY MERGE SEQUENCE
 
-Launch git-ops agent (background) with prompt:
+**Preferred: merge-queue.sh (one agent, N stories)**
+
+When one or more stories are ready to merge into the same epic, launch a single git-ops agent (background) with:
 ```
-Run: bash <project-root>/.claude/scripts/merge-story.sh \
-  <project-root> <epic-slug> <story-branch> "<story-title>" "<pr-number-or-empty>" "<epic-title>"
+Run: bash <project-root>/.claude/scripts/merge-queue.sh \
+  <project-root> '<json-manifest>'
+
+where <json-manifest> is a JSON array:
+[
+  {
+    "storyBranch": "story/my-feature",
+    "storyTitle":  "My feature title",
+    "epicSlug":    "my-epic",
+    "epicTitle":   "My Epic Title",
+    "prNumber":    "86",
+    "writeFiles":  ["src/foo.js", "src/bar.css"]
+  },
+  ...
+]
+
+Pass "" for prNumber if this is the first story merging into the epic.
 Report exit code and full stdout/stderr. Do not edit any files.
 ```
-Pass `""` (empty string) for `<pr-number>` if this is the first story merging into the epic.
+
+The script runs diff-gate + merge sequentially for each story and threads the PR number through automatically. Stories for *different* epic branches may run in separate parallel agents.
 
 When git-ops exits 0:
-- If the script printed `PR_NUMBER=<n>`, store that value as `prNumber` on the epic in `epics.json`.
-- Set story state to `closed` in `epics.json`.
+- For each `MERGED:<storyBranch>:PR_NUMBER=<n>` line in the output: update the epic's `prNumber` in `epics.json` if it changed, and set the story state to `closed`.
 - Check epic auto-close, unblock dependent stories.
+
+**Single-story fallback**: Only use `merge-story.sh` directly when merging a single story and no queue is needed.
 
 **Git rules**:
 - Never `git branch -D` — force-delete is forbidden. If `-d` fails, advance the local ref with `git update-ref` first, then retry `-d`.
 - Never merge story branches directly to main — stories go through the epic branch.
 - Never commit without explicit instruction.
+- **Serial merges — use merge-queue.sh**: When multiple stories are ready to merge, always use `merge-queue.sh` with a JSON manifest rather than launching multiple `merge-story.sh` agents. A single git-ops agent runs all diff-gates and merges sequentially in one invocation. Stories targeting *different* epic branches can be sent to separate `merge-queue.sh` agents in parallel. Never launch two agents targeting the same epic branch simultaneously — `merge-story.sh` does `git checkout epic/...` on the main worktree and concurrent agents race on this checkout.
 
 ---
 
@@ -536,9 +560,24 @@ When a story completes, scan for `filling` stories whose dependencies are resolv
 
 ## 15. CROSS-SESSION RECOVERY
 
-**Snapshot triggers** — write `epics.json` at exactly two points:
+**Snapshot triggers** — all `epics.json` writes are delegated to git-ops via `update-epics.sh`. Write at exactly these points:
 1. After each story merges into the epic branch.
 2. On state transitions that matter cross-session (`filling` → `running`, `running` → `closed`).
+3. After new stories/epics are approved and staged.
+4. After branch assignment (run trigger) and prNumber recording (merge).
+
+**§15.1 — update-epics.sh protocol**: Launch git-ops (background) with:
+```
+Run: bash <project-root>/.claude/scripts/update-epics.sh \
+  <project-root> '<json-patch>'
+where <json-patch> is a JSON object describing the update, e.g.:
+  '{"storyId":"story-053","fields":{"state":"running","branch":"story/connector-drag-fix"}}'
+  '{"storyId":"story-053","fields":{"state":"closed"}}'
+  '{"epicId":"epic-007","fields":{"prNumber":99}}'
+  '{"newStory":{...full story object...},"epicId":"epic-007"}'
+Report exit code and full stdout/stderr. Do not edit any files.
+```
+The script reads `epics.json`, applies the patch atomically, and writes it back. If the script does not yet exist, the git-ops agent may write `epics.json` directly via a one-line node/python command instead, until the script is created.
 
 **Recovery on session start** — when `epics.json` shows a story in `running` state:
 1. Check if the story worktree still exists (`git worktree list`).
@@ -719,3 +758,75 @@ Model: <haiku|sonnet|opus>
 - If user says "you decide" on a question: planner decides, tags with `(planner decision)`.
 - If user cancels mid-planning: planner writes partial output, main session asks user whether to proceed with partial plan or abandon.
 - If planner cannot resolve all questions: partial decisions tagged `(planner decision)`, orchestrator treats as resolved.
+
+---
+
+## 19.2. EPIC PLANNER — INTEGRATION SURFACE RECONCILIATION
+
+### What is an integration surface?
+
+An **integration surface** is a feature that exposes a registry, hook, or plugin API that other features must explicitly wire into to function correctly. Examples:
+- A command palette that other features register commands with
+- A keyboard shortcut registry
+- A context menu that features add items to
+- A notification/event bus that subscribers must register with
+- A settings panel that features add sections to
+
+### How to declare integration surfaces in CLAUDE.md
+
+Projects maintain an `## Integration surfaces` section in their `CLAUDE.md`. Each entry names the surface, its owner file(s), and the registration pattern:
+
+```
+## Integration surfaces
+- **Command palette** — `src/components/CommandPalette.jsx` + `src/hooks/useCommandRegistry.js`
+  Registration: call `registerCommand({ id, label, action })` from a `useEffect` in the feature component or hook.
+- **Context menu** — `src/components/ContextMenu.jsx`
+  Registration: pass items via `contextMenuItems` prop on `<BoardCanvas>`.
+```
+
+The epic-planner reads this section at the start of every epic plan run.
+
+### Detection algorithm (epic-planner, run after all feature stories are drafted)
+
+For each pair of stories (A, B) in the epic plan:
+
+1. **Surface owner check**: Does story A's `writeFiles` include a file listed as an integration surface owner? If yes, A *introduces or modifies* a surface.
+2. **Consumer check**: Does story B introduce a user-facing capability that the surface is designed to expose? Apply in order:
+   - **Confident yes**: story B's plan explicitly mentions registering, adding to, or wiring into the surface (e.g. "add command to palette", "register shortcut") — generate integration story, no question needed.
+   - **Confident no**: story B is infrastructure-only (CSS, Firestore rules, config, tests, schema migration) with no user-visible action — skip, no question needed.
+   - **Uncertain**: story B adds a user-facing feature (new component, new hook, new handler) but it's unclear whether it belongs in the surface — ask the developer via `AskUserQuestion` before deciding.
+3. **Gap check**: Does story B's `writeFiles` include the surface owner file(s)? If **no** and consumer check is yes, the integration is missing.
+4. **Generate integration story**: If gap detected, add a new story to the plan:
+
+```
+Title: Wire <story-B-feature> into <surface-name>
+Agent: quick-fixer
+Model: haiku
+Trivial: no
+Files:
+  write: <surface owner file(s)>
+  read: <story-B feature file(s)>
+Plan: Register <feature> with <surface> so it appears in <surface-name>.
+dependsOn: [story-A-id, story-B-id]
+```
+
+5. **Dedup**: If an existing open story already wires this pair, skip.
+
+### Epic-planner prompt addition (required)
+
+Every epic-planner invocation must include this block in its prompt:
+
+```
+Integration surface check (required — run after drafting all feature stories):
+1. Read the "## Integration surfaces" section of CLAUDE.md if present.
+2. For each surface listed, check whether any drafted story modifies the surface owner file AND any other story introduces a consumer feature without wiring into the surface.
+3. Apply the consumer check heuristic from ORCHESTRATION.md §19.2 — generate automatically when confident, ask when uncertain, skip when clearly infrastructure-only.
+4. For each gap found, append an integration story to the plan following the format in ORCHESTRATION.md §19.2.
+5. If no "## Integration surfaces" section exists in CLAUDE.md, skip this step.
+```
+
+### Main session responsibilities
+
+- After the epic-planner completes, scan the output for stories with `dependsOn` containing two or more other story IDs — these are integration stories. Surface them explicitly to the user in the approval summary:
+  > "Integration stories generated: [list titles]. These wire parallel features together and will run after their dependencies merge."
+- Integration stories are staged like any other story. No special handling needed beyond the `dependsOn` field.

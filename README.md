@@ -106,7 +106,7 @@ main
 - **Story branches** -- `story/<slug>`, created off the epic branch (not main)
 - **Stories merge without PRs** -- directly into the epic branch via fast-forward or merge commit
 - **Epic PR** -- created after the first story merges (so the PR has content); updated as more stories land
-- **Cross-epic sync** -- before creating a story worktree, the epic branch rebases onto `origin/main`
+- **Cross-epic sync** -- before creating a story worktree, `setup-story.sh` rebases the epic branch onto `origin/main` only if the epic has diverged (i.e. `origin/main` has commits not yet in the epic). If the epic already contains all of main, the rebase is skipped to avoid spurious conflicts.
 
 ---
 
@@ -733,6 +733,49 @@ After each story merge, scan coder output + reviewer warnings + test failure log
 - If novel: silently append to appropriate section (Common Gotchas, Architecture Rules, Key Conventions)
 - Format: one bullet, concise, actionable
 - Triggers: unexpected API behavior, reviewer pattern flag, "framework/API misuse" test failure, new invariant discovered
+
+---
+
+## Integration Surface Reconciliation
+
+When parallel stories share a "registry" surface (command palette, context menu, keyboard shortcuts, settings panel, etc.), the epic-planner automatically detects and generates an integration story.
+
+### How it works
+
+1. **Declare surfaces in project CLAUDE.md** -- when a feature ships that exposes a registry or hook API, add an entry to the `## Integration surfaces` section of the project's CLAUDE.md:
+
+```
+## Integration surfaces
+- **Command palette** -- `src/components/CommandPalette.jsx` + `src/hooks/useCommandRegistry.js`
+  Registration: call `registerCommand({ id, label, action })` from the feature's hook or component.
+```
+
+2. **Epic-planner detects gaps** -- after drafting all feature stories, the planner checks each pair against declared surfaces. For story B adding a user-facing feature that should appear in a surface story A introduced/modified:
+
+```
+Confident YES (story explicitly mentions registering) -> generate integration story automatically
+Confident NO  (infrastructure-only: CSS, rules, config) -> skip, no question asked
+Uncertain     (new user-facing feature, unclear intent) -> ask developer via AskUserQuestion
+```
+
+3. **Integration story generated automatically**:
+
+```
+Title: Wire <feature> into <surface-name>
+Agent: quick-fixer
+Model: haiku
+Files:
+  write: <surface owner file(s)>
+  read: <feature file(s)>
+dependsOn: [story-A-id, story-B-id]   <- runs after both parallel features merge
+```
+
+4. **Main session surfaces them in the approval summary**:
+   > "Integration stories generated: Wire following into command palette. These wire parallel features together and will run after their dependencies merge."
+
+### Why this matters
+
+Without this step, parallel features built in separate worktrees silently miss each other. Feature A (command palette) merges first. Feature B (following) merges second. "Follow user" never appears in the palette because neither story's coder knew the other existed. The integration story closes the gap automatically.
 
 ---
 
