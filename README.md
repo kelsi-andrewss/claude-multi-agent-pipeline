@@ -79,6 +79,42 @@ git-ops       -> Haiku  always (never escalated)
 
 ---
 
+## Git Branching Paradigm
+
+```
+main
+ └── epic/<slug>           (created off origin/main when first story runs)
+      ├── story/<slug-a>   (worktree, branched off epic branch)
+      ├── story/<slug-b>   (worktree, branched off epic branch)
+      └── story/<slug-c>   (worktree, branched off epic branch)
+```
+
+### Rules
+
+**Epic branches**
+- Created from `origin/main` when the first story in the epic runs
+- Before each new story worktree is created, the epic branch rebases onto `origin/main` — but only if main has new commits the epic doesn't have yet (skipped if already in sync)
+- Deleted immediately after squash-merge to main (`gh pr merge --squash --delete-branch`)
+
+**Story branches**
+- Always branch off the epic branch, never off main
+- Each gets an isolated git worktree at `.claude/worktrees/story/<slug>`
+- Merge back into the epic branch (not main) — no story PRs, direct merge
+- Worktree is cleaned up after merge
+
+**Epic PR**
+- Created after the first story merges (so the PR has actual content)
+- Updated as each subsequent story merges in
+- Squash-merges to main when user says "merge epic X"
+
+### Key invariants
+
+- Stories never merge directly to main
+- Two merge agents must never target the same epic branch simultaneously (they race on `git checkout epic/...`) — `merge-queue.sh` serializes them in one agent
+- `git branch -D` is forbidden — use `-d`, and if it fails, advance the ref with `git update-ref` first
+
+---
+
 ## Epic Feature Branch Lifecycle
 
 ```
