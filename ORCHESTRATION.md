@@ -2,53 +2,137 @@
 
 These rules apply to the main Claude Code session only. Spawned agents (coders, reviewers, testers) do not load this file.
 
-## Todo orchestrator agent rules
-**CRITICAL — the todo-orchestrator agent MUST NEVER:**
-- Run tests (no `npm test`, `vitest`, `jest`, or any test command)
-- Edit or write any source files
-- Run builds (`npm run build`)
-- Commit files
-- Push branches or open PRs
+---
 
-The orchestrator is a **pure research and classification agent**. Its only permitted actions are: reading files (Glob, Grep, Read), reading epics.json, and returning a staging payload. All implementation, testing, reviewing, and merging is delegated to specialist agents (quick-fixer, architect, reviewer, unit-tester).
+## 1. ENFORCEMENT
 
-## Todo orchestration
-- For code-changing prompts, spawn the todo-orchestrator agent (foreground, `model: "haiku"`) for research and classification.
-- **SKIP the orchestrator** when ALL of the following are true: (1) the affected file(s) are already known, (2) the root cause is clear, (3) no new story/epic needs to be created, (4) no schema/frame/AI tool changes. In these cases go directly to coder. Still create a `TaskCreate` entry afterward for tracking.
-- A "code-changing prompt" is any request that would modify, create, or delete project files. Bypass the orchestrator for: pure questions or explanations, read-only research (Glob/Grep only), git/commit/PR operations, and non-project tasks
-- The "todo:" prefix is an explicit trigger and always routes through the orchestrator, even if the intent is ambiguous
-- **Orchestrators MAY run in parallel.** Multiple orchestrators can run simultaneously since they only read files and return staging payloads — they never write files. The main session creates `TaskCreate` entries from orchestrator results. Safeguards: (1) assign story IDs before spawning by pre-incrementing a counter in memory — never let two orchestrators pick the same ID; (2) process all staging payloads sequentially after all orchestrators complete; (3) if two orchestrators target the same file in their write lists, note the conflict and sequence those stories. The orchestrator MAY also be spawned while coders, reviewers, or unit-testers are running in the background.
-- Before spawning the orchestrator, preprocess the user message: strip filler, extract the core intent as one sentence, and append a one-line summary of the current story context (what's already queued in the target story, if any). Pass this condensed prompt to the orchestrator — not the raw user message.
-- After todo-orchestrator completes, the main session validates the staging payload, presents the summary to the user, and creates `TaskCreate` entries only after approval. No coder launches until a run trigger.
-- Before spawning quick-fixer or architect agents, warn the user if the session is not in auto-edit mode
-- The orchestrator recommends the coder model based on task complexity: `haiku` for trivial/mechanical, `sonnet` for standard, `opus` for high-risk or ambiguous. The main session passes that model to the coder. The unit-tester always runs on Haiku.
-- The main session decides what model to run the orchestrator on (default: Haiku). Bump to Sonnet or Opus when the task is known to be architecturally complex before research even begins.
-- **Default models by role**: orchestrator → Haiku, coder → orchestrator's recommendation, reviewer → Haiku (Sonnet only if coder was Opus), unit-tester → Haiku. Opus only on escalation.
+**ZERO-SKIP RULE**: Every code change — no matter how small — that touches >1 file or any protected file MUST go through: story in epics.json → worktree → coder (background) → merge. No exceptions. No "it's just a small fix." If you find yourself thinking "this is too small for the pipeline," that is the exact moment you must use the pipeline.
 
-## In-session tracking
+**Corollary — no plan-to-coder shortcut**: When an approved plan exists, the sequence is still: create/find story → create worktree → launch coder into worktree (background). An approved plan does NOT authorize skipping the story/worktree steps. The plan tells the coder WHAT to do; the pipeline tells it WHERE to do it.
 
-During a session, use `TaskCreate` to register todos and `TaskUpdate` to track progress. Do not write to any JSON tracking file on every state change. Recovery snapshots handle cross-session persistence (see "Cross-session recovery" section). `epics.json` is the sole persistent file — written only on story merge and updated with simplified fields.
+**Corollary — "Implement the following plan:" is not a bypass**: When a user message begins with "Implement the following plan:" and the plan involves modifying project files, treat it as a run trigger — not a direct execution instruction. The pipeline still applies: find/create story → create worktree → launch coder (background). Only plans that involve zero project file changes (e.g. documentation research, git ops, answering questions, editing `~/.claude/` files) may be executed inline.
 
-## Agent execution rules
-**CRITICAL**: Coders (quick-fixer, architect), the reviewer, and the unit-tester MUST ALWAYS be launched with `run_in_background: true`. No exceptions. Never use foreground mode for any of these agents.
+**Corollary — read config before answering**: Before answering any workflow question — including hypotheticals — OR before acting on any code-changing prompt, read ORCHESTRATION.md and project CLAUDE.md first. Never answer from general knowledge when user-specific rules exist.
 
-**Check-in cadence**: Ping long-running background agents every 3 minutes via `TaskOutput` with `block: false`. If an agent shows no new tool uses after 2 consecutive check-ins (6 minutes), stop it and re-split the task into smaller pieces. Do not wait longer.
+**Corollary — no pre-reading before delegation**: Do not read source files before launching a coder. The coder reads its own files. Your job is to set up the pipeline (story, worktree, prompt) and launch. Reading files first wastes tokens and blocks the user.
 
-**Unit-tester and reviewer launch rules (non-trivial stories)**:
-1. Unit-tester launches FIRST. Do not launch the reviewer until the tester passes.
-2. Both use `run_in_background: true`.
-3. Do NOT launch either one inline or via Bash. Always use the `Task` tool with `subagent_type: "unit-tester"` and `subagent_type: "reviewer"`.
-4. After launching the tester, wait for its result before doing anything else for that story.
-5. If the tester fails with a trivial issue (missing import, typo), fix it inline immediately — do not spawn a coder agent. Re-run the tester.
-6. Only after tester PASS: launch the reviewer. Wait for its result.
-7. If the reviewer finds a trivial issue, fix it inline — do not spawn a coder agent. Re-run the tester then reviewer.
+---
 
-- Coders only execute approved plans — they never plan.
-- The user stays unblocked during coding, review, and testing phases.
+## 2. AGENT ROLES
 
-## Orchestrator output format (strict template)
+**todo-orchestrator** — pure research and classification. Permitted actions: Glob, Grep, Read, read epics.json, return staging payload. MUST NEVER: run tests, edit/write source files, run builds, commit, push, or open PRs.
 
-The orchestrator must return its output in this exact structure. The main session must not accept output that deviates from it.
+**quick-fixer** — coder for clear-scope changes with known root cause, no schema/frame/AI changes.
+
+**architect** — coder for ambiguous scope, schema changes, frame system mutations, new patterns, medium/high risk, or bugs spanning multiple interacting systems.
+
+**reviewer** — on-demand code review. Launched only when user requests or story is flagged `needsReview: true`.
+
+**unit-tester** — on-demand test runner. Launched only when story touches protected testable files or user requests.
+
+**epic-planner** — research and planning agent. Two modes:
+
+1. **Epic mode** (background): Takes an epic description and produces a multi-story plan. Trigger: "plan epic: ...". Always `run_in_background: true`. Writes to `$TMPDIR/epic-plan-<epic-slug>.md`. See §19.
+
+2. **Planning mode** (foreground): Takes orchestrator NEEDS_PLANNING bullets and conducts interactive research — asks user questions, makes suggestions, produces a refined plan. Trigger: orchestrator returns NEEDS_PLANNING. Always **foreground** (interactive). Writes to `$TMPDIR/planning-<todo-slug>.md`. See §19.1.
+
+Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/write source files, run builds, run tests, commit, push. Model: Sonnet default; Opus if Complexity is "high", Touches includes "AI tools"/"Firestore schema", or Files explored > 10.
+
+**git-ops** — background-only git agent. Executes one pipeline script per invocation via Bash. MUST NEVER: edit or write source files, read source files, make architectural decisions, run builds, or run tests. Only permitted actions: Bash (git commands and the four pipeline scripts). Always launched with `run_in_background: true`. Scripts live in `.claude/scripts/`:
+- `setup-story.sh` — epic branch setup + story worktree creation (§9)
+- `diff-gate.sh` — post-coder fetch, rebase, and out-of-scope file restoration (§11)
+- `merge-story.sh` — story → epic branch merge + epic PR create/update + worktree cleanup (§12)
+- `merge-epic.sh` — epic → main squash merge via PR (§13)
+
+**Agent launch rule**: Coders, reviewer, unit-tester, and git-ops MUST ALWAYS be launched with `run_in_background: true`. No exceptions. Never use foreground mode for any of these agents. Do NOT launch them via Bash — always use the `Task` tool.
+
+**Coders only execute approved plans — they never plan.**
+
+---
+
+## 3. MODEL SELECTION
+
+| Role | Default | Escalation |
+|---|---|---|
+| Orchestrator | Haiku | Sonnet/Opus if task is architecturally complex before research begins |
+| Epic-planner | Sonnet | Opus if epic touches >10 write-target files or involves AI/schema changes |
+| Coder | Orchestrator's recommendation | Opus after 2 BLOCKING reviewer round-trips |
+| Reviewer | Haiku | Sonnet only if coder ran on Opus |
+| Unit-tester | Haiku | Never escalated |
+
+**Orchestrator recommendation logic**: Haiku for trivial/mechanical; Sonnet for standard; Opus for high-risk or ambiguous.
+
+**Agent selection override**: Follow the orchestrator's recommendation. Only override to architect if the user explicitly asks or a new ambiguity surfaces after orchestration.
+
+---
+
+## 4. INCOMING REQUEST → ORCHESTRATION
+
+**A "code-changing prompt"** is any request that would modify, create, or delete project files.
+
+**Route through orchestrator** (foreground, Haiku) when:
+- A code-changing prompt arrives
+- The "todo:" prefix is present (always routes through orchestrator, even if intent is ambiguous)
+
+**Skip orchestrator** when ALL of the following are true: (1) the affected file(s) are already known, (2) the root cause is clear, (3) no new story/epic needs to be created, (4) no schema/frame/AI tool changes. Go directly to coder. Still create a `TaskCreate` entry for tracking.
+
+**Bypass orchestrator entirely** for: pure questions or explanations, read-only research, git/commit/PR operations, non-project tasks.
+
+**Preprocessing**: Before spawning the orchestrator, strip filler from the user message, extract the core intent as one sentence, and append a one-line summary of current story context. Pass this condensed prompt — not the raw message.
+
+**Parallel orchestrators**: Multiple orchestrators can run simultaneously (read-only). Safeguards: (1) assign story IDs before spawning by pre-incrementing a counter in memory — never let two orchestrators pick the same ID; (2) process all staging payloads sequentially after all orchestrators complete; (3) if two orchestrators target the same file, note the conflict and sequence those stories.
+
+**Epic-planned stories**: If the epic plan document specifies `writeFiles`, `agent`, and `model` per story, stage stories directly — no orchestrator needed.
+
+**After orchestrator completes**, check output type:
+1. **STAGING_PAYLOAD** → validate (§6), present summary to user, create `TaskCreate` entries only after approval. No coder launches until a run trigger.
+2. **NEEDS_PLANNING** → enter planning loop (§4.1).
+3. **DUPLICATE** → inform user, stop.
+
+**In-session tracking**: Use `TaskCreate` to register todos and `TaskUpdate` to track progress. Do not write to any JSON tracking file on every state change. `epics.json` is the sole persistent file — written only on story merge and on state transitions.
+
+### §4.1 — NEEDS_PLANNING handling
+
+When the orchestrator returns NEEDS_PLANNING:
+
+1. **Group bullets** into categories (scope, approach, schema, UX) — cosmetic, helps planner structure research.
+2. **Select model**: Opus if Complexity is "high", or Touches includes "AI tools"/"Firestore schema", or Files explored > 10. Sonnet otherwise.
+3. **Derive `<todo-slug>`** (kebab-case, ≤5 words) from the task description.
+4. **Launch epic-planner foreground** with planning prompt:
+   ```
+   MODE: planning
+   Original task: <user's todo>
+   Orchestrator findings:
+     Complexity: <from NEEDS_PLANNING>
+     Touches: <from NEEDS_PLANNING>
+     Files already explored: <from NEEDS_PLANNING>
+   Open questions (grouped):
+   ## Scope
+   - <bullet>
+   ## Approach
+   - <bullet>
+   Instructions: Research the codebase, ask the user questions via AskUserQuestion,
+   make concrete suggestions, write output to $TMPDIR/planning-<todo-slug>.md
+   ```
+5. **Wait** for planner to complete (foreground blocks).
+6. **Read** `$TMPDIR/planning-<todo-slug>.md`.
+7. **Re-launch orchestrator** (Haiku, foreground) with:
+   ```
+   PLANNING_CONTEXT
+   Original task: <user's todo>
+   Resolved plan: <full planning output>
+   Files already explored: <union of all explored files>
+   Produce STAGING_PAYLOAD. Do not return NEEDS_PLANNING.
+   ```
+8. If orchestrator returns **NEEDS_PLANNING again**: surface remaining questions to user directly, stop. No infinite loop — max 1 planning loop.
+9. If **UNRESOLVABLE**: surface reason to user, stop.
+10. If **STAGING_PAYLOAD**: validate (§6) and present as normal.
+
+---
+
+## 5. ORCHESTRATOR OUTPUT FORMAT
+
+The orchestrator must return output in this exact structure. Do not accept output that deviates from it.
 
 ```
 SUMMARY
@@ -68,14 +152,14 @@ STAGING_PAYLOAD
 <valid JSON object — see schema below>
 ```
 
-**Coder groups format** (orchestrator decides grouping, not main session):
+**Coder groups format**:
 ```
 Group 1 [architect|quick-fixer]: todo-xxx — <one-line rationale>
 Group 2 [quick-fixer]: todo-yyy, todo-zzz — <one-line rationale>
 Sequential after group 1: todo-aaa — <reason for dependency>
 ```
 
-**Staging payload schema:**
+**Staging payload schema**:
 ```json
 {
   "storyUpdate": {
@@ -100,26 +184,59 @@ Sequential after group 1: todo-aaa — <reason for dependency>
 
 `epicUpdate` is null if no new epic is needed. The main session creates `TaskCreate` entries from the orchestrator's plan — not JSON file writes.
 
-## Orchestrator responsibilities
+**NEEDS_PLANNING output format** (returned instead of STAGING_PAYLOAD when ambiguity is too broad for a single question):
 
-The orchestrator is the source of truth for classification. It must, in order:
+```
+NEEDS_PLANNING
+Todo: <one-line description>
+Complexity: <low|medium|high>
+Touches: <comma-separated areas>
+Files explored: <comma-separated files already read>
 
-1. **Dedup check first**: Read `epics.json` before any codebase exploration. If an existing story already covers this request, return `DUPLICATE: <story-id>` and stop — skip all further exploration.
+Questions:
+- <specific, actionable question>
+- <specific, actionable question>
+
+Suggestions:
+- <approach the orchestrator leans toward, if any>
+```
+
+Rules:
+- Minimum 2 questions, maximum 8. If only 1 question needed, ask it directly via the normal clarification path.
+- Questions must be specific — not "what do you want?" but "should the field be denormalized or queried separately?"
+- Each question must be independently answerable — no chaining.
+- Complexity reflects the full task: "high" if >5 files, touches frames/AI/schema, or new patterns.
+- If >5 files explored without converging on a plan, that is the signal to return NEEDS_PLANNING.
+
+**UNRESOLVABLE output format** (returned when even planning cannot resolve the task):
+
+```
+UNRESOLVABLE
+Todo: <one-line description>
+Reason: <why this cannot be staged>
+```
+
+**Orchestrator responsibilities** (in order):
+1. **Dedup check first**: Read `epics.json`. If an existing story already covers this request, return `DUPLICATE: <story-id>` and stop.
 2. **Classify**: Explore only the files needed to understand the task. No broad surveys.
-3. **Assign story/epic**: Find the best-fit story in `epics.json`. If none fits, propose a new story (and epic if needed) in the staging payload.
-4. **Decide coder grouping**: Apply the grouping decision tree using codebase knowledge from step 2. Flag write-target files vs. read-only context files per group.
+3. **Assign story/epic**: Find the best-fit story in `epics.json`. If none fits, propose a new story (and epic if needed).
+4. **Decide coder grouping**: Apply the grouping decision tree (§10). Flag write-target vs. read-only files per group.
 5. **Return the staging payload**: Structured JSON + human summary. Do not write any files.
 
-## Staging payload validation
+---
 
-Before updating `epics.json`, validate the staging payload:
+## 6. STAGING PAYLOAD VALIDATION
+
+Before updating `epics.json`, validate:
 - `storyUpdate` has all required fields: `id`, `epicId`, `title`, `state`, `branch`, `writeFiles`, `needsTesting`, `needsReview`
 - `state` is a valid value (`filling`, `running`, `closed`, etc.)
 - `writeFiles` is a non-empty array
 - If `epicUpdate` is present: all required fields present (`id`, `title`, `branch`, `prNumber`, `persistent`)
 - If validation fails: surface the error to the user, do not write, do not re-launch orchestrator automatically
 
-## Epic / Story structure
+---
+
+## 7. EPIC / STORY STRUCTURE
 
 Work is organized in two persistent levels:
 - **Epic** — a broad theme. Lives in `.claude/epics.json`.
@@ -127,9 +244,9 @@ Work is organized in two persistent levels:
 
 Todos are session-scoped — tracked via `TaskCreate`/`TaskList`/`TaskUpdate` during the session, not persisted to disk.
 
-### epics.json field reference
+**epics.json field reference**
 
-Each epic entry: `id`, `title`, `branch` (string, null until first story runs), `prNumber` (number, null until PR created), `persistent` (boolean, default true — branch not auto-deleted).
+Each epic entry: `id`, `title`, `branch` (null until first story runs), `prNumber` (null until PR created), `persistent` (default true — tracking field only; branch is deleted after epic PR merges).
 
 Each story entry:
 ```json
@@ -145,7 +262,7 @@ Each story entry:
 }
 ```
 
-### Valid story state transitions
+**Valid story state transitions**:
 ```
 filling → running         (run trigger)
 running → merging         (all coders done, default path — no tester or reviewer)
@@ -156,83 +273,64 @@ running → reviewing       (user explicitly requests review, or story flagged n
 reviewing → running       (reviewer BLOCKING — send back to coder)
 reviewing → merging       (reviewer PASS)
 merging → closed          (merged into epic branch)
-any → blocked             (Opus escalation still blocking — see Escalation section)
+any → blocked             (Opus escalation still blocking — see §11 Escalation)
 ```
-Note: `reviewing` state is only entered on-demand (user request or `needsReview: true`). Normal pipeline goes `running → testing → merging` without ever entering `reviewing`.
 
-### Epic feature branch lifecycle
+Note: `reviewing` is only entered on-demand. Normal pipeline: `running → testing → merging`.
 
-**Epic branch creation**:
-- When the first story in an epic transitions to `running`, create the epic feature branch: `epic/<epic-slug>` off `origin/main`
-- Do NOT create a PR immediately — wait until the first story merges into the epic branch (so the PR has content)
-- Store `branch` on the epic in `epics.json`
+**Ephemeral plans**: Write to `$TMPDIR/plan-<story-id>.md`. Do not persist in `~/.claude/plans/`. Architecture decisions go in `CLAUDE.md`.
 
-**Story worktree creation**:
-- Before creating a story worktree, the epic branch pulls from main: `git fetch origin main && git rebase origin/main` (on the epic branch)
-- Story worktrees branch off the epic branch (not main): `git worktree add .claude/worktrees/<story-branch> -b <story-branch> epic/<epic-slug>`
-- Symlinks same as before (.env, node_modules)
+---
 
-**Story merge → epic branch (no PR)**:
-- Stories merge into the epic branch directly — no PR needed for story → epic
-- Sequence:
-  1. `git -C <story-worktree> rebase epic/<epic-slug>`
-  2. `git checkout epic/<epic-slug>`
-  3. `git merge --ff-only story/<slug>` (or `--no-ff` if ff not possible)
-  4. `git push origin epic/<epic-slug>`
-  5. Clean up story worktree + branch
-  6. Update the epic PR body if it exists (append merged story title)
+## 8. FILL PHASE
 
-**Epic PR to main**:
-- Created after the first story merges into the epic branch
-- Title: epic title, body: list of merged stories
-- Updated (body appended) as each subsequent story merges
-- Squash-merged to main when user says "merge epic" or all stories are closed
-- Use `--delete-branch=false` because epic branches persist
-
-**Cross-epic sync**:
-- After an epic merges to main, all other active epic branches fetch + rebase onto `origin/main` before their next story worktree is created
-- Enforced at story worktree creation time (the "pull before branching" rule above covers it)
-- No automatic trigger needed
-
-**Epic branch persistence**:
-- Epic branches are NOT deleted after merge to main — they persist until the user explicitly says "delete epic branch X"
-- This allows reopening the epic for follow-up stories
-
-### Ephemeral plans
-
-Plans are ephemeral — write to `$TMPDIR/plan-<story-id>.md`. Do not persist plans in `~/.claude/plans/`. Architecture decisions and findings that survive sessions go in `CLAUDE.md` (project) or `~/.claude/CLAUDE.md` (global). Plans are working documents, not records.
-
-### Fill phase (default behavior)
 After the main session creates `TaskCreate` entries from the approved staging payload, it stops — no coder launches. The user adds more todos until ready to trigger.
 
-**Context clearing**: Clear the context window (`/clear`) to save tokens. Clear at these points — these are mandatory, not discretionary:
-1. **After a story merges** — after completing all merge cleanup steps and before auto-launching any queued story, run `/clear`.
-2. **After reviewer + unit-tester both launch** — once both are running in background, run `/clear`. They will wake the session when done.
-3. **After any background agent completes with no immediate follow-up action** — if reporting a result to the user and no coder/reviewer/tester launch is needed right now, run `/clear`.
-4. **When a background agent is running and the user asks if it's a good time to clear** — if no result is immediately needed, confirm yes and suggest `/clear`.
+**Context clearing** (mandatory, not discretionary):
+1. After a story merges — after all merge cleanup, before auto-launching any queued story.
+2. After reviewer + unit-tester both launch — once both are running in background.
+3. After any background agent completes with no immediate follow-up action.
+4. When a background agent is running and the user asks if it's a good time to clear — if no result is immediately needed, confirm yes.
+5. After 3 or more stories have been closed in a single session — prompt the user to `/clear` before starting the next story.
+
 Never clear if a background agent is currently running and its result is needed to proceed.
 
-### Run trigger
+**Standardized clearing message**: At every checkpoint above, use this format:
+> "Context checkpoint reached [reason]. Run `/clear` to reset the session. All epic and story state is saved in epics.json."
+
+Examples: `[reason]` = "story merged", "3 stories closed this session", "session recovery complete", "epic merged".
+
+---
+
+## 9. RUN TRIGGER
+
 Coders only launch when you explicitly say "run story-X" (or "run all open stories"). Main session then:
 
-1. Reads the story from `epics.json`, creates `TaskCreate` entries for each todo if not already created
-2. **Assigns the story branch** if `branch` is null: generates `story/<slug>`, writes to `epics.json`
-3. **Creates/updates the epic branch** if needed:
-   - If epic has no `branch`: create `epic/<epic-slug>` from `origin/main`, push to origin, store `branch` on the epic in `epics.json`
-   - If epic already has a `branch`: `git fetch origin main && git checkout epic/<epic-slug> && git rebase origin/main && git push origin epic/<epic-slug>`
-4. **Creates the story worktree from the epic branch** — idempotent:
-   - If worktree already exists AND story `state` is `running`: run `git -C <worktree> status --porcelain` first. If the worktree has uncommitted changes and no coder tasks are in-progress, a previous agent likely crashed — warn the user and do NOT launch until they confirm (stash, discard, or resume). If some tasks are done and others pending, the worktree is in a valid partial state — proceed normally. After the dirty check, launch only pending tasks
-   - If worktree exists but state is not `running`: warn user, do not proceed
-   - Otherwise: check if branch exists (`git branch --list <branch>`), delete if so (`git branch -d <branch>` or `-D` if unmerged), then `git worktree add .claude/worktrees/<branch> -b <branch> epic/<epic-slug>`, then symlink: `ln -sf <project-root>/.env .claude/worktrees/<branch>/.env && ln -sf <project-root>/node_modules .claude/worktrees/<branch>/node_modules`
-5. Launches coder tasks in BACKGROUND; tracks status via `TaskUpdate`
-6. Updates story `state` to `running` in `epics.json`
+1. Read the story from `epics.json`, create `TaskCreate` entries for each todo if not already created.
+2. **Assign the story branch** if `branch` is null: generate `story/<slug>`, write to `epics.json`.
+3. **Pre-flight worktree check** (inline, before launching git-ops):
+   - If worktree exists AND state is `running`: run `git -C <worktree> status --porcelain`. If uncommitted changes exist and no coder tasks are in-progress → warn user, do NOT launch until they confirm. If some tasks done and others pending → valid partial state, proceed. Launch only pending tasks.
+   - If worktree exists but state is not `running`: warn user, do not proceed.
+4. **Launch git-ops agent** (background) with prompt:
+   ```
+   Run: bash <project-root>/.claude/scripts/setup-story.sh \
+     <project-root> <epic-slug> <story-branch> <story-slug>
+   Report exit code and full stdout/stderr. Do not edit any files.
+   ```
+   Wait for git-ops to complete before launching coders. If it exits non-zero, report error to user and stop.
+5. Launch coder tasks in BACKGROUND; track status via `TaskUpdate`.
+6. Update story `state` to `running` in `epics.json`.
 
-### Coder grouping decision tree
+**Before launching a coder**: warn the user if the session is not in auto-edit mode.
+
+---
+
+## 10. CODER GROUPING
+
 Applied by the orchestrator at classification time. Coder groups are tracked via `TaskCreate` during the session.
 
+**Decision tree**:
 ```
-For each todo in the story:
-
 1. agent == "architect"
    → solo group, always
 
@@ -249,36 +347,34 @@ For each todo in the story:
 5. blockedBy: if todo A has blockedBy: todo B, and both are in this story
    → todo A's group gets dependsOn = todo B's group id
 
-Launch order (encoded as dependsOn relationships):
+Launch order:
   - Architect groups with no overlap: parallel (dependsOn: null)
   - Quick-fixer groups with no architect overlap: parallel with architects (dependsOn: null)
   - Quick-fixer groups overlapping an architect: dependsOn that architect group
 ```
 
-**Task size ceiling**: If a coder group's write-targets span >5 files or the estimated change is >200 lines, split it into 2+ atomic sub-tasks. Two 5-minute tasks are faster and more recoverable than one 15-minute task. Each sub-task gets its own `TaskCreate` entry and can run sequentially within the same worktree.
+**Task size ceiling**: If a coder group's write-targets span >5 files or estimated change is >200 lines, split into 2+ atomic sub-tasks. Each gets its own `TaskCreate` entry and runs sequentially within the same worktree.
 
-Coder prompts must include:
-- Todo descriptions — **list every todo explicitly**. If a group has multiple todos, number them. The coder must confirm all are implemented before committing.
-- Write-target files (these will be modified), read-only context files (read but do not modify)
-- **Edge cases extracted from codebase research** — e.g. "GroupPage's root onDrop passes the real groupId, not null — guard against this", "buffered local state needs a useEffect resync when the prop updates externally". Pull these from the orchestrator's exploration output before writing the prompt. This is the highest-leverage way to reduce reviewer round-trips.
-- **A "Pitfalls" section** — required for every non-trivial coder prompt. List specific gotchas relevant to the files being changed. Common pitfalls to always check and include when applicable:
+**Coder prompt requirements** (every prompt must include):
+- Todo descriptions — list every todo explicitly. The coder must confirm all are implemented before committing.
+- Write-target files (will be modified) and read-only context files (read but do not modify).
+- Edge cases extracted from codebase research. This is the highest-leverage way to reduce reviewer round-trips.
+- **A "Pitfalls" section** — required for every non-trivial prompt. Common pitfalls to include when applicable:
   - Konva Groups return `0` from `.width()` and `.height()` — use `.getClientRect()` for live bounding box
   - `onDragMove` / async callbacks must read state from refs (`.current`), not closed-over props
-  - If adding `:focus-visible` CSS, ensure the outline color **contrasts** with the button background (don't use the same color token as background)
+  - If adding `:focus-visible` CSS, ensure the outline color contrasts with the button background
   - Firestore `batch.update` throws if the document is also being deleted in the same batch — use `batch.set({merge:true})` or guard with a deleteSet check
   - Frame `childIds` and child `frameId` must always be updated atomically in the same `writeBatch`
-  - Protected files scope — if story does NOT touch a protected file, say so explicitly in the prompt
-- Specific invariants to preserve (e.g. "do not break the existing X behavior", "GroupPage is already correct — do not touch it")
-- Known gotchas in the affected files
-- **For new object types**: explicitly include the CLAUDE.md 6-step checklist (rendering component, creation handler, toolbar button, AI tool declaration, AI executor, sort order in BoardCanvas)
-- **For CSS alignment fixes**: explicitly state "verify the parent container has `display: flex` before adding `margin-left: auto` or similar flex-child properties"
-- **For any new props/params**: "Do not destructure or accept props/params you don't use in the component/function body. Verify every new prop is referenced."
-- **For any new `async` event handler**: "Capture all React state and props you need into local `const` variables before the first `await`. React state can be nulled or updated by other handlers (e.g. `onClose`) between an `await` suspension and resume — never read state after an `await`."
+  - For new object types: include the CLAUDE.md 6-step checklist
+  - For CSS alignment fixes: verify the parent container has `display: flex` before adding flex-child properties
+  - For any new props/params: "Do not destructure or accept props/params you don't use. Verify every new prop is referenced."
+  - For any new `async` event handler: "Capture all React state and props you need into local `const` variables before the first `await`. Never read state after an `await`."
+- Specific invariants to preserve and known gotchas in the affected files.
+- **CWD mismatch note** (required in every coder prompt): "Use absolute paths only — your CWD may not match the target directory. Do not use Glob/Grep without specifying the full absolute path."
 
-Coders must only write to write-target files.
+**Protected Konva files** (include in every coder prompt):
 
-**Protected Konva files — MUST be included in every coder prompt**:
-The following files are protected and must NEVER be edited unless explicit user permission is stated in the current session:
+The following files must NEVER be edited unless explicit user permission is stated in the current session:
 - `src/components/BoardCanvas.jsx`
 - `src/components/StickyNote.jsx`
 - `src/components/Frame.jsx`
@@ -286,278 +382,340 @@ The following files are protected and must NEVER be edited unless explicit user 
 - `src/components/LineShape.jsx`
 - `src/components/Cursors.jsx`
 
-When writing a coder prompt, if the story does NOT require editing one of these files, include this line verbatim:
+If the story does NOT require editing these files, include verbatim:
 > "IMPORTANT: Do NOT edit any of these protected files: BoardCanvas.jsx, StickyNote.jsx, Frame.jsx, Shape.jsx, LineShape.jsx, Cursors.jsx — even if you think an edit would improve them. Scope creep into protected files will block the review."
 
 If the story DOES require editing a protected file, include: "The user has explicitly granted permission to edit [filename] for this story."
 
-**CWD mismatch warning**: Coder agents launched from the main session have their CWD set to the debug worktree, NOT the project root or story worktree. Always provide absolute file paths in coder prompts. Include this explicit note in every coder prompt: "Use absolute paths only — your CWD may not match the target directory. Do not use Glob/Grep without specifying the full absolute path."
-
-### Story pipeline (shared reviewer + tester)
-All coders write to the same story branch. Once all coder tasks are done:
-
-**Trivial stories** (all todos marked trivial): skip reviewer entirely. Run `npm run build` inline via Bash (no agent spawn). If build passes → proceed to PR/merge.
-
-**Non-trivial stories**: Unit-tester and reviewer are both skipped by default. After the diff gate passes, go straight to PR/merge.
-
-**Unit-tester (on-demand only)**: Only run the unit-tester when the story touches any of:
-- `src/utils/` (frameUtils, connectorUtils, colorUtils, slugUtils, etc.)
-- `src/hooks/` (useBoard, useUndoStack, auth hooks)
-- Permission / admin logic
-- Firestore read/write paths (useBoard mutations, batchWriteAndDelete)
-- AI tool declarations or executors
-- Any file that already has a `.test.js` / `.test.jsx` counterpart
-
-To trigger: user says "test this story", or the story is auto-flagged `needsTesting: true` by the orchestrator when any write-target file matches the above list.
-
-**Protected testable files**: The files that auto-trigger testing are also protected from coder edits by default. If a story's write-targets include any file in `src/utils/`, `src/hooks/`, or any file with a `.test.*` counterpart, the main session MUST stop before launching the coder and ask the user:
+**Protected testable files**: If a story's write-targets include any file in `src/utils/`, `src/hooks/`, or any file with a `.test.*` counterpart, stop before launching the coder and ask the user:
 > "This story needs to edit [filename(s)], which are protected testable files. Allow edits? (This will set `needsTesting: true` on the story.)"
 
-Only proceed after explicit user approval. On approval: set `needsTesting: true` on the story in epics.json. Do NOT modify `.claude/settings.local.json` — the exception lives on the story only. If the user declines, remove those files from the write-targets and revise the plan.
+On approval: set `needsTesting: true` on the story in `epics.json`. Do NOT modify `.claude/settings.local.json`. If the user declines, remove those files from write-targets and revise the plan.
 
-**Unit-tester prompt (when triggered)**:
-- Write-target file paths + all todo descriptions.
-- **Runs existing tests + build only. Do NOT write new tests unless the story is a feature (not a fix).** For fixes: `npm test` + `npm run build` only.
-- Tester FAIL → fix inline if trivial (missing import, off-by-one, typo in test); otherwise send back to coder with failure output. Re-run diff gate, then re-run tester.
-- Tester PASS → proceed to PR/merge.
+Coders must only write to write-target files.
 
-**Reviewer (on-demand only)**: The reviewer is NOT launched automatically. Only run it when the user explicitly requests a review, or when the story touches: frame system mutations, Firestore schema changes, AI tool logic, or complex multi-system interactions. To trigger: user says "review this story" or the story is flagged `needsReview: true` in epics.json.
+---
 
-**Reviewer prompt (when triggered)**:
-- Write-target file paths from all groups + all todo descriptions + **the story branch diff** (`git diff main...<branch> -- <write-target files>`). Pass the diff inline in the prompt.
-  - **Diff-only mode** (first pass): if the diff is ≤75 lines, instruct the reviewer to review from the diff only — do not open any full files. If context outside the diff is needed to make a call, flag it as `needs-context: <filename>` rather than BLOCKING. The main session then re-runs the reviewer with those specific files included. If the diff is >75 lines, reviewer opens full files as normal.
-  - On send-back: include which coder task each finding belongs to, so only the affected task re-runs. Include **the coder's fix diff** (`git diff <pre-fix SHA>..<post-fix SHA> -- <affected files>`) in the send-back prompt so the reviewer focuses on what changed, not the full file.
-  - **Reviewer checklist — shared pattern completeness**: enumerate all instances of a pattern before marking PASS.
-- Reviewer PASS → proceed to PR/merge.
-- Reviewer BLOCKING → fix inline if trivial; otherwise send back to coder. Re-run diff gate → tester → reviewer after fix.
+## 11. PIPELINE EXECUTION
 
-**Per-story independence**: When multiple stories run in parallel, each story's pipeline is fully independent. Each story runs its own tester-then-reviewer sequence at its own pace. Never gate one story's next step on another story's state.
+`coder tasks → diff gate → [testing?] → [reviewing?] → merge`
 
-**Simple-fix policy**: If the reviewer or tester finds a trivial mechanical issue (missing import, wrong constant, typo), fix it inline as a Bash/Edit call rather than delegating back to a coder agent. This avoids a full agent round-trip for a one-line fix.
+### When a coder task completes
+- Mark done via `TaskUpdate`. If blocked: stop, report to user.
+- Check for dependent tasks — if dependencies satisfied, launch them.
+- When all coder tasks for a story are done: run the **diff gate**.
 
-**Worktree threshold**: Any change — regardless of how simple it appears — that touches **more than 2 files** OR **any protected Konva file** (BoardCanvas.jsx, StickyNote.jsx, Frame.jsx, Shape.jsx, LineShape.jsx, Cursors.jsx) MUST go through the full worktree pipeline: create worktree → coder → diff gate → unit-tester → reviewer → PR → merge. Never commit these changes directly to main. The simple-fix policy only applies to single-file, non-protected changes.
+### Diff gate (mandatory — delegated to git-ops agent, background)
 
-- Single PR per story — PR body includes: story title, todo list with one-line descriptions, affected files
-- Story `state` to `merging` → `closed` on merge
+Launch git-ops agent (background) with prompt:
+```
+Run: bash <project-root>/.claude/scripts/diff-gate.sh \
+  <project-root> <epic-slug> <story-branch> <write-file1> [<write-file2> ...]
+Report exit code and full stdout/stderr. Do not edit any files.
+```
+Exit code semantics:
+- `0` — diff matches write-targets; gate passes. Proceed to next pipeline step.
+- `1` — diff is empty (nothing committed). Report to user and stop.
+- `2` — unexpected files remain after restoration. Report to user; manual fix required before continuing.
 
-### Escalation: Opus still blocking
-If reviewer retries reach 2 AND the Opus coder attempt still produces a BLOCKING review:
-1. Set story `state` to `blocked`
-2. Report all findings to the user — do not proceed to merge
-3. Leave the worktree intact for manual resolution
-The story stays `blocked` until the user intervenes. `blocked` → `running` is a valid manual reset.
+If any files were restored, the script commits `"fix: restore out-of-scope files to epic branch state"` automatically. **Do not launch reviewer or tester until git-ops exits 0.**
 
-### Auto-close rules
-- Story closes on successful PR merge
-- Epic closes when all its stories are `closed`
+If a reviewer flags files the story didn't touch: this is a stale-branch issue, not a code bug. Re-run the diff gate, then re-launch reviewer and unit-tester.
 
-## Cross-session recovery
+### After diff gate
 
-**Snapshot triggers** — write `epics.json` at exactly two points:
-1. After each story merges into the epic branch (already in the merge flow)
-2. On story state transitions that matter cross-session (`filling` → `running`, `running` → `closed`)
+**Trivial stories** (all todos marked trivial): run `npm run build` inline → if passes, proceed to merge. Skip reviewer and tester.
 
-**Snapshot content** — the simplified `epics.json` with current story states. Todos are session-scoped and not persisted.
+**Default (no testing flag)**: proceed to merge immediately.
 
-**Recovery on session start** — when a new session starts and `epics.json` shows a story in `running` state:
-1. Check if the story worktree still exists (`git worktree list`)
-2. Check if there are uncommitted changes in the worktree
-3. Report to the user: "Story X was in-flight when the last session ended. Worktree at .claude/worktrees/story/X [has uncommitted changes | is clean]. Resume or discard?"
-4. Do not auto-resume — wait for user decision
+**needsTesting stories**: launch unit-tester (background), story → `testing`. Wait for result.
 
-**What's lost on crash (no exit hook)**: only the in-session todo progress and current coder task status. The last merge snapshot tells the next session which stories are closed. Git state (branches, worktrees, commits) is the ground truth for anything in-flight.
+### Unit-tester (on-demand)
+Auto-triggered when write-targets include: `src/utils/`, `src/hooks/`, permission/admin logic, Firestore read/write paths, AI tool declarations or executors, or any file with a `.test.js` / `.test.jsx` counterpart. Also triggered when user says "test this story" or story is flagged `needsTesting: true`.
 
-**Recovery sources** (no stop hook changes needed):
-1. `epics.json` on disk (updated on each story merge and state transition)
-2. `git worktree list` (shows in-flight story worktrees)
-3. `git branch --list 'story/*' 'epic/*'` (shows active branches)
+**Unit-tester prompt**: write-target paths (as `writeFiles` list) + all todo descriptions + worktree absolute path. The agent uses `writeFiles` as arguments to `npx vitest related --run <files>` to discover relevant tests before running anything. Do NOT omit `writeFiles` — the agent cannot use `--related` without them.
 
-The next session reconstructs state from these three sources.
+**Unit-tester results**:
+- PASS → story state to `merging`, handle merge.
+- FAIL (trivial — missing import, typo): fix inline, re-run tester.
+- FAIL (non-trivial): the agent must include root cause classification + 2–3 sentence analysis before re-delegating. Log to test failure log (§17), send back to coder with the full diagnosis. Re-run diff gate, then re-run tester.
+- Lint errors → treated as FAIL. Lint warnings → surfaced in summary after merge, do not block.
 
-## Pipeline execution — main session responsibility
-**CRITICAL**: The todo-orchestrator agent MUST NEVER be used to run a full pipeline. It is a read-only classification agent — it cannot write source files, run tests, commit, push, or open PRs. If the main session passes a "branch, implement, review, test, and merge" prompt to todo-orchestrator, the orchestrator will attempt to do all of that itself inline, violating every constraint. **NEVER do this.**
+### Simple-fix policy
+If the reviewer or tester finds a trivial mechanical issue (missing import, wrong constant, typo), fix it inline via Bash/Edit rather than delegating to a coder agent.
 
-The main session MUST directly spawn each pipeline stage as separate background agents:
+**Precedence**: Worktree threshold overrides simple-fix policy. Simple-fix only applies when the file is not protected AND the total change touches ≤2 files. Any change touching >2 files or any protected Konva file goes through the full worktree pipeline regardless of how trivial it appears.
 
-Pipeline stage → agent type to spawn:
-- Coder → `quick-fixer` or `architect` (per orchestrator recommendation)
-- Reviewer → `reviewer`
-- Unit-tester → `unit-tester`
+### Reviewer (on-demand)
+Only launched when user explicitly requests review OR story is flagged `needsReview: true`. Do NOT launch automatically. Trigger conditions include: frame system mutations, Firestore schema changes, AI tool logic, complex multi-system interactions.
 
-The main session chains: wait for all coder tasks → diff gate (inline) → merge into epic branch. Each stage is a separate `Task` call with `run_in_background: true`. The todo-orchestrator is ONLY used for the classification/staging step — never for execution.
+Unit-tester must pass before reviewer launches. Never gate one story's pipeline on another story's state.
 
-## Pipeline order
-`coder tasks → diff gate (inline) → merge into epic branch`
-- Unit-tester on-demand only: auto-triggered when write-targets include `src/utils/`, `src/hooks/`, permission/admin/Firestore/AI paths, or any file with a `.test.*` counterpart. Otherwise skipped.
-- Reviewer on-demand only: user must explicitly request it, or story must be flagged `needsReview: true`.
+**Reviewer prompt**: write-target paths + todo descriptions + the story branch diff (`git diff main...<branch> -- <write-target files>`).
+- **Diff-only mode** (first pass): if diff is ≤75 lines, review from diff only. If full-file context is needed, flag as `needs-context: <filename>` rather than BLOCKING. The main session re-runs the reviewer with those files included. If diff >75 lines, reviewer opens full files as normal.
+- On send-back: include which coder task each finding belongs to. Include the coder's fix diff in the send-back prompt.
+- Reviewer checklist: enumerate all instances of a pattern before marking PASS.
 
-Result handling: see **Story pipeline** section above.
+**Reviewer results**:
+- PASS → story state to `merging`, handle merge.
+- BLOCKING → fix inline if trivial; otherwise send back to coder. Re-run diff gate → tester → reviewer after fix. Do NOT increment retry count for simple-fix warnings.
+- **Log-only warnings** (judgment calls, trade-offs): append to `/Users/kelsiandrews/gauntlet/week1/.claude/review-findings.md`. Surface summary after merge: "X warnings logged to .claude/review-findings.md"
 
-**Model matching**: Reviewer defaults to Haiku. Use Sonnet only if the most complex coder ran on Opus. Unit-tester always Haiku.
-
-**Reviewer send-back budget**: 2 round-trips. At 2: escalate coder to Opus, run once more. If still blocking: story → `blocked`.
-
-**Reviewer: WARNINGS** — two categories:
-- **Simple-fix warnings** (clear root cause, mechanical): route back to coder. Do NOT increment retry count. Re-run both reviewer + unit-tester after fix.
-- **Log-only warnings** (judgment calls, trade-offs): append to `/Users/kelsiandrews/gauntlet/week1/.claude/review-findings.md` (always absolute path).
-- Surface summary after merge: "X warnings logged to .claude/review-findings.md"
-
-**Reviewer learnings threshold**: If reviewer output contains `⚠ reviewer-learnings.md has N entries`, surface it to the user after pipeline completes using this exact format:
+If reviewer output contains `⚠ reviewer-learnings.md has N entries`, surface after pipeline completes:
 > ⚠️ **reviewer-learnings.md has N entries — consider reviewing and promoting patterns.**
 
-## Stale story detection
-When checking on background agents, if any story has been in `running`, `reviewing`, or `testing` for more than 6 minutes (2 missed check-ins at 3-minute cadence) without progress:
-- Stop the stalled agent
-- Re-split the task into smaller pieces (each ≤5 files, ≤200 lines)
-- Warn: "Story [id] ([title]) agent stalled after 6 minutes. Splitting and re-launching."
+### Escalation
+**Reviewer send-back budget**: 2 BLOCKING round-trips. After 2: escalate coder to Opus, run once more. Budget does not reset after escalation. If Opus attempt is still BLOCKING → set story state to `blocked`, report all findings to user, leave worktree intact. `blocked` → `running` is a valid manual reset.
 
-## Agent selection (risk-based)
-- quick-fixer: clear scope, known root cause, no schema/frame/AI changes
-- architect: ambiguous scope, schema changes, frame system mutations, new patterns, medium/high risk, bugs spanning multiple interacting systems
-- Follow the orchestrator's recommendation. Only override to architect if the user explicitly asks or a new ambiguity surfaces after orchestration.
+### After successful merge
+- Story state to `closed` in `epics.json`, check epic auto-close, unblock dependent stories.
+- **Architectural findings check**: Scan coder output, reviewer warnings, and test failure log for novel findings (unexpected API behaviors, new invariants, patterns to document). Novel = not already present as a bullet in CLAUDE.md (Grep for 3+ key terms before appending). If novel: append to appropriate CLAUDE.md section (one bullet, concise, actionable). Do NOT ask the user — append silently.
 
-## Worktrees
-- Every story gets its own worktree, branched off the epic branch at run trigger (not during fill).
-- Worktree path: `.claude/worktrees/<story-branch>/`
-- Coder, reviewer, and unit-tester all operate inside the worktree — never the main working tree.
-- On successful merge into epic branch: follow the story merge sequence in the **Branch and merge rules** section below.
-- On merge conflict: leave worktree intact, report path to user.
-- Never reuse a worktree across stories.
+---
 
-## Parallel story execution
-Stories can run in parallel if they share no write-target files.
+## 12. STORY MERGE SEQUENCE
 
-Before launching a story, check `epics.json` for any story currently `running`, `reviewing`, or `testing`:
-- **No write-file overlap**: launch the new story immediately in parallel. Each story runs in its own worktree on its own branch — no coordination needed.
-- **Write-file overlap**: queue the story. When the blocking story merges, auto-launch the queued story immediately — do not ask the user.
-- When a story completes (merges into epic branch), scan for any stories in `filling` state whose dependencies are resolved — set `state` to `running`, create the worktree, and launch its first coder task in BACKGROUND. Notify the user that the queued story has auto-started.
+Launch git-ops agent (background) with prompt:
+```
+Run: bash <project-root>/.claude/scripts/merge-story.sh \
+  <project-root> <epic-slug> <story-branch> "<story-title>" "<pr-number-or-empty>" "<epic-title>"
+Report exit code and full stdout/stderr. Do not edit any files.
+```
+Pass `""` (empty string) for `<pr-number>` if this is the first story merging into the epic.
 
-**Merge ordering for same-epic stories**: Stories within the same epic all merge into the same epic branch. First story to complete merges first. Second story rebases onto the updated epic branch before merging. If rebase produces a conflict → pause, report to user.
+When git-ops exits 0:
+- If the script printed `PR_NUMBER=<n>`, store that value as `prNumber` on the epic in `epics.json`.
+- Set story state to `closed` in `epics.json`.
+- Check epic auto-close, unblock dependent stories.
 
-**Batch merge window**: After a story completes, wait 10 seconds before merging into the epic branch. If another story completes in that window, merge both sequentially in a single operation. This avoids redundant rebase/push cycles.
+**Git rules**:
+- Never `git branch -D` — force-delete is forbidden. If `-d` fails, advance the local ref with `git update-ref` first, then retry `-d`.
+- Never merge story branches directly to main — stories go through the epic branch.
+- Never commit without explicit instruction.
 
-**Sequence decisions**: When multiple stories conflict and must run sequentially, the main session decides the order autonomously using this priority: (1) fewest overlapping files first, (2) lowest complexity first (quick-fixer before architect), (3) story id ascending as tiebreaker. Never ask the user to choose the sequence.
+---
 
-**Overlap check**: compare the union of `writeFiles` across stories. Read-only files do not create a conflict.
+## 13. EPIC MERGE SEQUENCE
 
-## TaskCompleted handling
-When a coder task completes:
-- Mark it done via `TaskUpdate`
-- If blocked: stop, report to user
-- Check for dependent tasks — if dependencies satisfied, launch them
-- When all coder tasks for a story are done:
-  - **MANDATORY inline diff gate** (run as a single Bash call — not an agent, takes ~5 seconds):
-    ```bash
-    git -C <worktree> fetch origin
-    git -C <worktree> rebase epic/<epic-slug>   # rebase onto epic branch, not main
-    git -C <worktree> diff epic/<epic-slug>..HEAD --name-only
-    ```
-    Compare the output against the story's `writeFiles` list. For every file that appears in the diff but is NOT in `writeFiles`:
-    ```bash
-    git -C <worktree> checkout epic/<epic-slug> -- <extra-file>
-    ```
-    If any files were restored, commit them in a single commit: `"fix: restore out-of-scope files to epic branch state"`. Then re-run the diff and confirm it matches `writeFiles` exactly. **Do not launch reviewer or tester until this gate passes.**
-  - **Trivial stories**: run `npm run build` inline → if passes, story → `testing` → `merging`
-  - **Default (no testing flag)**: story → `merging` immediately, handle merge
-  - **needsTesting stories**: launch unit-tester (background, wait for result), story → `testing`
-    - Tester FAIL → fix inline if trivial (missing import, typo), otherwise send back to coder; re-run tester
-    - Tester PASS → story `state` to `merging`, handle merge
-- When reviewer completes (on-demand only):
-  - Reviewer PASS → story `state` to `merging`, handle merge
-  - Reviewer BLOCKING → story `state` to `running`, re-launch owning coder task with findings; re-run tester then reviewer after fix
-  - Reviewer simple-fix warnings → fix inline, re-run reviewer
-- Successful merge (into epic branch) → story `state` to `closed` in `epics.json`, check epic auto-close, unblock dependent stories
-  - **Architectural findings check**: After story merge, scan the coder's output, reviewer warnings, and test failure log for novel architectural findings (unexpected API behaviors, new invariants, patterns that should be documented). Check if finding is already in CLAUDE.md (Grep for key terms). If novel: append to the appropriate section (Common Gotchas, Architecture Rules, or Key Conventions). Format: one bullet, concise, actionable. Do NOT ask the user — append silently. Trigger conditions: coder hit an unexpected API behavior, reviewer flagged a documentable pattern, test failure root cause was "framework/API misuse" or "scope too narrow", or a new protected file/invariant was discovered. Only project-level findings go in CLAUDE.md — session-specific learnings go in tracking.
+Only when user says "merge epic X" or all stories are `closed`.
 
-## Branch and merge rules
-
-### Story merge (into epic branch — no PR)
-- Story branches: `story/<slug>` (e.g. `story/subgroup-dnd-and-search-ux`)
-- Stories merge into the epic branch directly — no PR required for story → epic
-- **Diff gate before merge**: The mandatory inline diff gate (described in TaskCompleted handling) must pass before reviewer/tester/merge. This is not optional and is not delegated to an agent — it runs inline as a Bash call.
-- **Stale branch rebase rule**: When a reviewer flags that the diff shows changes to files the story did NOT touch, do NOT treat it as a code bug. Instead: run the diff gate inline (fetch, rebase onto epic branch, restore out-of-scope files, commit, verify), then re-launch both reviewer and unit-tester.
-- Before merging: unit-tester must have passed (skip if all todos trivial)
-
-**Story merge sequence** (run inline, not as agent):
-```bash
-# Rebase story onto epic branch
-git -C <story-worktree> fetch origin
-git -C <story-worktree> rebase epic/<epic-slug>
-# Merge into epic branch
-git checkout epic/<epic-slug>
-git merge --ff-only story/<slug>   # use --no-ff if ff not possible
-git push origin epic/<epic-slug>
-# Cleanup
-git worktree remove .claude/worktrees/story/<slug> --force
-git worktree prune
-git branch -d story/<slug>
+Launch git-ops agent (background) with prompt:
+```
+Run: bash <project-root>/.claude/scripts/merge-epic.sh \
+  <project-root> <epic-slug> <pr-number>
+Report exit code and full stdout/stderr. Do not edit any files.
 ```
 
-After the first story merges into an epic branch, create the epic PR:
-```bash
-gh pr create --base main --head epic/<epic-slug> --title "<epic title>" --body "## Stories merged\n- <story title>"
-```
-Store the PR number on the epic in `epics.json` as `prNumber`. On subsequent story merges, update the PR body:
-```bash
-gh pr edit <prNumber> --body "<updated body with new story>"
-```
+The script squash-merges via `gh pr merge --squash --delete-branch`, deleting the remote epic branch immediately. The local ref is also deleted. Epic branches do not persist after merge.
 
-### Epic merge (into main — user-triggered)
-Epic merges to main only when the user says "merge epic X" or all stories in the epic are `closed`.
-```bash
-git fetch origin main
-git checkout epic/<epic-slug>
-git rebase origin/main   # resolve conflicts if any
-git push origin epic/<epic-slug> --force-with-lease
-gh pr merge <prNumber> --squash --delete-branch=false
-git fetch origin main
-git update-ref refs/heads/main origin/main
-```
-Note: `--delete-branch=false` because epic branches persist until explicitly deleted by the user.
+After the epic merge completes, prompt: "Context checkpoint reached (epic merged). Run `/clear` to reset the session. All epic and story state is saved in epics.json."
 
-### General rules
-- **Never `git branch -D`** — force-delete is forbidden. If `-d` fails, advance the local ref with `git update-ref` first, then retry `-d`.
-- Never merge story branches directly to main — stories go through the epic branch
-- Never commit without explicit instruction
+**Auto-close rules**:
+- Story closes on successful merge into epic branch.
+- Epic closes when all its stories are `closed`.
 
-## Error handling
+---
+
+## 14. PARALLEL STORY EXECUTION
+
+Stories can run in parallel if they share no write-target files (read-only files do not create a conflict).
+
+Before launching a story, check `epics.json` for stories currently `running`, `reviewing`, or `testing`:
+- **No write-file overlap**: launch immediately in parallel.
+- **Write-file overlap**: queue the story. When the blocking story merges, auto-launch the queued story — do not ask the user.
+
+When a story completes, scan for `filling` stories whose dependencies are resolved — set state to `running`, create the worktree, and launch the first coder task in BACKGROUND. Notify the user.
+
+**Merge ordering**: Stories within the same epic merge into the same epic branch. First to complete merges first. Second story rebases onto the updated epic branch before merging. If rebase produces a conflict → pause, report to user.
+
+**Batch merge window**: After a story completes, wait 10 seconds. If another story completes in that window, merge both sequentially in one operation.
+
+**Sequence decisions** (autonomous): (1) fewest overlapping files first, (2) lowest complexity first (quick-fixer before architect), (3) story id ascending as tiebreaker. Never ask the user to choose the sequence.
+
+---
+
+## 15. CROSS-SESSION RECOVERY
+
+**Snapshot triggers** — write `epics.json` at exactly two points:
+1. After each story merges into the epic branch.
+2. On state transitions that matter cross-session (`filling` → `running`, `running` → `closed`).
+
+**Recovery on session start** — when `epics.json` shows a story in `running` state:
+1. Check if the story worktree still exists (`git worktree list`).
+2. Check for uncommitted changes in the worktree.
+3. Report: "Story X was in-flight when the last session ended. Worktree at .claude/worktrees/story/X [has uncommitted changes | is clean]. Resume or discard?"
+4. Do not auto-resume — wait for user decision.
+
+After recovery is resolved (user says resume or discard), prompt: "Context checkpoint reached (session recovery). Run `/clear` to start fresh. All epic and story state is saved in epics.json."
+
+**What's lost on crash**: only in-session todo progress and coder task status. Git state (branches, worktrees, commits) is the ground truth for anything in-flight.
+
+**Recovery sources**:
+1. `epics.json` on disk
+2. `git worktree list`
+3. `git branch --list 'story/*' 'epic/*'`
+
+---
+
+## 16. BACKGROUND AGENT MANAGEMENT
+
+**Check-in cadence**: Ping long-running background agents every 3 minutes via `TaskOutput` with `block: false`. If an agent shows no new tool uses after 2 consecutive check-ins (6 minutes), stop it, re-split the task into smaller pieces (each ≤5 files, ≤200 lines), and warn: "Story [id] ([title]) agent stalled after 6 minutes. Splitting and re-launching."
+
+**Error handling**:
 - Tests run from the **root worktree** always. Build (`npm run build`) runs from the story worktree.
-- Test/build failure (trivial): unit-tester fixes directly
-- Test/build failure (non-trivial): re-delegate to the owning coder task with failing output → re-run both reviewer + unit-tester in parallel. Max 2 retries, then escalate to user.
-- Reviewer blocking: handled by pipeline retry rules — do not re-run orchestrator
-- Plan rejected: re-launch orchestrator in foreground with user's feedback
-- Merge conflict: abort, notify user, pause
+- Test/build failure (trivial): unit-tester fixes directly.
+- Test/build failure (non-trivial): re-delegate to coder with failing output → re-run reviewer + unit-tester in parallel. Max 2 retries, then escalate to user.
+- Reviewer blocking: handled by pipeline retry rules — do not re-run orchestrator.
+- Plan rejected: re-launch orchestrator in foreground with user's feedback.
+- Merge conflict: abort, notify user, pause.
 
-## Test failure logging
-Whenever the unit-tester reports a non-trivial failure (i.e. one that requires re-delegation to the coder rather than an inline fix), append an entry to the **absolute path** of the test failure log before re-delegating. The log lives at the project root (not inside a worktree): `/Users/kelsiandrews/gauntlet/week1/.claude/test-failure-log.md`. Always use the full absolute path — never a relative path — to avoid writing to the wrong worktree directory. Use this format:
+---
+
+## 17. LOGGING
+
+**Test failure log**: Whenever unit-tester reports a non-trivial failure (requires re-delegation), append to `/Users/kelsiandrews/gauntlet/week1/.claude/test-failure-log.md` (always absolute path) before re-delegating. The unit-tester agent is responsible for filling in root cause and analysis — the main session copies these verbatim from the agent output into the log.
 
 ```
 ## [ISO date] — [story id] — [one-line failure title]
 **Coder agent**: quick-fixer | architect
 **Model**: haiku | sonnet | opus
 **Failing test(s)**: [test name(s) or file(s)]
-**Error**: [exact error message or assertion failure, truncated to ~300 chars]
-**Root cause category**:
+**Error**: [exact error message, truncated to ~300 chars]
+**Root cause category** (exactly one checked by unit-tester):
   - [ ] Careless mistake (wrong variable, off-by-one, typo)
   - [ ] Scope too narrow (coder didn't read enough context before writing)
   - [ ] Prompt gap (plan was missing a critical detail)
   - [ ] Framework/API misuse (wrong Konva/Firebase/React API)
   - [ ] Test environment issue (mock gap, timing, missing setup)
-**Analysis**: [2-3 sentences: what went wrong and why]
+**Analysis**: [2-3 sentences from unit-tester: what went wrong and why]
+**Coverage gap**: [yes — no test existed for this path | no — existing test should have caught this]
 **Resolution**: re-delegated to coder | escalated to user
 ```
 
-**Threshold reminder**: Once `.claude/test-failure-log.md` reaches **5 entries**, surface this message to the user after the next successful pipeline completion:
+If the unit-tester output does not include a pre-filled root cause and analysis, reject it: send back to the tester with instruction to classify before re-delegating.
+
+Once the log reaches **5 entries**, surface after the next successful pipeline completion (once per session):
 > "test-failure-log.md has N entries. Worth reviewing to identify coder prompt patterns that need improvement."
 
-Do not surface the reminder more than once per session after the threshold is crossed.
+**Review findings log**: Log-only reviewer warnings go to `/Users/kelsiandrews/gauntlet/week1/.claude/review-findings.md`.
 
-## Token and time optimizations
+---
 
-**Epic-planned stories**: If the epic plan document specifies `writeFiles`, `agent`, and `model` per story, the main session stages stories directly — no orchestrator needed. The orchestrator is only required when a new todo arrives without a pre-planned story assignment.
+## 18. TOKEN OPTIMIZATIONS
 
-**Coder prompt size limit**: Keep coder prompts under 2000 tokens. Include: todo descriptions, write-target paths, read-only paths, and a Pitfalls section. Omit: full file contents (the coder reads them), architecture explanations the coder can find in CLAUDE.md, and verbose rationale. Link to CLAUDE.md sections by name instead of repeating them.
+**Coder prompt size limit**: Keep coder prompts under 2000 tokens. Include: todo descriptions, write-target paths, read-only paths, Pitfalls section. Omit: full file contents, architecture explanations available in CLAUDE.md, verbose rationale. Link to CLAUDE.md sections by name.
 
-**CSS-only stories** (no JS/JSX changes): always use Haiku, skip testing, skip diff gate file restoration (CSS files can't break tests). Only run `npm run build` to verify no syntax errors.
+**CSS-only stories** (no JS/JSX changes): always use Haiku, skip testing, skip diff gate file restoration. Only run `npm run build` to verify no syntax errors.
 
-**Inline parallelism**: Bash commands that don't gate the next write (build verification, lint, diff checks, git status) must run with `run_in_background: true` when there is other independent work to do in parallel. Never block on a build while the next file read is already known. Read the background result only when the next decision requires it.
+**Inline parallelism**: Bash commands that don't gate the next write (build verification, lint, diff checks, git status) must run with `run_in_background: true` when there is other independent work in parallel. Read the background result only when the next decision requires it.
+
+---
+
+## 19. EPIC PLANNER
+
+### Trigger
+User says `"plan epic: <description>"` or provides a requirements doc and asks to plan it. This is the only correct entry point — do not route through the todo-orchestrator for epic-level planning.
+
+### Launch sequence
+1. Derive an `<epic-slug>` from the description (kebab-case, ≤5 words).
+2. Assign a new epic ID by reading `epics.json` and incrementing the highest existing epic number.
+3. Launch epic-planner agent in **background** (`run_in_background: true`, model: Sonnet by default).
+4. Proceed with other work. Do not block waiting for the result.
+5. When the agent completes, read `$TMPDIR/epic-plan-<epic-slug>.md`.
+6. Validate each story payload (same rules as §6). Surface any validation errors to the user.
+7. Present the full plan summary to the user for approval.
+8. On approval: write all stories to `epics.json` (state: `filling`), create `TaskCreate` entries for each story.
+
+### Epic-planner agent prompt (required elements)
+- Epic description / requirements doc content
+- Absolute path to `epics.json` (for dedup check)
+- Absolute path to project root (for Glob/Grep)
+- Output path: `$TMPDIR/epic-plan-<epic-slug>.md`
+- Instruction to deduplicate against existing stories before proposing new ones
+
+### Epic-planner output format
+The agent MUST write a file at the specified output path with this structure:
+
+```
+EPIC_PLAN
+Epic: <epic-id> — <epic title>
+Stories: <count>
+
+STORY <n>
+Title: <story title>
+Agent: <quick-fixer|architect>
+Model: <haiku|sonnet|opus>
+Trivial: <yes|no>
+Files:
+  write: <comma-separated>
+  read: <comma-separated>
+Plan: <one sentence>
+
+...repeat for each story...
+
+STAGING_PAYLOAD
+<valid JSON array of story staging payloads — same schema as §5, wrapped in { "epicUpdate": {...}, "stories": [...] }>
+```
+
+The main session reads this file, validates the JSON, then presents it to the user.
+
+### Epic-planner constraints
+- Research only — no writes, no builds, no tests, no commits.
+- Dedup first: read `epics.json`, skip any story that duplicates an existing open story.
+- Group stories by write-file overlap (same grouping logic as §10) and note dependencies.
+- Flag any story that touches protected testable files (`needsTesting: true`) or protected Konva files (note: user permission required).
+- Stay within the task size ceiling: if a logical unit spans >5 write-targets or >200 lines estimated, split into sub-stories.
+- Do NOT write to `epics.json` — that is the main session's job after user approval.
+
+---
+
+## 19.1. EPIC PLANNER — PLANNING MODE
+
+### Mode comparison
+
+| Aspect | Epic mode (§19) | Planning mode (§19.1) |
+|---|---|---|
+| Trigger | "plan epic: ..." | Orchestrator NEEDS_PLANNING |
+| Launch | Background | Foreground (interactive) |
+| User interaction | None | Required — must ask questions |
+| Output | Multi-story plan + staging payloads | Single refined plan document |
+| Consumer | Main stages stories directly | Main feeds back to orchestrator |
+
+### Behavior
+
+1. Research areas listed in Touches, skip files already explored unless deeper context is needed.
+2. For each open question: resolve via codebase research or ask the user via `AskUserQuestion`. Do NOT silently assume answers.
+3. Propose a concrete approach for each question with brief trade-offs.
+4. Wait for user response before proceeding. Batch 2–3 independent questions at once to reduce round-trips.
+5. Write output to `$TMPDIR/planning-<todo-slug>.md`.
+
+### Output format
+
+```
+PLANNING_RESULT
+Original task: <one-line>
+Questions resolved: <count>
+
+## Decisions
+- Q: <question>
+  A: <answer>
+  Rationale: <one sentence>
+
+## Recommended approach
+<2-5 sentences>
+
+## Scope
+Write files: <comma-separated>
+Read files: <comma-separated>
+Agent: <quick-fixer|architect>
+Model: <haiku|sonnet|opus>
+
+## Constraints and edge cases
+- <bullet>
+```
+
+### Edge cases
+
+- If user says "you decide" on a question: planner decides, tags with `(planner decision)`.
+- If user cancels mid-planning: planner writes partial output, main session asks user whether to proceed with partial plan or abandon.
+- If planner cannot resolve all questions: partial decisions tagged `(planner decision)`, orchestrator treats as resolved.

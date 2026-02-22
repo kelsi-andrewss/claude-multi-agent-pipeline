@@ -58,6 +58,7 @@ Todos are **session-scoped** -- tracked via Claude's built-in task tools during 
 | Agent | Model | Role |
 |-------|-------|------|
 | `todo-orchestrator` | Haiku (default) | Research, classify, group todos -> staging payload. Never writes code. |
+| `epic-planner` | Sonnet/Opus | Two modes: (1) epic mode -- background multi-story planning; (2) planning mode -- foreground interactive research for ambiguous tasks |
 | `quick-fixer` | Haiku/Sonnet | Clear-scope fixes, style tweaks, mechanical changes |
 | `architect` | Sonnet/Opus | Ambiguous scope, schema changes, new patterns |
 | `reviewer` | Haiku | On-demand code review of diffs |
@@ -67,6 +68,7 @@ Todos are **session-scoped** -- tracked via Claude's built-in task tools during 
 
 ```
 orchestrator  -> Haiku  (bump to Sonnet/Opus if architecturally complex)
+epic-planner  -> Sonnet (default) | Opus (high complexity, AI/schema, >10 files)
 quick-fixer   -> Haiku (trivial) | Sonnet (standard) | Opus (escalation)
 architect     -> Sonnet (standard) | Opus (high-risk, escalation)
 reviewer      -> Haiku  (Sonnet only if coder was Opus)
@@ -480,6 +482,10 @@ If the story diff is <=75 lines, the reviewer reads the diff only -- no full fil
 
 ## Orchestrator Output Format
 
+The orchestrator returns one of four output types:
+
+### STAGING_PAYLOAD (normal path)
+
 ```
 SUMMARY
 Todo: <one-line description>
@@ -499,6 +505,60 @@ STAGING_PAYLOAD
 ```
 
 The main session creates `TaskCreate` entries from the orchestrator's plan -- not JSON file writes.
+
+### NEEDS_PLANNING (ambiguous tasks)
+
+When a task is too ambiguous for a single clarifying question (2+ open questions, scope unclear, >5 files explored without converging):
+
+```
+NEEDS_PLANNING
+Todo: <one-line description>
+Complexity: <low|medium|high>
+Touches: <comma-separated areas>
+Files explored: <comma-separated files already read>
+
+Questions:
+- <specific, actionable question>
+- <specific, actionable question>
+
+Suggestions:
+- <approach the orchestrator leans toward, if any>
+```
+
+This triggers the **planning loop**:
+
+```
+todo-orchestrator returns NEEDS_PLANNING
+       |
+       v
+Main session: group bullets, select model, derive slug
+       |
+       v
+epic-planner (foreground, planning mode)
+  |-- asks user questions interactively
+  |-- writes $TMPDIR/planning-<slug>.md
+       |
+       v
+todo-orchestrator (re-launch with PLANNING_CONTEXT)
+       |
+       +-- STAGING_PAYLOAD -> validate, present, approve
+       +-- NEEDS_PLANNING again -> surface to user, stop (max 1 loop)
+       +-- UNRESOLVABLE -> surface reason, stop
+```
+
+### DUPLICATE
+
+```
+DUPLICATE: <story-id>
+```
+
+### UNRESOLVABLE
+
+```
+UNRESOLVABLE
+Todo: <one-line description>
+Reason: <why this cannot be staged>
+```
 
 ---
 
@@ -626,6 +686,7 @@ After each story merge, scan coder output + reviewer warnings + test failure log
 |   +-- reviewer.md
 |   +-- unit-tester.md
 |   +-- todo-orchestrator.md
+|   +-- epic-planner.md    # Dual-mode: epic planning (background) + task planning (foreground)
 +-- tracking/
     +-- key-prompts/       # High-signal prompt logs (YYYY-MM-DD.md)
 
@@ -641,12 +702,28 @@ After each story merge, scan coder output + reviewer warnings + test failure log
 
 ---
 
+## Guides
+
+Reference documents on specific pipeline topics, available as PDFs in the `guides/` directory:
+
+| Guide | Description |
+|-------|-------------|
+| [Improved Session Persistence for Multi-Agent Pipeline](guides/Improved-Session-Persistence-for-Multi-Agent-Pipeline.pdf) | 3-layer defense (CLAUDE.md directive, /todo skill, PreToolUse hook) for enforcing pipeline usage |
+| [Orchestrator Context Management in Claude Code](guides/Orchestrator-Context-Management-in-Claude-Code.pdf) | Why context bloat happens and three solutions: sub-agent delegation, deterministic /clear checkpoints, PostToolUse hooks |
+
+---
+
 ## Quick Reference
 
 ```
-New feature request
-  +-- todo-orchestrator -> staging payload -> user approval
+New feature request (clear scope)
+  +-- todo-orchestrator -> STAGING_PAYLOAD -> user approval
       -> TaskCreate entries -> fill phase
+
+New feature request (ambiguous)
+  +-- todo-orchestrator -> NEEDS_PLANNING
+      -> epic-planner (foreground, interactive) -> resolved plan
+      -> todo-orchestrator (re-run with PLANNING_CONTEXT) -> STAGING_PAYLOAD
 
 "run story-X"
   +-- epic branch created/updated -> story worktree created
