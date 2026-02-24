@@ -194,6 +194,21 @@
           "needsReview": false,
           "agent": "quick-fixer",
           "model": "sonnet"
+        },
+        {
+          "id": "story-176",
+          "epicId": "epic-022",
+          "title": "Remove staging approval gate from /todo skill",
+          "state": "filling",
+          "branch": null,
+          "writeFiles": [
+            "skills/todo/SKILL.md",
+            "ORCHESTRATION.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet"
         }
       ]
     }
