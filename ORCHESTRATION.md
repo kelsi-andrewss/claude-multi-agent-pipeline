@@ -176,7 +176,9 @@ Sequential after group 1: todo-aaa — <reason for dependency>
     "branch": null,
     "writeFiles": ["src/handlers/stageHandlers.js"],
     "needsTesting": false,
-    "needsReview": false
+    "needsReview": false,
+    "agent": "quick-fixer",
+    "model": "sonnet"
   },
   "epicUpdate": {
     "id": "epic-001",
@@ -264,9 +266,13 @@ Each story entry:
   "branch": "story/ghost-placement",
   "writeFiles": ["src/handlers/stageHandlers.js", "src/components/BoardCanvas.jsx"],
   "needsTesting": false,
-  "needsReview": false
+  "needsReview": false,
+  "agent": "quick-fixer",
+  "model": "sonnet"
 }
 ```
+
+`agent` and `model` are optional fields set at staging time. Existing stories without these fields are valid — display them without agent/model columns.
 
 **Valid story state transitions**:
 ```
@@ -653,6 +659,7 @@ where <json-patch> is a JSON object describing the update, e.g.:
   '{"newStory":{...full story object...},"epicId":"epic-007"}'
 Report exit code and full stdout/stderr. Do not edit any files.
 ```
+When staging a new story, include `agent` and `model` in the `newStory` object so they are persisted for display by `/status`.
 The script reads `epics.json`, applies the patch atomically, and writes it back. If the script does not yet exist, the git-ops agent may write `epics.json` directly via a one-line node/python command instead, until the script is created.
 
 **Recovery on session start** — when `epics.json` shows a story in `running` state:

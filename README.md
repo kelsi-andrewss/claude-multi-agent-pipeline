@@ -403,9 +403,13 @@ Groups A and B run in parallel (no file overlap).
   "branch": "story/ghost-placement",
   "writeFiles": ["src/handlers/stageHandlers.js"],
   "needsTesting": false,
-  "needsReview": false
+  "needsReview": false,
+  "agent": "quick-fixer",
+  "model": "sonnet"
 }
 ```
+
+`agent` and `model` are optional — set at staging time and used by `/status` to color-code output. Existing stories without these fields display without agent/model columns.
 
 Dropped from previous schema: `body`, `labels`, `worktree` (derivable from branch), `todos` (in TaskList), `coderGroups` (in TaskList), `reviewerRetries` (in-session only), `startedAt`, `stageStartedAt` (in-session only).
 
