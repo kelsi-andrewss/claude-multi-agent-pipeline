@@ -27,6 +27,7 @@ Apply these ANSI escape codes when rendering story fields. Use `\033[0m` to rese
 | State: `closed` | `\033[2m` (dim) |
 | Agent: `architect` | `\033[35m` (magenta) |
 | Agent: `quick-fixer` | `\033[34m` (blue) |
+| Agent: `manual` | `\033[37m` (white/plain) |
 | Model: `opus` | `\033[1;31m` (bold red) |
 | Model: `sonnet` | `\033[33m` (yellow) |
 | Model: `haiku` | `\033[32m` (green) |

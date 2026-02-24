@@ -274,6 +274,8 @@ Each story entry:
 
 `agent` and `model` are optional fields set at staging time. Existing stories without these fields are valid — display them without agent/model columns.
 
+**Special agent value — `"manual"`**: Used by the `/checklist` skill for human-executed stories. Manual stories have no worktree, no branch, and no coder. They go straight to `running` and are closed by the checklist skill after all steps complete. They skip all diff-gate, reviewer, and unit-tester pipeline steps.
+
 **Valid story state transitions**:
 ```
 filling → queued          (run triggered but dependsOn stories not yet closed)
