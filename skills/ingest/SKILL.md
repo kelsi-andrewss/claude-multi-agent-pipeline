@@ -3,7 +3,7 @@ name: ingest
 description: >
   Load a roadmap file into epics.json, routing code stories through the epic-planner
   and creating manual checklist stories directly. Use when the user says "/ingest",
-  "/ingest <path>", or "ingest roadmap".
+  "/ingest <path>", or "ingest roadmap", or "/ingest --manual-only" to extract and write only manual checklist steps without launching epic-planners.
 ---
 
 # Ingest Skill
@@ -11,6 +11,18 @@ description: >
 Read a structured roadmap markdown file (produced by `/roadmap` or hand-written) and
 load it into `epics.json`. Code stories go through the epic-planner for decomposition;
 manual steps become checklist stories directly.
+
+## Flag — --manual-only
+
+If `/ingest` is called with `--manual-only`:
+
+- Execute Steps 1–5 exactly as described below.
+- Skip Step 6 entirely — do not launch any epic-planner agents.
+- Skip Step 7 entirely — no planner output to collect or validate.
+- Skip Step 8 — no approval gate. Proceed directly to writing.
+- In Step 9, write **only** manual stories (produced in Step 5) to `epics.json`. Do not write code story objects. Do not create `TaskCreate` entries for code stories.
+- Print the checklist-file confirmation block from Step 9 with the summary line reading: `Ingested <N> epics, 0 code stories, <K> manual steps.`
+- If the roadmap contains no manual stories, print: `No manual stories found in roadmap. Nothing to write.` and stop.
 
 ## Step 1 — Resolve the roadmap file
 
