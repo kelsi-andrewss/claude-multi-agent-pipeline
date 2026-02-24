@@ -80,7 +80,9 @@ Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/wri
 
 **Skip orchestrator** when ALL of the following are true: (1) the affected file(s) are already known, (2) the root cause is clear, (3) no new story/epic needs to be created, (4) no schema/frame/AI tool changes. Go directly to coder. Still create a `TaskCreate` entry for tracking.
 
-**Bypass orchestrator entirely** for: pure questions or explanations, read-only research, git/commit/PR operations, non-project tasks.
+**Bypass orchestrator entirely** for: pure questions or explanations, read-only research, git/commit/PR operations, and tasks that modify zero files in the working directory.
+
+> **Note**: "non-project tasks" is NOT a bypass category. Documentation files checked into the project repo (`.md`, `.txt`, config docs, `CLAUDE.md`, `ORCHESTRATION.md`, etc.) are project files — editing them requires the full pipeline like any other file change. The only true bypasses are the four categories listed above.
 
 **Preprocessing**: Before spawning the orchestrator, strip filler from the user message, extract the core intent as one sentence, and append a one-line summary of current story context. Pass this condensed prompt — not the raw message.
 
