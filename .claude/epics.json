@@ -199,7 +199,7 @@
           "id": "story-176",
           "epicId": "epic-022",
           "title": "Remove staging approval gate from /todo skill",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "writeFiles": [
             "skills/todo/SKILL.md",
