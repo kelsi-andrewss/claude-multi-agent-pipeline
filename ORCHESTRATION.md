@@ -91,7 +91,7 @@ Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/wri
 **Epic-planned stories**: If the epic plan document specifies `writeFiles`, `agent`, and `model` per story, stage stories directly — no orchestrator needed.
 
 **After orchestrator completes**, check output type:
-1. **STAGING_PAYLOAD** → orchestrator writes payload to `$TMPDIR/staging-<todo-slug>.json` and returns `STAGING_PAYLOAD written to $TMPDIR/staging-<todo-slug>.json`. Read that file, validate (§6), present summary to user, create `TaskCreate` entries only after approval. No coder launches until a run trigger.
+1. **STAGING_PAYLOAD** → orchestrator writes payload to `$TMPDIR/staging-<todo-slug>.json` and returns `STAGING_PAYLOAD written to $TMPDIR/staging-<todo-slug>.json`. Read that file, validate (§6), immediately write the story/epic to epics.json via update-epics.sh, create `TaskCreate` entries, and print summary to user. No coder launches until a run trigger.
 2. **NEEDS_PLANNING** → enter planning loop (§4.1).
 3. **DUPLICATE** → inform user, stop.
 
@@ -132,7 +132,7 @@ When the orchestrator returns NEEDS_PLANNING:
    ```
 8. If orchestrator returns **NEEDS_PLANNING again**: surface remaining questions to user directly, stop. No infinite loop — max 1 planning loop.
 9. If **UNRESOLVABLE**: surface reason to user, stop.
-10. If **STAGING_PAYLOAD**: validate (§6) and present as normal.
+10. If **STAGING_PAYLOAD**: validate (§6), immediately write to epics.json via update-epics.sh, create `TaskCreate` entries, and print summary to user.
 
 ---
 
