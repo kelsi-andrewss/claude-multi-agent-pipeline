@@ -4,7 +4,7 @@
       "id": "epic-022",
       "title": "Pipeline self-hosting and capability expansion",
       "branch": null,
-      "prNumber": null,
+      "prNumber": 1,
       "persistent": true,
       "stories": [
         {
@@ -30,7 +30,7 @@
           "id": "story-165",
           "epicId": "epic-022",
           "title": "Automated PR description generation",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
