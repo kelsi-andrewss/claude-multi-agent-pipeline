@@ -4,6 +4,51 @@ A structured multi-agent workflow for software development using Claude Code. Ep
 
 ---
 
+## What's in this repo
+
+This repo is the live `~/.claude/` configuration — the actual files Claude Code loads every session. Clone it into `~/.claude/` to use the pipeline.
+
+```
+~/.claude/
++-- CLAUDE.md              # Global preferences: style, React, Firebase, parallelism rules
++-- ORCHESTRATION.md       # Full pipeline spec (main session only)
++-- agents/                # Agent system prompts (loaded via subagent_type)
+|   +-- todo-orchestrator.md
+|   +-- epic-planner.md
+|   +-- quick-fixer.md
+|   +-- architect.md
+|   +-- reviewer.md
+|   +-- unit-tester.md
+|   +-- git-ops.md
++-- skills/                # Slash commands (invoked via /todo, /run-story, etc.)
+|   +-- todo/              # Start any code change -- runs the orchestrator
+|   +-- run-story/         # Execute the run trigger sequence for a story
+|   +-- merge/             # Merge one or more stories into their epic branch
+|   +-- status/            # Show pipeline state (epics, stories, flags)
+|   +-- recover/           # Cross-session recovery for in-flight stories
+|   +-- clear-guide/       # Check if it's safe to /clear right now
+|   +-- pre-response-check/# Hook: read ORCHESTRATION.md before workflow answers
+|   +-- view-tracking/     # Open charts dashboard and today's key-prompts file
++-- hooks/                 # Shell hooks (PreToolUse / PostToolUse)
+|   +-- load-session-context.sh   # Loads CLAUDE.md + ORCHESTRATION.md at session start
+|   +-- require-orch-read.sh      # Blocks workflow answers until ORCHESTRATION.md is read
+|   +-- mark-orch-read.sh         # Marks ORCHESTRATION.md as read in /tmp
+|   +-- guard-direct-edit.sh      # Warns when edits bypass the pipeline
+|   +-- warn-sync-heavy-bash.sh   # Flags bash commands that should run in background
++-- tracking/              # Session tracking scripts
+|   +-- generate-charts.py
+|   +-- cost-summary.py
+|   +-- backfill.py
+|   +-- update-prompts-index.py
+|   +-- stop-hook.sh
++-- plans/                 # Ephemeral planning docs from past sessions
++-- settings.json          # Claude Code settings (hooks config, permissions)
+```
+
+**Not tracked** (gitignored): `history.jsonl`, `todos/`, `session-env/`, `projects/`, `cache/`, `debug/`, `paste-cache/`, `shell-snapshots/`, `telemetry/`, `plugins/`.
+
+---
+
 ## Overview
 
 ```
@@ -828,9 +873,10 @@ Without this step, parallel features built in separate worktrees silently miss e
 ## File Structure
 
 ```
-~/.claude/
+~/.claude/                 # This repo
 +-- CLAUDE.md              # Global preferences (communication, code style, React, Firebase)
 +-- ORCHESTRATION.md       # This pipeline (main session only)
++-- settings.json          # Claude Code settings (hooks wiring, permissions)
 +-- agents/
 |   +-- quick-fixer.md
 |   +-- architect.md
@@ -839,12 +885,32 @@ Without this step, parallel features built in separate worktrees silently miss e
 |   +-- todo-orchestrator.md
 |   +-- epic-planner.md    # Dual-mode: epic planning (background) + task planning (foreground)
 |   +-- git-ops.md         # Git pipeline executor: scripts, rules, forbidden actions
++-- skills/
+|   +-- todo/              # /todo -- starts a code change via the orchestrator
+|   +-- run-story/         # /run-story -- run trigger sequence
+|   +-- merge/             # /merge -- merge stories into epic branch
+|   +-- status/            # /status -- pipeline state overview
+|   +-- recover/           # /recover -- cross-session recovery
+|   +-- clear-guide/       # /clear-guide -- safe-to-clear check
+|   +-- pre-response-check/# loaded before workflow answers
+|   +-- view-tracking/     # /view-tracking -- charts + key-prompts
++-- hooks/
+|   +-- load-session-context.sh
+|   +-- require-orch-read.sh
+|   +-- mark-orch-read.sh
+|   +-- guard-direct-edit.sh
+|   +-- warn-sync-heavy-bash.sh
 +-- tracking/
     +-- key-prompts/       # High-signal prompt logs (YYYY-MM-DD.md)
+    +-- generate-charts.py
+    +-- cost-summary.py
+    +-- backfill.py
+    +-- update-prompts-index.py
 
 <project>/.claude/
 +-- epics.json             # Epic + story state (sole persistent tracking file)
 +-- settings.local.json    # File deny rules (protected files)
++-- scripts/               # Pipeline shell scripts (setup-story, diff-gate, merge-*, update-epics)
 +-- tracking/
 |   +-- key-prompts/
 |   +-- test-failure-log.md
