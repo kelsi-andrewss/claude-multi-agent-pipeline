@@ -5,6 +5,7 @@ description: >
   "merge story-X", "merge story X and Y", or after diff gate passes.
   Encodes ORCHESTRATION.md §12 exactly. Supports optional --draft flag to
   create the epic PR as a draft instead of a ready PR.
+  To merge the epic branch into main, use /merge-epic instead.
 args:
   - name: story_ids
     type: string
