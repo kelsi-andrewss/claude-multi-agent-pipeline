@@ -1,0 +1,24 @@
+# Runtime / private data
+history.jsonl
+stats-cache.json
+.gitignore.bak
+
+# Runtime directories
+cache/
+debug/
+downloads/
+file-history/
+image-cache/
+paste-cache/
+projects/
+session-env/
+shell-snapshots/
+statsig/
+tasks/
+telemetry/
+todos/
+backups/
+ide/
+
+# Sensitive / machine-specific
+*.local
