@@ -1,9 +1,9 @@
 ---
 name: roadmap
 description: >
-  Convert a research document into a structured roadmap markdown file with tagged
-  [code]/[manual] stories, ready for /ingest. Use when the user says "/roadmap",
-  "/roadmap <path>", or "convert research to roadmap".
+  Convert a research document into a structured roadmap markdown file with natural-language
+  stories, ready for /ingest. Use when the user says "/roadmap", "/roadmap <path>",
+  or "convert research to roadmap".
 ---
 
 # Roadmap Skill
@@ -30,75 +30,28 @@ markdown file. The output is human-reviewable before ingestion into the pipeline
 Derive a slug from the filename stem (lowercase, hyphens for spaces, strip special chars,
 max 5 words). Example: `q3-auth-requirements.md` → `q3-auth-requirements`.
 
-Output path: `$TMPDIR/roadmap-<slug>.md`
-Final path: `<project-root>/.claude/roadmaps/<slug>.md`
+Output path: `<project-root>/.claude/roadmaps/<slug>.md`
 
-## Step 3 — Launch epic-planner in planning mode (foreground)
+## Step 3 — Analyze and structure inline
 
-Launch the epic-planner agent **foreground** (not background) with this prompt:
+Read the research document carefully. Then do the following inline (no sub-agent):
 
-```
-MODE: roadmap-conversion
-Research document path: <absolute-path>
-Research document content:
----
-<full content of the research doc>
----
-
-Project root: <absolute-path>
-Output path: $TMPDIR/roadmap-<slug>.md
-
-Task: Convert this research document into a structured roadmap markdown file.
-
-Instructions:
-1. Read the research document carefully. Identify discrete work items.
+1. Identify all discrete work items from the document.
 2. Group related items into epics. Each epic is a coherent theme of work.
-3. For each epic, list individual stories tagged [code] or [manual]:
-   - [code] — automated implementation work (will be handed to coder agents)
-   - [manual] — human steps (deploy actions, external config, approvals, etc.)
-4. Ask the user clarifying questions via AskUserQuestion if grouping is ambiguous
-   (e.g. "Should X and Y be one epic or two?"). Batch questions — ask at most
-   2-3 at once, never one at a time.
-5. Write the output file at the specified path using the format below.
-6. Do NOT write to epics.json. Do NOT run builds or tests.
+3. If grouping is ambiguous (e.g. "Should X and Y be one epic or two?"), ask via
+   `AskUserQuestion`. Batch all questions together — ask at most 2-3 at once, never
+   one at a time. Wait for answers before continuing.
+4. For each epic, draft a one-sentence description of what it delivers.
+5. For each epic, list the individual stories as top-level bullet points.
+   - Sub-bullets under a story are detail/plan for that story — they are NOT separate stories.
+   - For manual human actions (external dashboards, config steps, API key creation),
+     include specific links and instructions in the sub-bullets.
 
-Output format:
----
-# <Project/Feature Title>
+## Step 4 — Write the roadmap file
 
-## Epic: <Epic Title>
-> <one-sentence description of what this epic delivers>
-
-### Stories
-- [code] <Story title> — <one-line plan describing what the coder will do>
-- [code] <Story title> — <one-line plan>
-- [manual] <Human step description>
-
-## Epic: <Another Epic Title>
-> <description>
-
-### Stories
-- [code] <Story title> — <one-line plan>
-- [manual] <Human step description>
----
-
-Rules:
-- Every story line must start with exactly `- [code]`, `- [manual]`, or `- ` (untagged, treated as [code])
-- Epic titles must be unique
-- Story titles must be concise (≤10 words)
-- One-line plans must describe the implementation action, not the business outcome
-- Manual steps describe a human action (e.g. "Configure OAuth app in provider dashboard")
-- Keep epics to 3-8 stories each; split if larger
-```
-
-Wait for the planner to complete (foreground blocks).
-
-## Step 4 — Read planner output and write roadmap file
-
-1. Read `$TMPDIR/roadmap-<slug>.md`.
-2. If the file is empty or missing, print `Planner did not produce output. Aborting.` and stop.
-3. Create `<project-root>/.claude/roadmaps/` if it does not exist.
-4. Write the content to `<project-root>/.claude/roadmaps/<slug>.md`.
+1. Create `<project-root>/.claude/roadmaps/` if it does not exist.
+2. Write the structured content to `<project-root>/.claude/roadmaps/<slug>.md`
+   using the format below.
 
 ## Step 5 — Print completion message
 
@@ -107,38 +60,50 @@ Roadmap written to .claude/roadmaps/<slug>.md
 Review and edit it, then run: /ingest .claude/roadmaps/<slug>.md
 ```
 
-Also print a compact summary of what was generated:
+Also print a compact summary:
 ```
-  <N> epics, <M> code stories, <K> manual steps
+  <N> epics, <M> stories, <K> manual steps
 ```
 
 ## Notes
 
 - The roadmap file is human-editable. Users should review and adjust before running `/ingest`.
-- Tags `[code]` and `[manual]` are case-sensitive — use lowercase.
-- Untagged story lines (starting with `- ` but no tag) default to `[code]` at ingest time.
-- The planner uses interactive mode — it may ask 1-3 grouping questions before writing output.
-- If the user wants to skip the interactive step and accept defaults, they can tell the planner "use your judgment".
+- No `[code]`/`[manual]` tags in the output — ingest infers type from content.
+- Sub-bullets are detail for the parent story, not separate stories.
+- Manual steps should include direct links and specific instructions so a human can
+  follow them without additional research.
 
 ## Roadmap file format (reference)
 
 ```markdown
 # Authentication System
 
-## Epic: Core Auth
-> Implement email/password login and session management.
+## Core Auth
+Implement email/password login and session management.
 
-### Stories
-- [code] Add login endpoint — implement POST /auth/login with bcrypt password check
-- [code] Add session store — wire Redis-based session with 24h TTL
-- [manual] Configure SMTP credentials in provider dashboard
+- Add login endpoint
+  - Implement POST /auth/login with bcrypt password check
+  - Return signed JWT with 24h expiry
+- Add session store
+  - Wire Redis-based session with 24h TTL
+- Configure SMTP credentials
+  - Go to https://resend.com/api-keys
+  - Create a key with "Sending access" scope
+  - Add to .env as RESEND_API_KEY
 
-## Epic: OAuth Integration
-> Add Google and GitHub OAuth login flows.
+## OAuth Integration
+Add Google and GitHub OAuth login flows.
 
-### Stories
-- [code] Add Google OAuth — implement OAuth2 flow with passport-google-oauth20
-- [code] Add GitHub OAuth — implement OAuth2 flow with passport-github2
-- [manual] Register OAuth app in Google Cloud Console
-- [manual] Register OAuth app in GitHub developer settings
+- Add Google OAuth
+  - Implement OAuth2 flow with passport-google-oauth20
+- Add GitHub OAuth
+  - Implement OAuth2 flow with passport-github2
+- Register OAuth app in Google Cloud Console
+  - Go to https://console.cloud.google.com/apis/credentials
+  - Create OAuth 2.0 Client ID, set redirect URI to /auth/google/callback
+  - Add client ID and secret to .env as GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+- Register OAuth app in GitHub
+  - Go to https://github.com/settings/developers
+  - Create new OAuth App, set callback URL to /auth/github/callback
+  - Add client ID and secret to .env as GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
 ```

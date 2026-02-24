@@ -31,9 +31,12 @@ and stop.
 
 For each roadmap file:
 
-1. Scan for lines matching `## Epic: <title>` (trim whitespace).
-2. For each epic heading, check the immediately following line. If it starts
-   with `> `, capture it as the epic description (trim the leading `> `).
+1. Scan for epic headings. Two formats are supported:
+   - Old format: lines matching `## Epic: <title>` → capture the title after `Epic: `.
+   - New format: lines matching `## <title>` where the title does NOT start with `Epic:` → capture as-is.
+2. For each epic heading, check the immediately following non-empty line:
+   - Old format: if it starts with `> `, capture it as the epic description (trim the leading `> `).
+   - New format: if it is plain prose (not a bullet or heading), capture it as the epic description.
 3. Build a map: `filename → [epicTitle, ...]` preserving order of appearance.
 
 ## Step 4 — Read epics.json
@@ -104,3 +107,55 @@ bucket (i.e., filling + in-progress = 0 and closed > 0), also print:
 - Uningested = title appears in a roadmap file but has no matching entry in
   `epics.json`.
 - Do NOT read ORCHESTRATION.md. Do NOT modify epics.json or any roadmap file.
+
+## Roadmap file format (reference)
+
+New natural-language format (preferred):
+
+```markdown
+# Authentication System
+
+## Core Auth
+Implement email/password login and session management.
+
+- Add login endpoint
+  - Implement POST /auth/login with bcrypt password check
+  - Return signed JWT with 24h expiry
+- Add session store
+  - Wire Redis-based session with 24h TTL
+- Configure SMTP credentials
+  - Go to https://resend.com/api-keys
+  - Create a key with "Sending access" scope
+  - Add to .env as RESEND_API_KEY
+
+## OAuth Integration
+Add Google and GitHub OAuth login flows.
+
+- Add Google OAuth
+  - Implement OAuth2 flow with passport-google-oauth20
+- Register OAuth app in Google Cloud Console
+  - Go to https://console.cloud.google.com/apis/credentials
+  - Create OAuth 2.0 Client ID, set redirect URI to /auth/google/callback
+  - Add client ID and secret to .env as GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+```
+
+Old format (still supported for backwards compatibility):
+
+```markdown
+# Authentication System
+
+## Epic: Core Auth
+> Implement email/password login and session management.
+
+### Stories
+- [code] Add login endpoint — implement POST /auth/login with bcrypt password check
+- [code] Add session store — wire Redis-based session with 24h TTL
+- [manual] Configure SMTP credentials in provider dashboard
+
+## Epic: OAuth Integration
+> Add Google and GitHub OAuth login flows.
+
+### Stories
+- [code] Add Google OAuth — implement OAuth2 flow with passport-google-oauth20
+- [manual] Register OAuth app in Google Cloud Console
+```

@@ -1,7 +1,7 @@
 ---
 name: ingest
 description: >
-  Load a roadmap file into epics.json, routing [code] stories through the epic-planner
+  Load a roadmap file into epics.json, routing code stories through the epic-planner
   and creating manual checklist stories directly. Use when the user says "/ingest",
   "/ingest <path>", or "ingest roadmap".
 ---
@@ -31,14 +31,37 @@ manual steps become checklist stories directly.
 
 ## Step 2 — Parse the roadmap
 
-Extract structure from the roadmap file:
+Extract structure from the roadmap file. The file may be in either the old format
+(with `## Epic:` prefix and `### Stories` subheading) or the new natural-language format
+(bare `## <Title>` headings with top-level bullet stories). Handle both.
 
-**Epics**: Lines matching `## Epic: <title>` → capture title.
-**Epic descriptions**: The `> <description>` line immediately following an `## Epic:` line.
-**Stories**: Lines under `### Stories` headings, in the format:
-  - `- [code] <title> — <plan>` → automated story
+**Epics (old format)**: Lines matching `## Epic: <title>` → capture title.
+**Epic descriptions (old format)**: The `> <description>` line immediately following an `## Epic:` line.
+
+**Epics (new format)**: Lines matching `## <title>` where the title does NOT start with
+`Epic:` → capture title. The immediately following non-empty line (which is plain prose,
+not a bullet or heading) is the epic description.
+
+**Stories (old format)**: Lines under `### Stories` headings, in the format:
+  - `- [code] <title> — <plan>` → automated story, plan is the text after ` — `
   - `- [manual] <title>` → manual checklist step
   - `- <title> — <plan>` (untagged) → treat as `[code]`
+
+**Stories (new format)**: Top-level `- <text>` bullet lines under an epic heading
+(not indented, starting with `- ` at column 0). Sub-bullets (`  - <text>`, indented
+two or more spaces) are detail/plan for the parent story — do NOT promote them to
+separate stories. Collect sub-bullets as the plan string for the parent story
+(join with `; `).
+
+**Code vs manual inference (new format only)**: Classify each top-level story as
+`manual` if any of the following are true for the story title or any of its sub-bullets:
+- Contains a URL (http:// or https://)
+- Mentions a dashboard, console, portal, or provider
+- Contains imperative human actions: "go to", "create a key", "add to .env",
+  "register", "configure in", "enable in"
+- Contains a file path starting with `.env`
+
+Classify as `code` otherwise.
 
 Build a list of epics, each with:
 ```
@@ -248,6 +271,37 @@ On approval:
   whether to retry just that epic or abort the entire ingest.
 
 ## Roadmap file format (reference)
+
+New natural-language format (preferred):
+
+```markdown
+# Authentication System
+
+## Core Auth
+Implement email/password login and session management.
+
+- Add login endpoint
+  - Implement POST /auth/login with bcrypt password check
+  - Return signed JWT with 24h expiry
+- Add session store
+  - Wire Redis-based session with 24h TTL
+- Configure SMTP credentials
+  - Go to https://resend.com/api-keys
+  - Create a key with "Sending access" scope
+  - Add to .env as RESEND_API_KEY
+
+## OAuth Integration
+Add Google and GitHub OAuth login flows.
+
+- Add Google OAuth
+  - Implement OAuth2 flow with passport-google-oauth20
+- Register OAuth app in Google Cloud Console
+  - Go to https://console.cloud.google.com/apis/credentials
+  - Create OAuth 2.0 Client ID, set redirect URI to /auth/google/callback
+  - Add client ID and secret to .env as GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+```
+
+Old format (still supported for backwards compatibility):
 
 ```markdown
 # Authentication System
