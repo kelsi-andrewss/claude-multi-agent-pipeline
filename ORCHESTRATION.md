@@ -329,14 +329,25 @@ Coders only launch when you explicitly say "run story-X" (or "run all open stori
 4. **Pre-flight worktree check** (inline, before launching git-ops):
    - If worktree exists AND state is `running`: run `git -C <worktree> status --porcelain`. If uncommitted changes exist and no coder tasks are in-progress → warn user, do NOT launch until they confirm. If some tasks done and others pending → valid partial state, proceed. Launch only pending tasks.
    - If worktree exists but state is not `running`: warn user, do not proceed.
-5. **Launch git-ops agent** (background) with prompt:
+5. **Pre-flight summary** (printed before launching git-ops, skipped if `--no-preview` flag passed):
+   ```
+   Story: <title>
+   Agent: <quick-fixer | architect>
+   Write targets: <list of writeFiles>
+   Read context: <read-only context files, if any>
+   Protected files: <any writeFiles in the protected Konva list, or "none">
+   Estimated scope: <line count estimate from plan, if available>
+   ```
+   The user sees this before any file changes begin. Add `--no-preview` to `/run-story` to skip for experienced users.
+
+6. **Launch git-ops agent** (background) with prompt:
    ```
    Run: bash <project-root>/.claude/scripts/setup-story.sh \
      <project-root> <epic-slug> <story-branch> <story-slug>
    Report exit code and full stdout/stderr. Do not edit any files.
    ```
    Wait for git-ops to complete before launching coders. If it exits non-zero, report error to user and stop.
-6. Launch coder tasks in BACKGROUND; track status via `TaskUpdate`.
+7. Launch coder tasks in BACKGROUND; track status via `TaskUpdate`.
 7. Update story `state` to `running` in `epics.json`.
 
 **Before launching a coder**: warn the user if the session is not in auto-edit mode.
@@ -498,6 +509,22 @@ If reviewer output contains `⚠ reviewer-learnings.md has N entries`, surface a
 ### Escalation
 **Reviewer send-back budget**: 2 BLOCKING round-trips. After 2: escalate coder to Opus, run once more. Budget does not reset after escalation. If Opus attempt is still BLOCKING → set story state to `blocked`, report all findings to user, leave worktree intact. `blocked` → `running` is a valid manual reset.
 
+**Blocked-story resume protocol**: When a story is in `blocked` state and the user wants to resume:
+
+1. **Manual reset**: User runs:
+   ```
+   update-epics.sh '{"storyId":"story-X","fields":{"state":"running"}}'
+   ```
+   Or equivalently, tells the main session "reset story-X to running" — the main session delegates to git-ops.
+
+2. **Re-launch options**: After state resets to `running`, the main session asks the user:
+   - "Re-launch the same coder with revised instructions?" (user provides new instructions or constraints)
+   - "Proceed to diff-gate with current worktree state?" (if user manually fixed the code)
+
+3. **Reviewer retry budget**: Does NOT reset after user intervention. If the story already had 2 BLOCKING rounds, the Opus escalation has been used. A user reset does not grant additional retry budget — the story is now on borrowed time. The user should provide clear new instructions to avoid another BLOCKING.
+
+4. **Worktree state**: The worktree is left intact when a story enters `blocked`. The user can inspect it with `git -C <worktree-path> diff` and `git -C <worktree-path> log --oneline`.
+
 ### After successful merge
 - Story state to `closed` in `epics.json`, check epic auto-close, unblock dependent stories.
 - **Architectural findings check**: Scan coder output, reviewer warnings, and test failure log for novel findings (unexpected API behaviors, new invariants, patterns to document). Novel = not already present as a bullet in CLAUDE.md (Grep for 3+ key terms before appending). If novel: append to appropriate CLAUDE.md section (one bullet, concise, actionable). Do NOT ask the user — append silently.
@@ -539,6 +566,8 @@ When git-ops exits 0:
 
 **Single-story fallback**: Only use `merge-story.sh` directly when merging a single story and no queue is needed.
 
+**Draft PR option**: When the user passes `--draft` to `/merge`, the epic PR is created as a draft (`gh pr create --draft`). This is useful when the epic has more stories pending — the PR is visible on GitHub but not merge-ready. The epic `prNumber` is recorded normally in `epics.json`. When the user triggers "merge epic X" later, the main session runs `gh pr ready <prNumber>` to convert draft → ready before running `gh pr merge --squash --delete-branch`.
+
 **Git rules**:
 - Never `git branch -D` — force-delete is forbidden. If `-d` fails, advance the local ref with `git update-ref` first, then retry `-d`.
 - Never merge story branches directly to main — stories go through the epic branch.
@@ -560,6 +589,8 @@ Report exit code and full stdout/stderr. Do not edit any files.
 
 The script squash-merges via `gh pr merge --squash --delete-branch`, deleting the remote epic branch immediately. The local ref is also deleted. Epic branches do not persist after merge.
 
+**Draft → ready conversion**: If the epic PR was created as a draft (see §12 Draft PR option), the main session must run `gh pr ready <prNumber>` BEFORE launching `merge-epic.sh`. Check the PR state with `gh pr view <prNumber> --json isDraft` first — if `isDraft` is true, run `gh pr ready <prNumber>` and wait for it to succeed before proceeding.
+
 After the epic merge completes, prompt: "Context checkpoint reached (epic merged). Run `/clear` to reset the session. All epic and story state is saved in epics.json."
 
 **Auto-close rules**:
@@ -578,9 +609,24 @@ Before launching a story, check `epics.json` for stories currently `running`, `r
 
 When a story completes, scan for `queued` stories whose `dependsOn` are now all `closed` — run `setup-story.sh` (git-ops, background), set state to `running`, and launch the first coder task in BACKGROUND. Also scan for `filling` stories with no blocking dependencies and notify the user they are ready to run.
 
-**Merge ordering**: Stories within the same epic merge into the same epic branch. First to complete merges first. Second story rebases onto the updated epic branch before merging. If rebase produces a conflict → pause, report to user.
+**Merge ordering**: Stories within the same epic merge into the same epic branch. First to complete merges first. Second story rebases onto the updated epic branch before merging. If rebase produces a conflict → pause, report to user (see rebase conflict protocol below).
 
-**Batch merge window**: After a story completes, wait 10 seconds. If another story completes in that window, merge both sequentially in one operation.
+**Batch merge window**: After a story completes, wait 30 seconds. If another story completes in that window, merge both sequentially in one operation.
+
+**Rebase conflict pause protocol**: When merge-queue.sh exits non-zero on a rebase step:
+1. Parse the output to identify which story's rebase failed and which files conflict.
+2. Pause the pipeline for that epic branch only. All other epic branches continue running.
+3. Report to user:
+   ```
+   Rebase conflict on <story-branch> rebasing onto <epic-branch>.
+   Conflicting files: <list>
+   Other epic branches: unaffected.
+   ```
+4. User resolution path:
+   - Fix conflicts manually, then: `git -C <worktree-path> add <files> && git -C <worktree-path> rebase --continue`
+   - Or abort rebase: `git -C <worktree-path> rebase --abort`
+   - After resolution, re-run merge for the affected story only: `/merge <story-id>`
+5. Do NOT auto-resolve conflicts — always surface to user.
 
 **Sequence decisions** (autonomous): (1) fewest overlapping files first, (2) lowest complexity first (quick-fixer before architect), (3) story id ascending as tiebreaker. Never ask the user to choose the sequence.
 

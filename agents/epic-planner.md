@@ -105,6 +105,30 @@ STAGING_PAYLOAD
 <valid JSON: { "epicUpdate": {...}, "stories": [...] }>
 ```
 
+### Integration surface reconciliation (run after all feature stories are drafted)
+
+This step is REQUIRED. Apply the algorithm from ORCHESTRATION.md §19.2:
+
+1. Read the `## Integration surfaces` section of the project CLAUDE.md (if present). If absent, skip this entire step.
+2. For each integration surface listed, check: does any drafted story modify the surface owner file? Does any OTHER story introduce a consumer feature without wiring into that surface?
+3. Apply the consumer check heuristic:
+   - **Confident yes** (story plan explicitly mentions registering/wiring into the surface): generate integration story automatically.
+   - **Confident no** (story is infrastructure-only — CSS, Firestore rules, config, tests, schema): skip.
+   - **Uncertain** (story adds user-facing feature but unclear if it belongs in surface): ask via `AskUserQuestion` before deciding.
+4. For each gap found, append an integration story:
+   ```
+   Title: Wire <feature> into <surface-name>
+   Agent: quick-fixer
+   Model: haiku
+   Trivial: no
+   Files:
+     write: <surface owner file(s)>
+     read: <feature file(s)>
+   Plan: Register <feature> with <surface> so it appears in <surface-name>.
+   dependsOn: [<surface-story-id>, <feature-story-id>]
+   ```
+5. Dedup: if an existing open story already wires this pair, skip.
+
 ---
 
 ## Shared constraints

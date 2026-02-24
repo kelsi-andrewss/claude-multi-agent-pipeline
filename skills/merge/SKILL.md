@@ -3,20 +3,30 @@ name: merge
 description: >
   Merge one or more stories into their epic branch. Use when the user says
   "merge story-X", "merge story X and Y", or after diff gate passes.
-  Encodes ORCHESTRATION.md §12 exactly.
+  Encodes ORCHESTRATION.md §12 exactly. Supports optional --draft flag to
+  create the epic PR as a draft instead of a ready PR.
 args:
   - name: story_ids
     type: string
-    description: "Comma-separated story IDs to merge (e.g. story-042,story-043)."
+    description: "Comma-separated story IDs to merge (e.g. story-042,story-043). Optionally append --draft to create a draft epic PR."
 ---
 
 # Merge: {{story_ids}}
 
 Execute the merge-queue sequence per ORCHESTRATION.md §12.
 
+## Draft flag
+
+If `--draft` is present in `{{story_ids}}`:
+- Extract the story IDs (everything before `--draft`)
+- Pass `DRAFT_PR=true` context to the merge sequence
+- The epic PR will be created as a draft (`gh pr create --draft`)
+- Draft PRs are visible on GitHub but not merge-ready — useful for review before the epic is complete
+- When the user later says "merge epic X", the main session runs `gh pr ready <prNumber>` to convert draft → ready BEFORE running `gh pr merge --squash --delete-branch`
+
 ## Steps
 
-1. **Read** `.claude/epics.json`. Find each story in `{{story_ids}}`. Report any not found and stop.
+1. **Read** `.claude/epics.json`. Find each story in `{{story_ids}}` (strip `--draft` flag first). Report any not found and stop.
 
 2. **Verify state**: Each story must be in `running`, `testing`, `reviewing`, or `merging` state. If any are not, report and stop.
 

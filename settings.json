@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(/opt/homebrew/opt/claude-code-tracker/libexec/src/stop-hook.sh*)"
+      "Bash(/opt/homebrew/opt/claude-code-tracker/libexec/src/stop-hook.sh*)",
+      "Bash(/Users/kelsiandrews/.claude/hooks/context-check.sh*)",
+      "Bash(/Users/kelsiandrews/.claude/hooks/cost-alert.sh*)",
+      "Bash(/Users/kelsiandrews/.claude/hooks/guard-protected-files.sh*)"
     ]
   },
   "hooks": {
@@ -12,6 +15,11 @@
           {
             "type": "command",
             "command": "/Users/kelsiandrews/.claude/hooks/guard-direct-edit.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/Users/kelsiandrews/.claude/hooks/guard-protected-files.sh",
             "timeout": 5
           }
         ]
@@ -55,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Context check: if 3+ stories closed this session, prompt user to /clear before next story.'",
+            "command": "/Users/kelsiandrews/.claude/hooks/context-check.sh",
             "timeout": 5,
             "async": true
           }
@@ -69,6 +77,16 @@
             "type": "command",
             "command": "/opt/homebrew/opt/claude-code-tracker/libexec/src/stop-hook.sh",
             "timeout": 30,
+            "async": true
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/kelsiandrews/.claude/hooks/cost-alert.sh",
+            "timeout": 10,
             "async": true
           }
         ]

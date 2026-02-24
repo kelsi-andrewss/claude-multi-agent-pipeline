@@ -23,4 +23,4 @@ Chain them in sequence from the main session, each with `run_in_background: true
 
 **Correct behavior**: Use `gh pr merge --squash --delete-branch` — squash keeps history clean, delete-branch avoids manual remote branch cleanup.
 
-**Status**: Not yet fixed in ORCHESTRATION.md.
+**Status**: RESOLVED — ORCHESTRATION.md §13 already uses `--squash --delete-branch`. Fixed 2026-02-23.

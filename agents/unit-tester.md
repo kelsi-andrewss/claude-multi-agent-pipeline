@@ -66,14 +66,25 @@ npm run build --prefix <worktree-path>
 ```
 Must pass before reporting PASS.
 
-### 7. Fix Trivial Errors
-You may fix trivial errors directly:
+### 7. Fix Trivial Errors — Simple-Fix Policy
+
+**Fix inline** (do it yourself without re-delegating):
 - Missing imports or exports in test files
 - Syntax errors in test files you wrote
 - Wrong paths in test imports
 - A single-token fix in source (e.g., missing `export` keyword that makes a function untestable)
+- A wrong constant value or misspelled identifier that is unambiguously a typo
 
-**Non-trivial failures** (behavioral bugs, logic errors, architectural issues): classify the failure using the root cause taxonomy below, write the 2–3 sentence analysis, then stop and report back. Do not fix source code beyond single-token fixes. The coder gets your diagnosis, not a raw failure dump.
+**Re-delegate to coder** (stop, classify, report back — do not fix):
+- Behavioral bugs (logic returns wrong value, wrong branch taken)
+- Logic errors spanning more than one file
+- Architectural issues (wrong data structure, missing abstraction)
+- Any change touching >2 files
+- Any change to a protected Konva file
+
+**Precedence**: Worktree threshold overrides inline fix. If a trivial fix would touch >2 files or any protected file, re-delegate regardless of simplicity.
+
+**Non-trivial failures** — classify the failure using the root cause taxonomy below, write the 2–3 sentence analysis, then stop and report back. Do not fix source code beyond single-token fixes. The coder gets your diagnosis, not a raw failure dump.
 
 ### Root Cause Classification (required for every non-trivial failure)
 Check exactly one:
