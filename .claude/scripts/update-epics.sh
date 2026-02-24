@@ -77,9 +77,41 @@ else:
     print("ERROR: patch must contain storyId, epicId, or newStory", file=sys.stderr)
     sys.exit(1)
 
+def validate(data):
+    VALID_STATES = {'filling', 'queued', 'running', 'testing', 'reviewing', 'merging', 'closed', 'blocked'}
+    REQUIRED_STORY_FIELDS = {'id', 'epicId', 'title', 'state', 'branch', 'writeFiles', 'needsTesting', 'needsReview'}
+    epic_ids = {e['id'] for e in data['epics']}
+    story_ids = []
+    errors = []
+    for epic in data['epics']:
+        for story in epic.get('stories', []):
+            # check required fields
+            missing = REQUIRED_STORY_FIELDS - set(story.keys())
+            if missing:
+                errors.append(f"story {story.get('id','?')} missing fields: {missing}")
+            # check valid state
+            if story.get('state') not in VALID_STATES:
+                errors.append(f"story {story.get('id','?')} has invalid state: {story.get('state')}")
+            # check epicId exists
+            if story.get('epicId') not in epic_ids:
+                errors.append(f"story {story.get('id','?')} references non-existent epicId: {story.get('epicId')}")
+            # check duplicate IDs
+            sid = story.get('id')
+            if sid in story_ids:
+                errors.append(f"duplicate story id: {sid}")
+            else:
+                story_ids.append(sid)
+    return errors
+
 with open(tmp_path, 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\n')
+
+errors = validate(data)
+if errors:
+    for error in errors:
+        print(f"ERROR: {error}", file=sys.stderr)
+    sys.exit(1)
 PYEOF
 
 mv "$TMPFILE" "$EPICS_FILE"
