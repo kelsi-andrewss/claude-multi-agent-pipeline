@@ -11,8 +11,8 @@
           "id": "story-164",
           "epicId": "epic-022",
           "title": "Bootstrap pipeline directory structure and scripts",
-          "state": "filling",
-          "branch": null,
+          "state": "running",
+          "branch": "story/bootstrap-pipeline-scripts",
           "dependsOn": [],
           "writeFiles": [
             ".claude/epics.json",
