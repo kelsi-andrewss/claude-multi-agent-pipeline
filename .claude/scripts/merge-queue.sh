@@ -83,6 +83,14 @@ print(json.dumps(data))
 ")
   fi
 
+  # Update PR body with generated description (stories, files changed, commits)
+  if [ -n "$PR_NUMBER" ]; then
+    EPIC_BRANCH="epic/${EPIC_SLUG}"
+    PR_BODY=$(bash "${SCRIPTS_DIR}/generate-pr-body.sh" "$REPO_ROOT" "$EPIC_BRANCH" 2>/dev/null || echo "## Stories merged")
+    # Use printf to safely handle multiline content and avoid shell interpolation
+    gh pr edit "$PR_NUMBER" --body "$(printf '%s' "$PR_BODY")" 2>/dev/null || true
+  fi
+
   echo "MERGED:${STORY_BRANCH}:PR_NUMBER=${PR_NUMBER}"
 done
 
