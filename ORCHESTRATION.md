@@ -398,6 +398,7 @@ Launch order:
 - unit-tester (FAIL): uncapped — full output required for log + re-delegation
 
 **Coder prompt requirements** (every prompt must include):
+Start with the appropriate template from `.claude/prompts/quick-fixer.md` or `.claude/prompts/architect.md` and customize per story.
 - Todo descriptions — list every todo explicitly. The coder must confirm all are implemented before committing.
 - Write-target files (will be modified) and read-only context files (read but do not modify).
 - Edge cases extracted from codebase research. This is the highest-leverage way to reduce reviewer round-trips.
