@@ -19,11 +19,6 @@ telemetry/
 todos/
 backups/
 ide/
-plugins/
-
-# Junk/temp files
-tracking/test.*
-*.GrYsrJ
 
 # Sensitive / machine-specific
 *.local
