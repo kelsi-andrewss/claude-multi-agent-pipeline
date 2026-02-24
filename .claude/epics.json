@@ -1,0 +1,154 @@
+{
+  "epics": [
+    {
+      "id": "epic-022",
+      "title": "Pipeline self-hosting and capability expansion",
+      "branch": null,
+      "prNumber": null,
+      "persistent": true,
+      "stories": [
+        {
+          "id": "story-164",
+          "epicId": "epic-022",
+          "title": "Bootstrap pipeline directory structure and scripts",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": [],
+          "writeFiles": [
+            ".claude/epics.json",
+            ".claude/scripts/setup-story.sh",
+            ".claude/scripts/diff-gate.sh",
+            ".claude/scripts/merge-story.sh",
+            ".claude/scripts/merge-queue.sh",
+            ".claude/scripts/merge-epic.sh",
+            ".claude/scripts/update-epics.sh"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-165",
+          "epicId": "epic-022",
+          "title": "Automated PR description generation",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/scripts/generate-pr-body.sh",
+            ".claude/scripts/merge-queue.sh"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-166",
+          "epicId": "epic-022",
+          "title": "epics.json health check skill",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/skills/health/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-167",
+          "epicId": "epic-022",
+          "title": "Story dependency visualization skill",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/skills/deps/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-168",
+          "epicId": "epic-022",
+          "title": "Coder prompt templates",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/prompts/quick-fixer.md",
+            ".claude/prompts/architect.md",
+            "ORCHESTRATION.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-169",
+          "epicId": "epic-022",
+          "title": "Per-story time tracking hook",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/hooks/story-timer.sh",
+            ".claude/tracking/story-times.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-170",
+          "epicId": "epic-022",
+          "title": "reviewer-learnings promotion skill",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/skills/promote-learning/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-171",
+          "epicId": "epic-022",
+          "title": "epics.json schema validation in update-epics.sh",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/scripts/update-epics.sh"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-172",
+          "epicId": "epic-022",
+          "title": "Stale worktree cleanup skill",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/skills/cleanup/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        },
+        {
+          "id": "story-173",
+          "epicId": "epic-022",
+          "title": "/estimate skill for story cost estimation",
+          "state": "filling",
+          "branch": null,
+          "dependsOn": ["story-164"],
+          "writeFiles": [
+            ".claude/skills/estimate/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false
+        }
+      ]
+    }
+  ],
+  "backlog": []
+}
