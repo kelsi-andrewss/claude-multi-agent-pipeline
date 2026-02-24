@@ -178,6 +178,22 @@
           "needsReview": false,
           "agent": "quick-fixer",
           "model": "sonnet"
+        },
+        {
+          "id": "story-175",
+          "epicId": "epic-022",
+          "title": "Rewrite /roadmap and /ingest for natural-language format",
+          "state": "filling",
+          "branch": null,
+          "writeFiles": [
+            "skills/roadmap/SKILL.md",
+            "skills/ingest/SKILL.md",
+            "skills/roadmap-progress/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet"
         }
       ]
     }
