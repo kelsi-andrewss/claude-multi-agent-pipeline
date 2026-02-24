@@ -61,7 +61,7 @@
           "id": "story-167",
           "epicId": "epic-022",
           "title": "Story dependency visualization skill",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
