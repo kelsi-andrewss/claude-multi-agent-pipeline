@@ -14,7 +14,7 @@ Determine if it's safe to run `/clear` right now.
 
 1. **Check TaskList** for any tasks currently `in_progress`. If any: note which agents are running.
 
-2. **Read** `.claude/epics.json`. Find any stories in `running`, `testing`, `reviewing`, or `merging` state.
+2. **Read** `.claude/epics.json`. Find any stories in `in-progress`, `in-review`, or `approved` state.
 
 3. **Output decision**:
 

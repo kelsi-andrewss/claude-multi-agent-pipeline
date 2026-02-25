@@ -4,13 +4,24 @@ description: >
   Show per-epic story-state progress derived from roadmap files and epics.json.
   Use when the user says "/roadmap-progress", "show roadmap progress", or
   "how many stories are done per epic". Read-only — does not modify any files
-  or launch any agents.
+  or launch any agents. Supports flags: --stalled, --shipped, epic-ID drill-in.
+args:
+  - name: flags
+    type: string
+    description: "Optional: epic ID to drill into, --stalled (only stalled epics), --shipped (include shipped)"
 ---
 
 # Roadmap Progress Skill
 
 Read roadmap files from `.claude/roadmaps/` and cross-reference with
 `epics.json` to show story-state tallies per epic, grouped by roadmap file.
+
+## Flag modes
+
+- `/roadmap-progress` — summary + interactive menu
+- `/roadmap-progress epic-005` — drill into one epic
+- `/roadmap-progress --stalled` — only epics with draft/blocked stories
+- `/roadmap-progress --shipped` — include shipped epics
 
 ## Step 1 — Resolve project root
 
@@ -53,13 +64,35 @@ Record titles that have no match as **uningested**.
 For each matched epic, iterate its `stories` array and classify each story's
 `state` into one of three buckets:
 
-- `filling` bucket: states `filling`, `queued`
-- `in-progress` bucket: states `running`, `testing`, `reviewing`, `merging`, `blocked`
-- `closed` bucket: state `closed`
+- `draft` bucket: states `draft`, `ready`
+- `active` bucket: states `in-progress`, `in-review`, `approved`, `blocked`
+- `done` bucket: states `done`, `shipped`
 
 Compute `total` = sum of all three buckets.
 
 ## Step 6 — Render output
+
+### If drilling into a specific epic (`/roadmap-progress epic-005`)
+
+Show detailed view:
+
+```
+Epic: <title> (<epic-id>)  state: <epic-state>
+Source: .claude/roadmaps/<filename>.md
+
+Stories:
+  story-NNN  [in-progress]  <title>  architect  sonnet  (3/5 tasks)
+  story-NNN  [done]         <title>  quick-fixer  haiku
+  story-NNN  [in-progress]  Checklist: deploy  manual  (2/4 steps)
+  story-NNN  [blocked]      <title>  — blocked since <date if known>
+
+Actions: /run-story <id> | /defer <id> | /rescope <id>
+```
+
+For code stories with tasks: show task progress "(<done>/<total> tasks)".
+For manual stories: read checklist file, count `[x]` vs `[ ]`, show "(<done>/<total> steps)".
+
+### Default summary view
 
 For each roadmap file, print:
 
@@ -67,16 +100,20 @@ For each roadmap file, print:
 Roadmap: .claude/roadmaps/<filename>.md
 
   Epic: <title> (<epic-id>)
-    filling:     N  [░░░░░░░░░░]
-    in-progress: N  [██░░░░░░░░]
-    closed:      N  [████░░░░░░]
-    total:       N
+    draft:   N  [░░░░░░░░░░]
+    active:  N  [██░░░░░░░░]
+    done:    N  [████░░░░░░]
+    total:   N
 
   Epic: <uningested title> (uningested)
     Not yet loaded via /ingest.
 
-Roadmap total: N epics  |  N filling  |  N in-progress  |  N closed
+Roadmap total: N epics  |  N draft  |  N active  |  N done
 ```
+
+If `--stalled`: only show epics that have stories in `draft` or `blocked` state.
+
+If `--shipped`: include epics with state `shipped` (normally hidden).
 
 Progress bar rules:
 - Width is always 10 characters.
@@ -84,26 +121,42 @@ Progress bar rules:
 - If `total` is 0, all characters are `░`.
 
 ANSI color codes to apply (reset each with `\033[0m`):
-- `filling` label and bar: `\033[2m` (dim)
-- `in-progress` label and bar: `\033[32m` (green)
-- `closed` label and bar: `\033[34m` (blue)
+- `draft` label and bar: `\033[2m` (dim)
+- `active` label and bar: `\033[32m` (green)
+- `done` label and bar: `\033[34m` (blue)
 
 After printing all roadmaps, print a grand total line:
 ```
-All roadmaps: N epics  |  N filling  |  N in-progress  |  N closed
+All roadmaps: N epics  |  N draft  |  N active  |  N done
 ```
 
-If all matched epics across all roadmaps have zero stories outside the `closed`
-bucket (i.e., filling + in-progress = 0 and closed > 0), also print:
+If all matched epics across all roadmaps have zero stories outside the `done`
+bucket (i.e., draft + active = 0 and done > 0), also print:
 ```
-\033[32mAll ingested epics are closed.\033[0m
+\033[32mAll ingested epics are done.\033[0m
 ```
+
+### Interactive menu (after summary table)
+
+After the summary, print:
+```
+[1] Drill into an epic
+[2] Show stalled stories
+[3] Show backlog
+[4] Done
+```
+
+Ask via `AskUserQuestion`. On selection:
+- **1**: Ask which epic ID, then re-render as drill-in view.
+- **2**: Re-render with `--stalled` filter.
+- **3**: Show backlog stories from backlog epic.
+- **4**: Stop.
 
 ## Notes
 
 - Read-only. No file writes. No agent launches.
 - Stories present in `epics.json` but not sourced from any roadmap file are
-  not shown.
+  not shown (except in drill-in mode which reads directly from epics.json).
 - Uningested = title appears in a roadmap file but has no matching entry in
   `epics.json`.
 - Do NOT read ORCHESTRATION.md. Do NOT modify epics.json or any roadmap file.

@@ -7,6 +7,7 @@
       "Bash(/Users/kelsiandrews/.claude/hooks/guard-protected-files.sh*)"
     ]
   },
+  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -118,6 +119,5 @@
     "ralph-loop@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": false,
-  "skipDangerousModePermissionPrompt": true,
-  "model": "sonnet"
+  "skipDangerousModePermissionPrompt": true
 }

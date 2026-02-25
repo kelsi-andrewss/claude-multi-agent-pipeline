@@ -21,7 +21,7 @@ Your job is to initiate the full development pipeline. Do NOT implement the chan
 4. Spawn the `todo-orchestrator` agent (foreground, Haiku) with the condensed task description.
 5. Check the orchestrator's output type:
 
-   **A. STAGING_PAYLOAD** → The orchestrator writes the payload to `$TMPDIR/staging-<todo-slug>.json` and returns `STAGING_PAYLOAD written to $TMPDIR/staging-<todo-slug>.json`. Read that file, validate per ORCHESTRATION.md §6, immediately write the story to epics.json (via update-epics.sh or direct node command), create `TaskCreate` entries, and print the summary to the user. Wait for run trigger before launching any coder.
+   **A. STAGING_PAYLOAD** → The orchestrator writes the payload to `$TMPDIR/staging-<todo-slug>.json` and returns `STAGING_PAYLOAD written to $TMPDIR/staging-<todo-slug>.json`. Read that file, validate per ORCHESTRATION.md §6 (story state must be `draft`), immediately write the story to epics.json (via update-epics.sh or direct node command), create `TaskCreate` entries, and print the summary to the user. Wait for run trigger before launching any coder. Supports `--backlog` flag: if present, stage story directly to the backlog epic (no orchestrator needed), state `draft`.
 
    **B. DUPLICATE** → Inform the user which existing story covers this request. Stop.
 

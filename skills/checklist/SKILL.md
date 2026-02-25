@@ -2,14 +2,33 @@
 name: checklist
 description: >
   Run a manual checklist from .claude/checklists/, creating a pipeline story in
-  epics.json so progress is tracked cross-session. Use when the user says
-  "/checklist", "/checklist <name>", or "run checklist <name>".
+  epics.json so progress is tracked cross-session. Supports interactive walk-through
+  and direct actions via flags. Use when the user says "/checklist", "/checklist <name>",
+  "/checklist <name> status", "/checklist <name> mark <N>", etc.
+args:
+  - name: checklist_args
+    type: string
+    description: "Checklist name and optional action: status, mark <N>, unmark <N>, add \"<text>\", remove <N>, reorder <from> <to>, source"
 ---
 
 # Checklist Skill
 
-Walk through a manual checklist from the project's `.claude/checklists/` directory,
+Walk through or manage a manual checklist from the project's `.claude/checklists/` directory,
 tracking each step in `epics.json` as a story with `agent: "manual"`.
+
+## Flag actions
+
+| Command | Action |
+|---|---|
+| `/checklist <name>` | Walk interactively (default) |
+| `/checklist <name> status` | Numbered steps + progress bar |
+| `/checklist <name> mark <N>` | Mark step N done (or text substring match) |
+| `/checklist <name> unmark <N>` | Undo completed step |
+| `/checklist <name> add "<text>"` | Append step |
+| `/checklist <name> add "<text>" --after <N>` | Insert after step N |
+| `/checklist <name> remove <N>` | Remove step (confirm first) |
+| `/checklist <name> reorder <from> <to>` | Move step position |
+| `/checklist <name> source` | Show roadmap provenance |
 
 ## Step 1 — Resolve the project root and checklist file
 
@@ -20,24 +39,96 @@ tracking each step in `epics.json` as a story with `agent: "manual"`.
    - Print: `Available checklists:` followed by each filename stem, one per line.
    - Print: `Run /checklist <name> to start one.`
    - Stop.
-4. If args were given: match by exact filename stem first (args == stem), then
-   substring match (args appear anywhere in filename). If multiple matches, list them
-   and ask the user to pick. If zero matches, print `No checklist matching "<args>"
+4. If args were given: parse the first word as the checklist name, remaining words as action/flags.
+   Match name by exact filename stem first, then substring match. If multiple matches, list them
+   and ask the user to pick. If zero matches, print `No checklist matching "<name>"
    found in .claude/checklists/` and stop.
 
 ## Step 2 — Parse the checklist file
 
 1. Read the matched `.md` file.
-2. Find the `## Steps` heading. Extract all lines that start with `- [ ]` or `- [x]`
-   (in the order they appear).
-3. If no `## Steps` heading or no step lines found, print an error and stop.
-4. Count already-completed steps (lines matching `- [x]`).
+2. Check for a source comment: `<!-- source: ... | epic: ... | story: ... -->`. If present, record the provenance.
+3. Find the `## Steps` heading. Extract all lines that start with `- [ ]` or `- [x]`
+   (in the order they appear). Number them sequentially starting from 1.
+4. If no `## Steps` heading or no step lines found, print an error and stop.
+5. Count already-completed steps (lines matching `- [x]`).
 
-## Step 3 — Resolve or create the story in epics.json
+## Step 3 — Route by action
+
+### Action: `status`
+
+Print:
+```
+Checklist: <name> (story-NNN, epic-NNN)
+Source: <provenance path or "none">
+
+  1. [x] <step text>
+  2. [x] <step text>
+  3. [ ] <step text>
+  4. [ ] <step text>
+
+Progress: [████████░░░░░░░░░░░░] 2/4 (50%)
+
+Actions: /checklist <name> mark 3 | /checklist <name> add "..."
+```
+
+Progress bar: 20 chars wide. Filled = `floor(done/total * 20)`. Remainder = `░`.
+
+Stop after printing.
+
+### Action: `mark <N>`
+
+1. Find step N (by number) or by text substring match.
+2. If already `[x]`, print "Step N is already complete." and stop.
+3. Edit the checklist file: replace `- [ ] <step text>` with `- [x] <step text>`.
+4. Print: `[x] Step N marked complete.`
+5. Check if all steps are now `[x]`. If so, close the story (see Step 6).
+
+### Action: `unmark <N>`
+
+1. Find step N by number.
+2. If already `[ ]`, print "Step N is not yet complete." and stop.
+3. Edit the checklist file: replace `- [x] <step text>` with `- [ ] <step text>`.
+4. If story was `done`, set it back to `in-progress` via `update-epics.sh`.
+5. Print: `[ ] Step N unmarked.`
+
+### Action: `add "<text>"` (with optional `--after <N>`)
+
+1. If `--after <N>` is present: insert `- [ ] <text>` after step N in the file.
+2. Otherwise: append `- [ ] <text>` at the end of the steps section.
+3. Print: `Added step: <text>`
+
+### Action: `remove <N>`
+
+1. Ask confirmation: `Remove step N: "<text>"? (yes/no)`.
+2. On yes: remove the line from the checklist file.
+3. Print: `Removed step N.`
+
+### Action: `reorder <from> <to>`
+
+1. Remove step at position `<from>`.
+2. Insert it at position `<to>`.
+3. Print the updated numbered list.
+
+### Action: `source`
+
+Print the source comment contents if present:
+```
+Source: .claude/roadmaps/auth-system.md
+Epic: epic-005
+Story: story-042
+```
+If no source comment, print "No source provenance recorded."
+
+### Default (no action): interactive walk-through
+
+Proceed to Step 4 (resolve/create story) then Step 5 (walk interactively).
+
+## Step 4 — Resolve or create the story in epics.json
 
 1. Read `<project-root>/.claude/epics.json`.
 2. Look for an existing story whose `title` is exactly `"Checklist: <stem>"` and
-   whose `state` is not `"closed"`. If found, resume that story (skip to Step 5).
+   whose `state` is not `"done"` or `"shipped"`. If found, resume that story (skip to Step 5).
 3. If not found, create the story:
    a. Find or create the Operations epic:
       - Look for an epic titled `"Manual Operations"` in `epics.json`. Use it if found.
@@ -49,7 +140,8 @@ tracking each step in `epics.json` as a story with `agent: "manual"`.
           "title": "Manual Operations",
           "branch": null,
           "prNumber": null,
-          "persistent": true
+          "persistent": true,
+          "state": "active"
         }
         ```
    b. Assign a new story ID (increment from the highest existing `story-NNN` number).
@@ -59,7 +151,7 @@ tracking each step in `epics.json` as a story with `agent: "manual"`.
         "id": "story-NNN",
         "epicId": "<operations-epic-id>",
         "title": "Checklist: <stem>",
-        "state": "running",
+        "state": "in-progress",
         "branch": null,
         "writeFiles": [".claude/checklists/<filename>"],
         "needsTesting": false,
@@ -72,25 +164,8 @@ tracking each step in `epics.json` as a story with `agent: "manual"`.
       ```
       bash <project-root>/.claude/scripts/update-epics.sh '<project-root>' '<json-patch>'
       ```
-      If `update-epics.sh` does not exist, write directly using a one-line node command:
-      ```bash
-      node -e "
-        const fs = require('fs');
-        const path = '<project-root>/.claude/epics.json';
-        const data = JSON.parse(fs.readFileSync(path, 'utf8'));
-        // add epic if new
-        // add story
-        fs.writeFileSync(path, JSON.stringify(data, null, 2));
-      "
-      ```
-      Construct the node command inline with the actual values substituted.
+      If `update-epics.sh` does not exist, write directly using a one-line node command.
    e. Print: `Story <story-id> created under "<operations-epic-title>" epic.`
-
-## Step 4 — Create TaskCreate entries for uncompleted steps
-
-For each `- [ ]` step (not yet completed), call `TaskCreate` with:
-- `title`: the step text (stripped of `- [ ] ` prefix)
-- `description`: `Checklist: <stem> — step N of M`
 
 ## Step 5 — Walk through steps interactively
 
@@ -112,22 +187,22 @@ For each `- [ ]` step in order (skip `- [x]` steps silently):
      - Stop immediately. Leave the checklist file and story state as-is.
      - Print:
        ```
-       Checklist paused. Story <story-id> is still running.
+       Checklist paused. Story <story-id> is still in-progress.
        Resume with: /checklist <stem>
        ```
      - Stop.
 
-## Step 6 — After all steps are walked through
+## Step 6 — After all steps are walked through (or all marked via flags)
 
 1. Re-read the checklist file. Count `- [x]` and `- [ ]` lines.
 2. **All steps complete** (zero `- [ ]` remaining):
-   - Set story state to `closed` in `epics.json` (via `update-epics.sh` or direct node write).
-   - Print: `Checklist complete. Story <story-id> closed.`
+   - Set story state to `done` in `epics.json` (via `update-epics.sh` or direct node write).
+   - Print: `Checklist complete. Story <story-id> done.`
 3. **Some steps skipped** (one or more `- [ ]` remaining):
-   - Set story state to `closed` in `epics.json`.
+   - Set story state to `done` in `epics.json`.
    - Print:
      ```
-     Checklist finished with skipped steps. Story <story-id> closed.
+     Checklist finished with skipped steps. Story <story-id> done.
      Skipped:
        - <step text>
        ...
@@ -148,6 +223,7 @@ For each `- [ ]` step in order (skip `- [x]` steps silently):
 ## Checklist file format (reference)
 
 ```markdown
+<!-- source: .claude/roadmaps/auth-system.md | epic: epic-005 | story: story-042 -->
 # Deploy to Production
 
 ## Steps

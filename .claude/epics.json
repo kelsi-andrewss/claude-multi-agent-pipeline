@@ -11,7 +11,7 @@
           "id": "story-164",
           "epicId": "epic-022",
           "title": "Bootstrap pipeline directory structure and scripts",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [],
           "writeFiles": [
@@ -30,7 +30,7 @@
           "id": "story-165",
           "epicId": "epic-022",
           "title": "Automated PR description generation",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -46,7 +46,7 @@
           "id": "story-166",
           "epicId": "epic-022",
           "title": "epics.json health check skill",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -61,7 +61,7 @@
           "id": "story-167",
           "epicId": "epic-022",
           "title": "Story dependency visualization skill",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -76,7 +76,7 @@
           "id": "story-168",
           "epicId": "epic-022",
           "title": "Coder prompt templates",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -93,7 +93,7 @@
           "id": "story-169",
           "epicId": "epic-022",
           "title": "Per-story time tracking hook",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -109,7 +109,7 @@
           "id": "story-170",
           "epicId": "epic-022",
           "title": "reviewer-learnings promotion skill",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -124,7 +124,7 @@
           "id": "story-171",
           "epicId": "epic-022",
           "title": "epics.json schema validation in update-epics.sh",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -139,7 +139,7 @@
           "id": "story-172",
           "epicId": "epic-022",
           "title": "Stale worktree cleanup skill",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -154,7 +154,7 @@
           "id": "story-173",
           "epicId": "epic-022",
           "title": "/estimate skill for story cost estimation",
-          "state": "filling",
+          "state": "closed",
           "branch": null,
           "dependsOn": [
             "story-164"
@@ -280,6 +280,70 @@
           "needsReview": false,
           "agent": "quick-fixer",
           "model": "sonnet"
+        },
+        {
+          "id": "story-182",
+          "epicId": "epic-022",
+          "title": "Sparse-checkout worktrees with sparseOk flag",
+          "state": "closed",
+          "branch": "story/sparse-checkout-worktrees",
+          "writeFiles": [
+            "ORCHESTRATION.md",
+            "scripts/setup-story.sh"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "architect",
+          "model": "sonnet",
+          "dependsOn": [
+            "story-164"
+          ]
+        },
+        {
+          "id": "story-183",
+          "epicId": "epic-022",
+          "title": "/audit skill — codebase audit via Opus agent",
+          "state": "closed",
+          "branch": "story/audit-skill",
+          "dependsOn": [],
+          "writeFiles": [
+            "skills/audit/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet"
+        },
+        {
+          "id": "story-184",
+          "epicId": "epic-022",
+          "title": "/quick skill — bypass pipeline for small iterative changes",
+          "state": "closed",
+          "branch": "story/quick-skill",
+          "dependsOn": [],
+          "writeFiles": [
+            "skills/quick/SKILL.md",
+            "ORCHESTRATION.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "architect",
+          "model": "sonnet"
+        },
+        {
+          "id": "story-185",
+          "epicId": "epic-022",
+          "title": "Enhance --update: global stale-state migration and spec refresh",
+          "state": "draft",
+          "branch": null,
+          "writeFiles": [
+            "skills/ingest/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet",
+          "dependsOn": []
         }
       ]
     }

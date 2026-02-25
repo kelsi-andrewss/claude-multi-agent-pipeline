@@ -25,7 +25,8 @@ SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
 touch "/tmp/orch-read-${SESSION_ID}"
 
 # Stale story check: warn if any story has been in a running-like state for >24h.
-# "Running-like" = running, testing, reviewing, merging (anything not filling/queued/closed).
+# "Running-like" = in-progress, in-review, approved (anything not draft/ready/done/shipped).
+# Also matches old state names for backward compat.
 # Uses the story branch's last git commit time as a proxy for last activity.
 EPICS_FILES=$(find /Users/kelsiandrews/projects /Users/kelsiandrews/gauntlet /Users/kelsiandrews/.claude \
   -maxdepth 6 -name "epics.json" -path "*/.claude/epics.json" 2>/dev/null)
@@ -35,7 +36,7 @@ python3 - "$EPICS_FILES" <<'PYEOF'
 import json, subprocess, sys, time
 
 STALE_SECONDS = 86400  # 24 hours
-RUNNING_STATES = {"running", "testing", "reviewing", "merging"}
+RUNNING_STATES = {"in-progress", "in-review", "approved", "running", "testing", "reviewing", "merging"}
 now = time.time()
 stale = []
 

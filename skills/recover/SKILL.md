@@ -14,7 +14,7 @@ Execute recovery check per ORCHESTRATION.md §15.
 
 ## Steps
 
-1. **Read** `.claude/epics.json`. Find all stories with state `running`, `testing`, `reviewing`, or `merging`.
+1. **Read** `.claude/epics.json`. Find all stories with state `in-progress`, `in-review`, or `approved` (also check legacy names `running`, `testing`, `reviewing`, `merging` for backward compat).
 
 2. If none found: output "No in-flight stories found. Nothing to recover." and stop.
 
@@ -33,7 +33,7 @@ Execute recovery check per ORCHESTRATION.md §15.
 
 5. **Ask the user** for each story: "Resume or discard?"
    - **Resume**: proceed as normal — launch pending coder tasks or continue from current pipeline step.
-   - **Discard**: run `git worktree remove --force <path>` and reset story state to `filling` via `update-epics.sh`.
+   - **Discard**: run `git worktree remove --force <path>` and reset story state to `draft` via `update-epics.sh`.
 
 6. After all decisions resolved, output:
    > "Context checkpoint reached (session recovery). Run `/clear` to start fresh. All epic and story state is saved in epics.json."
@@ -57,7 +57,7 @@ Story <id> has uncommitted coder changes with no completed checkpoint.
 
 - Option (a): run `git -C <worktree> checkout -- .` to discard, then re-launch coder agent with original prompt.
 - Option (b): run diff-gate directly. If it passes, continue normal pipeline. If it fails, fall back to option (a).
-- Option (c): run `git -C <worktree> checkout -- .` and set story state to `filling` via `update-epics.sh`.
+- Option (c): run `git -C <worktree> checkout -- .` and set story state to `draft` via `update-epics.sh`.
 
 ---
 
@@ -66,13 +66,13 @@ Story <id> has uncommitted coder changes with no completed checkpoint.
 Detected when: merge-queue.sh exited non-zero AND at least one `MERGED:` line appears before the failure in the output.
 
 1. Parse merge-queue.sh output to identify which stories merged successfully (have `MERGED:` lines) vs which failed.
-2. Mark successfully merged stories as `closed` via `update-epics.sh`.
+2. Mark successfully merged stories as `done` via `update-epics.sh`.
 3. Report to user:
    ```
    Partial merge completed:
      Merged: <story-branch> (story-X)
      Failed: <story-branch> (story-Y) — <error reason>
    ```
-4. Offer: "Re-run merge for failed stories only" or "Discard and reset failed stories to running state."
+4. Offer: "Re-run merge for failed stories only" or "Discard and reset failed stories to in-progress state."
    - Re-run: construct a new JSON manifest with only the failed stories and re-launch merge-queue.sh.
-   - Discard: set failed story state to `running` via `update-epics.sh`. Leave worktree intact for investigation.
+   - Discard: set failed story state to `in-progress` via `update-epics.sh`. Leave worktree intact for investigation.

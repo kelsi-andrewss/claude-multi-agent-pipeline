@@ -19,7 +19,9 @@ Read both files in parallel before acting:
 ## Constraints (apply after reading)
 
 - **Zero-skip rule**: code-changing requests go through story → worktree → coder (background). No inline edits.
-- **Route decision**: orchestrator (code-change or "todo:") vs direct coder (files + root cause known, no new story) vs bypass (Q&A, git ops, research).
+- **Lightweight path routing**: If a code-changing request qualifies for `/hotfix` (single file, ≤30 lines, known cause, not protected) or `/quickfix` (1-3 files, known cause, not protected), suggest the lighter path. Don't default to `/todo` for everything.
+- **Route decision**: orchestrator (code-change or "todo:") vs direct coder (files + root cause known, no new story) vs bypass (Q&A, git ops, research) vs `/hotfix` or `/quickfix` (small known-cause fixes).
 - **No pre-reading before delegation**: set up pipeline, then launch coder.
-- **Protected files**: check for Konva/testable file overlap before proceeding.
+- **Protected files**: check `<project>/.claude/protected-files.md` (or fallback Konva list) for overlap before proceeding.
 - **Workflow answers**: answer only from ORCHESTRATION.md — never from general knowledge.
+- **Staleness check**: If `<project>/.claude/project-orchestration.md` exists, check ref hashes once per session. Surface warning if stale: "Project orchestration refs are stale. Run `/refine --refresh`."

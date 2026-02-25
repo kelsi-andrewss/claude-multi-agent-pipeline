@@ -49,6 +49,15 @@ if [[ "$FILE_PATH" == /tmp/* || "$FILE_PATH" == "$TMPDIR"* ]]; then
   exit 0
 fi
 
+# Allow edits during active /hotfix — sentinel contains allowed file path
+HOTFIX_SENTINEL="/tmp/hotfix-active-${PPID:-$$}"
+if [[ -f "$HOTFIX_SENTINEL" ]]; then
+  ALLOWED_FILE=$(cat "$HOTFIX_SENTINEL")
+  if [[ "$FILE_PATH" == *"$ALLOWED_FILE"* || "$ALLOWED_FILE" == *"$FILE_PATH"* ]]; then
+    exit 0
+  fi
+fi
+
 # Enhanced check: look up the active story's writeFiles in epics.json.
 # If a running story exists, check whether this file is in scope.
 EPICS_JSON=$(find /Users/kelsiandrews -maxdepth 5 -name "epics.json" -path "*/.claude/epics.json" 2>/dev/null | head -1)
@@ -68,7 +77,7 @@ except:
     sys.exit(0)
 
 stories = data.get('stories', [])
-running_stories = [s for s in stories if s.get('state') in ('running', 'testing', 'reviewing', 'merging')]
+running_stories = [s for s in stories if s.get('state') in ('in-progress', 'in-review', 'approved', 'running', 'testing', 'reviewing', 'merging')]
 
 if not running_stories:
     # No story running — use legacy block behavior

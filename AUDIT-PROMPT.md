@@ -1,22 +1,22 @@
-Let's perform a comprehensive code audit and generate a detailed report for this early submission of the ColabBoard project. Use the attached PDF file containing the requirements as the source of truth for evaluating completeness and adherence to specifications.
+Perform a comprehensive code audit and generate a detailed report. Use any provided requirements document as the source of truth for evaluating completeness and adherence to specifications.
 
 Focus on the following key areas:
-- **Code Smells and Quality Check**: Identify code smells, anti-patterns, and opportunities for improving code quality, readability, maintainability, and performance. Ensure the code follows SOLID principles (Single Responsibility, Open-Closed, Liskov Substitution, Interface Segregation, Dependency Inversion) and promotes modular design.
-- **Bug Audit**: Thoroughly review the entire codebase for bugs, vulnerabilities, edge cases, logical errors, runtime issues, and potential security risks. Test for common issues like null pointer exceptions, off-by-one errors, improper error handling, resource leaks, and concurrency problems if applicable.
-- **Completeness Check**: Cross-reference the code against the PDF requirements to flag any missing features, incomplete implementations, or deviations.
+- **Code Quality**: Identify code smells, anti-patterns, and opportunities for improving readability, maintainability, and performance. Look for SOLID principle violations, unnecessary complexity, and poor separation of concerns.
+- **Bug Audit**: Review the codebase for bugs, edge cases, logical errors, runtime issues, and potential security risks. Common targets: null dereferences, off-by-one errors, improper error handling, resource leaks, race conditions, injection vulnerabilities.
+- **Completeness**: If a requirements document is provided, cross-reference the code against it and flag missing features, incomplete implementations, or deviations.
 
-For each issue identified (bug, code smell, or quality concern):
-- Assign a priority level: High (critical, affects functionality or security), Medium (important but non-blocking), Low (minor improvements).
-- Describe the issue clearly, including the file name, line numbers, and relevant code snippets.
-- Suggest mitigations or fixes, providing enough detail (e.g., pseudocode or exact code changes) so a developer or AI can implement the fix quickly (ideally in under 30 minutes).
-- If applicable, recommend refactoring steps to align with modular and SOLID methodologies.
+For each issue identified:
+- Assign a priority level: High (critical — affects functionality or security), Medium (important but non-blocking), Low (minor improvement).
+- Describe the issue clearly, including file name, line numbers, and relevant code snippets.
+- Suggest a mitigation or fix with enough detail (pseudocode or exact code) that a developer can implement it in under 30 minutes.
+- If applicable, recommend refactoring steps toward cleaner design.
 
-Structure the report as a Markdown file (AUDIT.md) with sections like:
+Structure the report as a Markdown file (AUDIT.md) with the following sections:
 - Executive Summary
-- Completeness Against Requirements
+- Completeness Against Requirements (omit if no requirements document)
 - Code Quality and Smells
 - Identified Bugs and Fixes
 - Recommendations for Improvements
-- Overall Score or Rating (e.g., on a scale of 1-10)
+- Overall Score (1–10 scale with brief rationale)
 
-Review the entire codebase systematically, file by file, and include any assumptions or limitations in the report.
+Review all target files systematically and include any assumptions or scope limitations in the report.

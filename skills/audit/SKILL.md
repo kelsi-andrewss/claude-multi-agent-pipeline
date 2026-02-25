@@ -85,7 +85,7 @@ Read `.claude/epics.json`. Build a map:
 ```
 open_story_map = { story_id: { title, writeFiles[] } }
 ```
-Include only stories where `state` is NOT `closed`. This is used in step 8.
+Include only stories where `state` is NOT `done`. This is used in step 8.
 
 ### 6. Build the audit prompt
 

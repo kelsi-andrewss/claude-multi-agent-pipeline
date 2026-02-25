@@ -3,7 +3,9 @@ name: ingest
 description: >
   Load a roadmap file into epics.json, routing code stories through the epic-planner
   and creating manual checklist stories directly. Use when the user says "/ingest",
-  "/ingest <path>", or "ingest roadmap", or "/ingest --manual-only" to extract and write only manual checklist steps without launching epic-planners.
+  "/ingest <path>", or "ingest roadmap", or "/ingest --manual-only" to extract and write
+  only manual checklist steps without launching epic-planners.
+  Supports "/ingest --update <path>" to diff an existing roadmap against epics.json.
 ---
 
 # Ingest Skill
@@ -11,6 +13,18 @@ description: >
 Read a structured roadmap markdown file (produced by `/roadmap` or hand-written) and
 load it into `epics.json`. Code stories go through the epic-planner for decomposition;
 manual steps become checklist stories directly.
+
+## Flag — --update
+
+If `/ingest` is called with `--update <path>`:
+
+1. Parse the roadmap at `<path>`.
+2. Find matching epics in `epics.json` by title.
+3. Diff:
+   - New stories in roadmap not in epics.json → offer to add as `draft`.
+   - Stories in epics.json not in roadmap → offer to archive (move to backlog).
+   - Changed sub-bullets → offer to update story tasks.
+4. Present diff to user. On approval, write changes via `update-epics.sh`.
 
 ## Flag — --manual-only
 
@@ -92,7 +106,7 @@ If parsing produces zero epics, print `No epics found in roadmap. Check the file
 Read `<project-root>/.claude/epics.json`.
 
 For each parsed epic title, check (case-insensitive) whether an epic with the same
-title already exists in `epics.json` and is NOT in `closed` state.
+title already exists in `epics.json` and is NOT in `done` or `shipped` state.
 
 If a match is found, print:
 ```
@@ -139,7 +153,7 @@ For each epic that has `manualSteps`:
      "id": "story-NNN",
      "epicId": "<assigned-epic-id>",
      "title": "Checklist: <epic-slug>",
-     "state": "filling",
+     "state": "draft",
      "branch": null,
      "writeFiles": [".claude/checklists/<epic-slug>.md"],
      "needsTesting": false,
@@ -193,7 +207,7 @@ For each planner output file at `$TMPDIR/epic-plan-<epic-slug>.md`:
 2. Validate the STAGING_PAYLOAD JSON against ORCHESTRATION.md §6 schema:
    - Each story has: `id`, `epicId`, `title`, `state`, `branch`, `writeFiles`, `needsTesting`, `needsReview`
    - `writeFiles` is non-empty
-   - `state` is `"filling"`
+   - `state` is `"draft"`
 3. Collect validation errors. If any: print the error and mark this epic as failed.
 
 If any epic failed validation, print:
@@ -262,7 +276,7 @@ On approval:
 4. Print:
    ```
    Ingested <N> epics, <M> code stories, <K> manual steps.
-   All stories in filling state. Use /run-story to start work.
+   All stories in draft state. Use /run-story to start work.
    ```
    If checklist files were created:
    ```
@@ -273,10 +287,18 @@ On approval:
 
 ## Notes
 
-- All ingested stories land in `filling` state. No coders auto-launch.
+- All ingested stories land in `draft` state. No coders auto-launch.
 - The `/run-story` skill controls when automated stories execute.
 - The `/checklist` skill controls when manual steps are walked through.
 - Checklist files are written whether or not the user runs `/checklist` immediately.
+- **Source comment**: When writing checklist files (Step 5), prepend a source comment:
+  `<!-- source: .claude/roadmaps/<slug>.md | epic: <epic-id> | story: <story-id> -->`
+- **Sub-bullets → tasks**: When parsing new-format roadmaps, code story sub-bullets become
+  `tasks` array entries with state `todo`. Example: a story "Add login endpoint" with
+  sub-bullets becomes `{"title": "Add login endpoint", "tasks": [{"id":"t1","title":"Implement POST /auth/login","state":"todo"}, ...]}`.
+- **--update mode**: Diffs a roadmap against existing epics.json entries. New stories are offered
+  for addition. Missing stories are offered for archival to backlog. Changed sub-bullets are
+  offered as task updates.
 - Epic-planners may propose integration stories (per ORCHESTRATION.md §19.2). These appear
   in the consolidated summary under "Integration stories" and are staged like any other story.
 - If a planner stalls (no output after 6 minutes), surface the error and ask the user
