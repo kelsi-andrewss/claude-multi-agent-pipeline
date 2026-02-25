@@ -281,6 +281,9 @@ On approval:
   in the consolidated summary under "Integration stories" and are staged like any other story.
 - If a planner stalls (no output after 6 minutes), surface the error and ask the user
   whether to retry just that epic or abort the entire ingest.
+- Do NOT delete, move, or rename the roadmap file after ingestion. It must remain on
+  disk exactly where it was found. This applies to both the auto-discovered file from
+  `.claude/roadmaps/` and any path passed as an argument.
 
 ## Roadmap file format (reference)
 

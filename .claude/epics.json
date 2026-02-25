@@ -209,6 +209,77 @@
           "needsReview": false,
           "agent": "quick-fixer",
           "model": "sonnet"
+        },
+        {
+          "id": "story-177",
+          "epicId": "epic-022",
+          "title": "Add merge-epic skill and update merge skill description",
+          "state": "closed",
+          "branch": "story/merge-epic-skill-update",
+          "writeFiles": [
+            "skills/merge-epic/SKILL.md",
+            "skills/merge/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet"
+        },
+        {
+          "id": "story-178",
+          "epicId": "epic-022",
+          "title": "Add --manual-only flag to /ingest skill",
+          "state": "closed",
+          "branch": "story/ingest-manual-only-flag",
+          "writeFiles": [
+            "skills/ingest/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet"
+        },
+        {
+          "id": "story-179",
+          "epicId": "epic-022",
+          "title": "Clean up $TMPDIR staging/plan/planning files after story merge",
+          "state": "closed",
+          "branch": "story/tmpdir-cleanup-on-merge",
+          "writeFiles": [
+            "skills/merge/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet"
+        },
+        {
+          "id": "story-180",
+          "epicId": "epic-022",
+          "title": "Tighten Opus escalation rules in ORCHESTRATION.md",
+          "state": "closed",
+          "branch": "story/tighten-opus-escalation",
+          "writeFiles": [
+            "ORCHESTRATION.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet"
+        },
+        {
+          "id": "story-181",
+          "epicId": "epic-022",
+          "title": "Preserve roadmap file after /ingest completes",
+          "state": "closed",
+          "branch": null,
+          "writeFiles": [
+            "skills/ingest/SKILL.md"
+          ],
+          "needsTesting": false,
+          "needsReview": false,
+          "agent": "quick-fixer",
+          "model": "sonnet"
         }
       ]
     }

@@ -115,7 +115,7 @@ Todos are **session-scoped** -- tracked via Claude's built-in task tools during 
 ```
 orchestrator  -> Haiku  (bump to Sonnet/Opus if architecturally complex)
 epic-planner  -> Sonnet (default) | Opus (high complexity, AI/schema, >10 files)
-quick-fixer   -> Haiku (trivial) | Sonnet (standard) | Opus (escalation)
+quick-fixer   -> Haiku (trivial) | Sonnet (standard) | Opus (escalation, architect stories only)
 architect     -> Sonnet (standard) | Opus (high-risk, escalation)
 reviewer      -> Haiku  (Sonnet only if coder was Opus)
 unit-tester   -> Haiku  always
@@ -783,6 +783,7 @@ reviewer retries == 2
        |
        v
 Escalate coder to Opus (one more attempt)
+  [only for architect stories -- see constraint below]
        |
        +-- PASS -> proceed to merge
        +-- Still BLOCKING -> story.state = "blocked"
@@ -790,6 +791,8 @@ Escalate coder to Opus (one more attempt)
                             Leave worktree intact
                             Wait for user intervention
 ```
+
+**Opus escalation constraint**: Opus escalation only applies to architect stories. CSS-only stories and skill-file-only stories are never escalated to Opus regardless of how many reviewer round-trips occur.
 
 ---
 
