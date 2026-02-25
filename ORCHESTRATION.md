@@ -20,6 +20,27 @@ These rules apply to the main Claude Code session only. Spawned agents (coders, 
 
 ---
 
+## §quickfix — Quick bypass path
+
+The `/quick` skill is the ONLY authorized exception to the ZERO-SKIP RULE. It applies ONLY when ALL five conditions are met:
+1. The change is described in one sentence
+2. ≤4 files are touched
+3. No protected Konva files are modified
+4. No Firestore schema changes
+5. The skill is invoked explicitly via `/quick`
+
+**How it works**: Edits happen directly in the main worktree on a persistent `quickfix` branch. No worktree is created. Each change is recorded as a story in `epic-quickfix` (state: `closed` immediately on commit). The epic is never auto-closed by the pipeline.
+
+**Merge**: `/quick --merge` cherry-picks each story's commit onto main in story order (preserving per-story messages), then deletes the quickfix branch and resets the epic-quickfix stories list.
+
+**Safety rails — never waived**:
+- Protected Konva files are always blocked
+- Firestore schema changes are always blocked
+- Hard stop at 5+ files — use `/todo` instead
+- Commit message format is always enforced
+
+---
+
 ## 2. AGENT ROLES
 
 **todo-orchestrator** — pure research and classification. Permitted actions: Glob, Grep, Read, read epics.json, return staging payload. MUST NEVER: run tests, edit/write source files, run builds, commit, push, or open PRs.
@@ -274,6 +295,8 @@ Each story entry:
 
 `agent` and `model` are optional fields set at staging time. Existing stories without these fields are valid — display them without agent/model columns.
 
+`sparseOk` (optional boolean, default false): When true AND agent is `quick-fixer`, `setup-story.sh` creates a sparse-checkout worktree scoped to `writeFiles` + `readFiles` only. Never set on architect stories — they always get full checkout. Saves disk space for large repos with narrow write targets.
+
 **Special agent value — `"manual"`**: Used by the `/checklist` skill for human-executed stories. Manual stories have no worktree, no branch, and no coder. They go straight to `running` and are closed by the checklist skill after all steps complete. They skip all diff-gate, reviewer, and unit-tester pipeline steps.
 
 **Valid story state transitions**:
@@ -357,6 +380,7 @@ Coders only launch when you explicitly say "run story-X" (or "run all open stori
    Report exit code and full stdout/stderr. Do not edit any files.
    ```
    Wait for git-ops to complete before launching coders. If it exits non-zero, report error to user and stop.
+   If the story has `sparseOk: true` and `agent: "quick-fixer"`, setup-story.sh will create a sparse-checkout worktree. Architect stories always receive a full checkout regardless of `sparseOk`.
 7. Launch coder tasks in BACKGROUND; track status via `TaskUpdate`.
 7. Update story `state` to `running` in `epics.json`.
 
@@ -407,7 +431,7 @@ Launch order:
 - unit-tester (PASS): 1 line — "tests passed: <N> tests"
 - unit-tester (FAIL): uncapped — full output required for log + re-delegation
 
-**Coder prompt requirements** (every prompt must include):
+**Coder prompt requirements** (every prompt must include): Template files available at `.claude/prompts/quick-fixer.md` and `.claude/prompts/architect.md`.
 - Todo descriptions — list every todo explicitly. The coder must confirm all are implemented before committing.
 - Write-target files (will be modified) and read-only context files (read but do not modify).
 - Edge cases extracted from codebase research. This is the highest-leverage way to reduce reviewer round-trips.
