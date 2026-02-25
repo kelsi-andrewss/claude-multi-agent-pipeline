@@ -20,6 +20,27 @@ These rules apply to the main Claude Code session only. Spawned agents (coders, 
 
 ---
 
+## §quickfix — Quick bypass path
+
+The `/quick` skill is the ONLY authorized exception to the ZERO-SKIP RULE. It applies ONLY when ALL five conditions are met:
+1. The change is described in one sentence
+2. ≤4 files are touched
+3. No protected Konva files are modified
+4. No Firestore schema changes
+5. The skill is invoked explicitly via `/quick`
+
+**How it works**: Edits happen directly in the main worktree on a persistent `quickfix` branch. No worktree is created. Each change is recorded as a story in `epic-quickfix` (state: `closed` immediately on commit). The epic is never auto-closed by the pipeline.
+
+**Merge**: `/quick --merge` cherry-picks each story's commit onto main in story order (preserving per-story messages), then deletes the quickfix branch and resets the epic-quickfix stories list.
+
+**Safety rails — never waived**:
+- Protected Konva files are always blocked
+- Firestore schema changes are always blocked
+- Hard stop at 5+ files — use `/todo` instead
+- Commit message format is always enforced
+
+---
+
 ## 2. AGENT ROLES
 
 **todo-orchestrator** — pure research and classification. Permitted actions: Glob, Grep, Read, read epics.json, return staging payload. MUST NEVER: run tests, edit/write source files, run builds, commit, push, or open PRs.
