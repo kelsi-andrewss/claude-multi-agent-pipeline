@@ -274,6 +274,8 @@ Each story entry:
 
 `agent` and `model` are optional fields set at staging time. Existing stories without these fields are valid — display them without agent/model columns.
 
+`sparseOk` (optional boolean, default false): When true AND agent is `quick-fixer`, `setup-story.sh` creates a sparse-checkout worktree scoped to `writeFiles` + `readFiles` only. Never set on architect stories — they always get full checkout. Saves disk space for large repos with narrow write targets.
+
 **Special agent value — `"manual"`**: Used by the `/checklist` skill for human-executed stories. Manual stories have no worktree, no branch, and no coder. They go straight to `running` and are closed by the checklist skill after all steps complete. They skip all diff-gate, reviewer, and unit-tester pipeline steps.
 
 **Valid story state transitions**:
@@ -357,6 +359,7 @@ Coders only launch when you explicitly say "run story-X" (or "run all open stori
    Report exit code and full stdout/stderr. Do not edit any files.
    ```
    Wait for git-ops to complete before launching coders. If it exits non-zero, report error to user and stop.
+   If the story has `sparseOk: true` and `agent: "quick-fixer"`, setup-story.sh will create a sparse-checkout worktree. Architect stories always receive a full checkout regardless of `sparseOk`.
 7. Launch coder tasks in BACKGROUND; track status via `TaskUpdate`.
 7. Update story `state` to `running` in `epics.json`.
 
