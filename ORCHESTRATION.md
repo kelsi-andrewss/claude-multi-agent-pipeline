@@ -38,7 +38,7 @@ These rules apply to the main Claude Code session only. Spawned agents (coders, 
 
 2. **Planning mode** (foreground): Takes orchestrator NEEDS_PLANNING bullets and conducts interactive research — asks user questions, makes suggestions, produces a refined plan. Trigger: orchestrator returns NEEDS_PLANNING. Always **foreground** (interactive). Writes to `$TMPDIR/planning-<todo-slug>.md`. See §19.1.
 
-Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/write source files, run builds, run tests, commit, push. Model: Sonnet default; Opus if Complexity is "high", Touches includes "AI tools"/"Firestore schema", or Files explored > 10.
+Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/write source files, run builds, run tests, commit, push. Model: Sonnet default; Opus if Touches includes "AI tools"/"Firestore schema". Sonnet otherwise.
 
 **git-ops** — registered subagent (`subagent_type: "git-ops"`). Executes one pipeline script per invocation via Bash. MUST NEVER: edit or write source files (except `epics.json`), read source files, make architectural decisions, run builds, or run tests. Only permitted actions: Bash (git commands, the six pipeline scripts, and direct `epics.json` writes via node/python/jq or a dedicated update script). Always launched with `run_in_background: true`. Scripts live in `.claude/scripts/`:
 - `setup-story.sh` — epic branch setup + story worktree creation (§9)
@@ -58,8 +58,8 @@ Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/wri
 
 | Role | Default | Escalation |
 |---|---|---|
-| Orchestrator | Haiku | Sonnet/Opus if task is architecturally complex before research begins |
-| Epic-planner | Sonnet | Opus if epic touches >10 write-target files or involves AI/schema changes |
+| Orchestrator | Haiku | Sonnet if task is architecturally complex before research begins |
+| Epic-planner | Sonnet | Opus if the epic modifies AI tool declarations/executors OR Firestore schema (structural changes) |
 | Coder | Orchestrator's recommendation | Opus after 2 BLOCKING reviewer round-trips |
 | Reviewer | Haiku | Sonnet only if coder ran on Opus |
 | Unit-tester | Haiku | Never escalated |
@@ -102,7 +102,7 @@ Permitted actions (both modes): Glob, Grep, Read, WebFetch. MUST NEVER: edit/wri
 When the orchestrator returns NEEDS_PLANNING:
 
 1. **Group bullets** into categories (scope, approach, schema, UX) — cosmetic, helps planner structure research.
-2. **Select model**: Opus if Complexity is "high", or Touches includes "AI tools"/"Firestore schema", or Files explored > 10. Sonnet otherwise.
+2. **Select model**: Opus if Touches includes "AI tools" or "Firestore schema". Sonnet otherwise.
 3. **Derive `<todo-slug>`** (kebab-case, ≤5 words) from the task description.
 4. **Launch epic-planner foreground** with planning prompt:
    ```
@@ -517,7 +517,7 @@ If reviewer output contains `⚠ reviewer-learnings.md has N entries`, surface a
 > ⚠️ **reviewer-learnings.md has N entries — consider reviewing and promoting patterns.**
 
 ### Escalation
-**Reviewer send-back budget**: 2 BLOCKING round-trips. After 2: escalate coder to Opus, run once more. Budget does not reset after escalation. If Opus attempt is still BLOCKING → set story state to `blocked`, report all findings to user, leave worktree intact. `blocked` → `running` is a valid manual reset.
+**Reviewer send-back budget**: 2 BLOCKING round-trips. After 2: escalate coder to Opus, run once more. Budget does not reset after escalation. If Opus attempt is still BLOCKING → set story state to `blocked`, report all findings to user, leave worktree intact. `blocked` → `running` is a valid manual reset. **Opus escalation constraint**: Opus escalation only applies to architect stories. CSS-only stories and skill-file-only stories are never escalated to Opus regardless of reviewer round-trips.
 
 **Blocked-story resume protocol**: When a story is in `blocked` state and the user wants to resume:
 
