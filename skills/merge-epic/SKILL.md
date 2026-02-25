@@ -5,15 +5,35 @@ description: >
   or "/merge-epic epic-X". Encodes ORCHESTRATION.md §13 exactly.
   Prerequisite: all stories in the epic must be in done state (unless --partial).
   Supports --partial flag to merge done stories and move open stories to a continuation epic.
+  Omit args entirely to auto-detect merge-ready epics.
 args:
   - name: epic_ref
     type: string
-    description: "Epic ID or slug (e.g. epic-022 or pipeline-self-hosting). Optionally append --partial."
+    description: "Epic ID or slug (e.g. epic-022 or pipeline-self-hosting). Optionally append --partial. Omit entirely to auto-detect."
 ---
 
 # Merge Epic: {{epic_ref}}
 
 Execute the epic merge sequence per ORCHESTRATION.md §13.
+
+## Auto-detect (no args)
+
+If `{{epic_ref}}` is empty or not provided:
+1. Read `.claude/epics.json`. Collect epics where state is `active`.
+2. For each active epic, classify:
+   - **Fully merge-ready**: all stories are `done` — show these first.
+   - **Partial candidates**: at least one story is `done`, others are not `done` — show with `[partial]` tag.
+3. If no epics qualify, report "No merge-ready epics found." and stop.
+4. Display:
+   ```
+   Merge-ready epics:
+     epic-005  [all done]   Pipeline self-hosting
+     epic-007  [partial]    Dark mode (2 done, 1 in-progress)
+   Which epic to merge? (enter ID, or ID + "--partial" for partial merge)
+   ```
+5. Use `AskUserQuestion` to get the user's selection.
+   - If user selects a `[partial]` epic without `--partial`, automatically suggest adding `--partial`: "That epic has open stories — did you mean `/merge-epic epic-007 --partial`?"
+6. Continue with the selected epic_ref as if it were passed as an arg.
 
 ## Parse flags
 
@@ -27,7 +47,7 @@ If `--partial` is present in `{{epic_ref}}`:
 
 2. **Verify all stories done**: Every story in the epic must be in `done` state. If any are not `done`, list them and stop — do not proceed until all stories are merged.
 
-3. **Resolve `prNumber`**: Read the epic's `prNumber` from `epics.json`. If null or empty, report "No epic PR found — run /merge on outstanding stories first." and stop.
+3. **Resolve `prNumber`**: Read the epic's `prNumber` from `epics.json`. If null or empty, report "No epic PR found — run /merge-story on outstanding stories first." and stop.
 
 4. **Draft → ready conversion**: Check whether the epic PR is a draft:
    ```
@@ -41,8 +61,11 @@ If `--partial` is present in `{{epic_ref}}`:
 
 5. **Launch git-ops** (background) with prompt:
    ```
-   Run: bash <project-root>/.claude/scripts/merge-epic.sh \
-     <project-root> <epic-slug> <pr-number>
+   Read ~/.claude/skills/merge-epic/SKILL.md. Execute step 5 only (merge-epic.sh invocation).
+   Project root: <project-root>
+   Epic slug: <epic-slug>
+   PR: <pr-number>
+   Run: bash <project-root>/.claude/scripts/merge-epic.sh <project-root> <epic-slug> <pr-number>
    Report exit code and full stdout/stderr. Do not edit any files.
    ```
 
@@ -57,7 +80,7 @@ If `--partial` is present in `{{epic_ref}}`:
 
 1. **Read** `.claude/epics.json`. Find the epic. Report if not found and stop.
 
-2. **Verify at least one story is `done`**. If none are done, print "No done stories to merge. Run /merge on stories first." and stop.
+2. **Verify at least one story is `done`**. If none are done, print "No done stories to merge. Run /merge-story on stories first." and stop.
 
 3. **List open stories** (any state other than `done`):
    ```

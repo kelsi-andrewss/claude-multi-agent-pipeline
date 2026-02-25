@@ -168,8 +168,7 @@ For each epic that has `manualSteps`:
 For each epic that has `codeStories` (and was not skipped in the dedup step):
 
 Determine the model:
-- Opus if the epic has >5 code stories, or if the title/description mentions "schema",
-  "AI", "migration", or "database".
+- Opus if the title/description mentions "AI tools" or "Firestore schema" specifically.
 - Sonnet otherwise.
 
 Launch an epic-planner agent **background** (`run_in_background: true`) with:

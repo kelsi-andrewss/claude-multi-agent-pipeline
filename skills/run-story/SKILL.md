@@ -46,8 +46,10 @@ Execute the full run trigger sequence per ORCHESTRATION.md §9.
 
 6. **Launch git-ops** (background) with:
    ```
-   Run: bash <project-root>/.claude/scripts/setup-story.sh \
-     <project-root> <epic-slug> <story-branch> <story-slug>
+   Read ~/.claude/skills/run-story/SKILL.md. Execute step 6 only (setup-story.sh invocation).
+   Project root: <project-root>
+   Args: <epic-slug> <story-branch> <story-slug>
+   Run: bash <project-root>/.claude/scripts/setup-story.sh <project-root> <epic-slug> <story-branch> <story-slug>
    Report exit code and full stdout/stderr. Do not edit any files.
    ```
    Wait for git-ops to exit. If non-zero, report error and stop.

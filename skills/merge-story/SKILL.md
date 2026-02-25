@@ -1,5 +1,5 @@
 ---
-name: merge
+name: merge-story
 description: >
   Merge one or more stories into their epic branch. Use when the user says
   "merge story-X", "merge story X and Y", or after diff gate passes.
@@ -9,12 +9,27 @@ description: >
 args:
   - name: story_ids
     type: string
-    description: "Comma-separated story IDs to merge (e.g. story-042,story-043). Optionally append --draft to create a draft epic PR."
+    description: "Comma-separated story IDs to merge (e.g. story-042,story-043). Optionally append --draft to create a draft epic PR. Omit entirely to auto-detect mergeable stories."
 ---
 
-# Merge: {{story_ids}}
+# Merge Story: {{story_ids}}
 
 Execute the merge-queue sequence per ORCHESTRATION.md §12.
+
+## Auto-detect (no args)
+
+If `{{story_ids}}` is empty or not provided:
+1. Read `.claude/epics.json`. Collect all stories where state is `in-progress`, `in-review`, or `approved`.
+2. If none found: report "No mergeable stories found." and stop.
+3. If one or more found, display:
+   ```
+   Mergeable stories:
+     story-042  [approved]   Add dark mode toggle
+     story-043  [in-review]  Fix sidebar layout
+   Which story/stories to merge? (enter IDs or "all")
+   ```
+4. Use `AskUserQuestion` to get the user's selection. If "all", proceed with all listed IDs.
+5. Continue with the selected IDs as if they were passed as args.
 
 ## Draft flag
 
@@ -47,10 +62,12 @@ If `--draft` is present in `{{story_ids}}`:
    ]
    ```
 
-5. **Launch git-ops** (background) per epic group:
+5. **Launch git-ops** (background) per epic group with prompt:
    ```
-   Run: bash <project-root>/.claude/scripts/merge-queue.sh \
-     <project-root> '<json-manifest>'
+   Read ~/.claude/skills/merge-story/SKILL.md. Execute step 5 only (merge-queue.sh invocation).
+   Project root: <project-root>
+   Manifest: '<json-manifest>'
+   Run: bash <project-root>/.claude/scripts/merge-queue.sh <project-root> '<json-manifest>'
    Report exit code and full stdout/stderr. Do not edit any files.
    ```
 
