@@ -29,7 +29,7 @@ If `--draft` is present in `{{story_ids}}`:
 
 1. **Read** `.claude/epics.json`. Find each story in `{{story_ids}}` (strip `--draft` flag first). Report any not found and stop.
 
-2. **Verify state**: Each story must be in `running`, `testing`, `reviewing`, or `merging` state. If any are not, report and stop.
+2. **Verify state**: Each story must be in `in-progress`, `in-review`, or `approved` state. If any are not, report and stop.
 
 3. **Group by epic**: Stories targeting different epic branches can be processed in separate parallel git-ops agents. Stories targeting the SAME epic branch must go into one `merge-queue.sh` call — never run two agents on the same epic branch simultaneously.
 
@@ -56,11 +56,20 @@ If `--draft` is present in `{{story_ids}}`:
 
 6. **On exit 0**: For each `MERGED:<storyBranch>:PR_NUMBER=<n>` line in output:
    - Update epic's `prNumber` in epics.json via `update-epics.sh` (if changed)
-   - Set story state to `closed` via `update-epics.sh`
+   - Set story state to `done` via `update-epics.sh`
 
-7. **Check epic auto-close**: If all stories in an epic are now `closed`, the epic is complete — note this to the user.
+6a. **Branch cleanup**: For each merged story branch, delete it locally and remotely:
+    ```bash
+    git -C <project-root> branch -D <story-branch> 2>/dev/null || true
+    git -C <project-root> push origin --delete <story-branch> 2>/dev/null || true
+    git -C <project-root> worktree prune
+    ```
+    Use `-D` because squash merges are not recognized as merged by git's ancestry check. Skip silently if the branch is already gone.
+    Run this even when `merge-queue.sh` handles the merge — it is a no-op if the branch was already deleted by the script.
 
-8. **Unblock queued stories**: Scan epics.json for `queued` stories whose `dependsOn` are now all `closed`. For each: auto-launch `setup-story.sh` + coder (background). Notify the user.
+7. **Check epic auto-close**: If all stories in an epic are now `done`, the epic is complete — note this to the user. Set epic state to `done`.
+
+8. **Unblock ready stories**: Scan epics.json for `ready` or `draft` stories whose `dependsOn` are now all `done`. For each: auto-launch `setup-story.sh` + coder (background). Notify the user.
 
 9. Output: "Context checkpoint reached (story merged). Run `/clear` to reset the session. All epic and story state is saved in epics.json."
 

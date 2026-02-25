@@ -156,7 +156,7 @@ main
 
 - Stories never merge directly to main
 - Two merge agents must never target the same epic branch simultaneously (they race on `git checkout epic/...`) — `merge-queue.sh` serializes them in one agent
-- `git branch -D` is forbidden — use `-d`, and if it fails, advance the ref with `git update-ref` first
+- `git branch -D` is required for story branches after squash merges — squash commits are not in the ancestry chain, so git's `-d` safety check always fails on them
 
 ---
 
@@ -196,29 +196,30 @@ main
 ## Story Pipeline
 
 ```
-filling --> running --> [testing] --> merging --> closed
-               |            |
-               |       (FAIL: back to running)
-               |
-               +--> reviewing (on-demand only)
+draft --> ready --> in-progress --> [in-review] --> approved --> done
+                        |               |
+                        |          (FAIL: back to in-progress)
                         |
-                   (PASS: merging)
-                   (BLOCK: back to running)
+                        +--> in-review (on-demand only)
+                                  |
+                             (PASS: approved)
+                             (BLOCK: back to in-progress)
 ```
 
 ### State Transitions
 
 | From | To | Trigger |
 |------|----|---------|
-| `filling` | `running` | User says "run story-X" |
-| `running` | `merging` | All coder tasks done (default -- no tests) |
-| `running` | `testing` | All coders done + `needsTesting: true` |
-| `testing` | `merging` | Unit-tester PASS |
-| `testing` | `running` | Unit-tester FAIL -> back to coder |
-| `running` | `reviewing` | User requests or `needsReview: true` |
-| `reviewing` | `merging` | Reviewer PASS |
-| `reviewing` | `running` | Reviewer BLOCKING -> back to coder |
-| `merging` | `closed` | Merged into epic branch |
+| `draft` | `ready` | Dependencies met |
+| `ready` | `in-progress` | User says "run story-X" |
+| `in-progress` | `approved` | All coder tasks done (default -- no tests) |
+| `in-progress` | `in-review` | All coders done + `needsTesting: true` |
+| `in-review` | `approved` | Unit-tester PASS |
+| `in-review` | `in-progress` | Unit-tester FAIL -> back to coder |
+| `in-progress` | `in-review` | User requests or `needsReview: true` |
+| `in-review` | `approved` | Reviewer PASS |
+| `in-review` | `in-progress` | Reviewer BLOCKING -> back to coder |
+| `approved` | `done` | Merged into epic branch |
 | `any` | `blocked` | 2 reviewer retries still blocking (Opus escalation) |
 
 ---
@@ -281,7 +282,7 @@ User: "run story-X"
     Each story: diff-gate -> rebase -> git checkout epic/<slug> -> merge --ff-only -> push -> cleanup
        |
        v
-11. Write epics.json snapshot (story -> closed)
+11. Write epics.json snapshot (story -> done)
        |
        v
 12. Create/update epic PR
@@ -292,7 +293,7 @@ User: "run story-X"
 13. Check architectural findings -> append novel ones to CLAUDE.md
        |
        v
-14. Story -> closed. Check epic auto-close. /clear
+14. Story -> done. Check epic auto-close. /clear
 ```
 
 ---
@@ -399,7 +400,7 @@ Groups A and B run in parallel (no file overlap).
   "id": "story-001",
   "epicId": "epic-001",
   "title": "Ghost placement accuracy",
-  "state": "closed",
+  "state": "done",
   "branch": "story/ghost-placement",
   "writeFiles": ["src/handlers/stageHandlers.js"],
   "needsTesting": false,
