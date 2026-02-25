@@ -63,3 +63,9 @@ If `--draft` is present in `{{story_ids}}`:
 8. **Unblock queued stories**: Scan epics.json for `queued` stories whose `dependsOn` are now all `closed`. For each: auto-launch `setup-story.sh` + coder (background). Notify the user.
 
 9. Output: "Context checkpoint reached (story merged). Run `/clear` to reset the session. All epic and story state is saved in epics.json."
+
+10. **Cleanup ephemeral files**: Delete any `$TMPDIR` files whose slug matches a merged story. For each merged story slug, run:
+    ```
+    rm -f $TMPDIR/staging-<slug>.json $TMPDIR/epic-plan-<slug>.md $TMPDIR/planning-<slug>.md
+    ```
+    Use `rm -f` — do not fail if files are absent. This prevents unbounded accumulation of ephemeral pipeline files in the OS temp directory.
