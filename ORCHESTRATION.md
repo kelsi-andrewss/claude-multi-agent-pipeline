@@ -30,7 +30,7 @@ These rules apply to the main Claude Code session only. Spawned agents (coders, 
 
 **epic-planner** — research and planning agent. Epic mode (background): "plan epic: ...". Planning mode (foreground): orchestrator NEEDS_PLANNING. Permitted: Glob, Grep, Read, WebFetch. MUST NEVER: edit/write source files, run builds/tests, commit/push. Model: Sonnet default; Opus if touches AI tools/Firestore schema.
 
-**git-ops** — executes pipeline scripts via Bash. MUST NEVER: edit source files (except epics.json), read source, make architectural decisions, run builds/tests. Always `run_in_background: true`. Scripts in `.claude/scripts/`: `setup-story.sh`, `diff-gate.sh`, `merge-story.sh`, `merge-queue.sh`, `merge-epic.sh`, `update-epics.sh`.
+**git-ops** — executes pipeline scripts via Bash. MUST NEVER: edit source files (except epics.json), read source, make architectural decisions, run builds/tests. Always `run_in_background: true`. Scripts in `.claude/scripts/`: `setup-story.sh`, `diff-gate.sh`, `merge-story.sh`, `merge-queue.sh`, `merge-epic.sh`, `update-epics.sh`. When launched by a skill, reads the skill file and executes only the designated bash steps.
 
 **Agent launch rule**: Coders, reviewer, unit-tester, and git-ops MUST ALWAYS be launched with `run_in_background: true`. Use `Task` tool, never Bash.
 
@@ -217,11 +217,19 @@ Launch: parallel where no overlap, sequential where dependent.
 
 **Coder prompt requirements** (every prompt must include):
 - Todo descriptions (list every todo explicitly)
-- Write-target files and read-only context files
+- Write-target files and read-only context files (as absolute paths under the worktree)
 - Edge cases from codebase research
 - **Pitfalls section** — see pitfalls routing table below
 - Specific invariants and known gotchas
-- **CWD mismatch note**: "Use absolute paths only — your CWD may not match the target directory."
+- **Worktree enforcement block** (copy verbatim, substituting actual paths):
+  ```
+  WORKTREE: <absolute-worktree-path>
+  All file reads and writes MUST use paths under this directory.
+  Example: edit <absolute-worktree-path>/src/foo.py — NOT /Users/.../project/src/foo.py
+  Before doing anything else, verify: run `git -C <absolute-worktree-path> branch --show-current`
+  and confirm it prints `<story-branch>`. If it prints anything else, STOP and report the branch mismatch.
+  Do NOT commit or edit files outside this worktree.
+  ```
 
 ### Pitfalls routing table
 
@@ -259,7 +267,7 @@ Coders must only write to write-target files.
 
 ### Diff gate (mandatory — git-ops agent, background)
 
-See `/merge` skill for the `diff-gate.sh` invocation. Exit codes: 0 = pass, 1 = empty diff, 2 = unexpected files remain.
+See `/merge-story` skill for the `diff-gate.sh` invocation. Exit codes: 0 = pass, 1 = empty diff, 2 = unexpected files remain.
 
 If reviewer flags untouched files: stale-branch issue. Re-run diff gate, then re-launch reviewer/tester.
 
@@ -306,12 +314,13 @@ Trivial mechanical issues (missing import, typo): fix inline. Only when file is 
 
 ## 12. STORY MERGE SEQUENCE
 
-See `/merge` skill for full procedure. Key policy rules:
+See `/merge-story` skill for full procedure. Key policy rules:
 
 - **Prefer merge-queue.sh** for multiple stories into same epic (one agent, sequential).
 - **merge-story.sh** only for single-story fallback.
 - **Draft PR**: `--draft` flag creates draft epic PR. Convert with `gh pr ready` before epic merge.
 - **Git rules**: No `git branch -D`. Stories merge through epic branch, never directly to main. No commits without instruction. Never two agents targeting same epic branch simultaneously.
+- **Git-ops agents execute skill steps directly** — read the skill file, run only the bash steps, report output.
 
 ---
 
@@ -350,7 +359,7 @@ When a story completes: scan for `ready` stories now unblocked → auto-launch. 
 
 **Snapshot triggers** — write epics.json at: story merge, state transitions, staging approval, branch/PR assignment.
 
-**§15.1 — update-epics.sh protocol**: See `/run-story` and `/merge` skills for invocation patterns. JSON patch format:
+**§15.1 — update-epics.sh protocol**: See `/run-story` and `/merge-story` skills for invocation patterns. JSON patch format:
 ```
 '{"storyId":"story-X","fields":{"state":"in-progress","branch":"story/slug"}}'
 '{"newStory":{...},"epicId":"epic-X"}'

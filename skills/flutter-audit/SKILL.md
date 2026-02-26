@@ -1,24 +1,24 @@
 ---
-name: audit
+name: flutter-audit
 description: >
-  Audit a codebase and write a structured AUDIT.md report via a foreground Sonnet agent.
-  Use when the user says "/audit", "audit the codebase", "audit story-NNN", or "audit <path>".
-  Supports scoping to files, directories, story diffs, or time ranges. Supports section
-  filters (security, bugs, completeness, quality), --requirements, --output, --append,
-  --ignore, --summary, --json, --no-completeness, --since, and --opus flags.
+  Audit a Flutter codebase and write a structured AUDIT.md report via a foreground Sonnet agent.
+  Use when the user says "/flutter-audit", "flutter audit the codebase", "flutter audit story-NNN",
+  or "flutter audit <path>". Supports all flags from /audit plus --state-mgmt for explicit state
+  management pattern selection and --opus to force Opus model. Section filters include: security,
+  bugs, completeness, quality, widgets, state, performance, platform, pubspec.
 args:
   - name: args
     type: string
     description: >
       Optional. Any combination of: paths, story-NNN, section keywords
-      (security|bugs|completeness|quality), and flags
-      (--requirements <path>, --output <path>, --append, --ignore <glob>,
-      --summary, --json, --no-completeness, --since <commit|date>, --opus).
+      (security|bugs|completeness|quality|widgets|state|performance|platform|pubspec), and flags
+      (--state-mgmt <bloc|riverpod|provider|getx|none>, --requirements <path>, --output <path>,
+      --append, --ignore <glob>, --summary, --json, --no-completeness, --since <commit|date>, --opus).
 ---
 
-# Audit Skill Invoked
+# Flutter Audit Skill Invoked
 
-User has requested: `/audit {{args}}`
+User has requested: `/flutter-audit {{args}}`
 
 ## Steps
 
@@ -28,7 +28,8 @@ Parse `{{args}}` into the following categories:
 
 - **paths**: any token that is not a flag and not `story-NNN` and not a section keyword — collect as target paths
 - **story_id**: token matching `story-\d+` — at most one
-- **section_filter**: token matching one of: `security`, `bugs`, `completeness`, `quality` — at most one (collect all that match; if multiple given, run all of them)
+- **section_filter**: token matching one of: `security`, `bugs`, `completeness`, `quality`, `widgets`, `state`, `performance`, `platform`, `pubspec` — collect all that match
+- **flag_state_mgmt**: value after `--state-mgmt` if present — one of: `bloc`, `riverpod`, `provider`, `getx`, `none`
 - **flag_requirements**: value after `--requirements` if present
 - **flag_output**: value after `--output` if present
 - **flag_append**: present if `--append` appears
@@ -37,13 +38,26 @@ Parse `{{args}}` into the following categories:
 - **flag_json**: present if `--json` appears
 - **flag_no_completeness**: present if `--no-completeness` appears
 - **flag_since**: value after `--since` if present
-- **flag_opus**: present if `--opus` appears — forces Opus model for the audit agent
 
 If none of paths, story_id, or flag_since are provided → full project audit mode.
 
 ### 2. Resolve the project root
 
 Identify the project root as the directory containing the nearest `.git` folder walking up from the current working directory. Store as `<project-root>`.
+
+### 2a. Auto-detect state management
+
+If `flag_state_mgmt` is set → use that value as `state_mgmt` and skip detection.
+
+Otherwise, read `<project-root>/pubspec.yaml`. Scan the `dependencies:` block for the following package names:
+- `flutter_bloc` or `bloc` → `state_mgmt = bloc`
+- `flutter_riverpod` or `riverpod` or `hooks_riverpod` → `state_mgmt = riverpod`
+- `provider` → `state_mgmt = provider`
+- `get` → `state_mgmt = getx`
+
+If multiple packages are found, set `state_mgmt = mixed` and note all detected packages.
+If none are found, set `state_mgmt = none`.
+If `pubspec.yaml` does not exist, set `state_mgmt = unknown`.
 
 ### 3. Resolve target file list
 
@@ -86,13 +100,22 @@ Read `.claude/epics.json`. Build a map:
 ```
 open_story_map = { story_id: { title, writeFiles[] } }
 ```
-Include only stories where `state` is NOT `done`. This is used in step 8.
+Include only stories where `state` is NOT `done`. This is used in step 9.
 
 ### 6. Build the audit prompt
 
-Start with the base text from `~/.claude/AUDIT-PROMPT.md` (read that file verbatim).
+Start with the base text from `~/.claude/AUDIT-PROMPT-FLUTTER.md` (read that file verbatim).
 
 Append the following sections as relevant:
+
+**State Management Context** (always):
+```
+## State Management Context
+Resolved state management approach: <state_mgmt>
+<if flag_state_mgmt was set>: (explicitly specified by user)
+<else>: (auto-detected from pubspec.yaml)
+Audit state management patterns specific to this approach. If state_mgmt is "mixed", audit each detected pattern.
+```
 
 **Scope section** (always):
 ```
@@ -124,7 +147,7 @@ Omit all other sections from the output.
 ```
 ## Output Format
 <if flag_summary>: Produce an executive summary only — skip detailed per-finding sections.
-<if flag_json>: Output the report as a JSON object with keys: summary, completeness, quality, bugs, recommendations, score. No markdown prose.
+<if flag_json>: Output the report as a JSON object with keys: summary, completeness, widget_performance, state_management, null_safety, platform_build, pubspec, bugs, recommendations, score. No markdown prose.
 ```
 
 **Append mode** (if flag_append):
@@ -148,13 +171,14 @@ Write the complete report to: <output_path>
 
 ### 8. Launch the audit agent (foreground)
 
-Model selection: use `sonnet` by default. Use `opus` only if `flag_opus` is set.
+Model selection: use `sonnet` by default. Use `opus` only if `--opus` was passed in args.
 
 Launch a **general-purpose** subagent with the selected model in **foreground** (not background) using the composed prompt from step 6.
 
 The agent's job is to:
 - Read all target files
 - Read the requirements document if provided
+- Read `<project-root>/pubspec.yaml` for dependency analysis
 - Produce the full audit report
 - Write the report to output_path
 
@@ -187,7 +211,8 @@ If the user says yes (or selects specific items), invoke `/todo` for each select
 Output the following to the user:
 
 ```
-Audit complete.
+Flutter audit complete.
+State management: <state_mgmt>
 Report: <output_path>
 Findings: <N> High, <N> Medium, <N> Low
 <if stories created>: Stories created: story-NNN, ...

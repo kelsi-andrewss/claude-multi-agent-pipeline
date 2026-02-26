@@ -31,6 +31,8 @@ git fetch origin 2>/dev/null || git fetch 2>/dev/null || true
 # Rebase story branch onto epic branch
 echo "Rebasing ${STORY_BRANCH} onto ${EPIC_BRANCH}"
 git -C "$WORKTREE_PATH" rebase "$EPIC_BRANCH"
+# Push rebased branch so remote stays in sync (force required after rebase)
+git -C "$WORKTREE_PATH" push --force-with-lease origin "$STORY_BRANCH" 2>/dev/null || true
 
 # Get list of files changed in story vs epic branch
 CHANGED_FILES=$(git -C "$WORKTREE_PATH" diff --name-only "${EPIC_BRANCH}...HEAD" 2>/dev/null || true)

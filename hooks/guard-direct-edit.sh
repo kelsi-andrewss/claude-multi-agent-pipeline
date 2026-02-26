@@ -50,7 +50,8 @@ if [[ "$FILE_PATH" == /tmp/* || "$FILE_PATH" == "$TMPDIR"* ]]; then
 fi
 
 # Allow edits during active /hotfix — sentinel contains allowed file path
-HOTFIX_SENTINEL="/tmp/hotfix-active-${PPID:-$$}"
+# Fixed path (not PID-based) because the hook's PPID never matches the skill's $$
+HOTFIX_SENTINEL="/tmp/hotfix-active"
 if [[ -f "$HOTFIX_SENTINEL" ]]; then
   ALLOWED_FILE=$(cat "$HOTFIX_SENTINEL")
   if [[ "$FILE_PATH" == *"$ALLOWED_FILE"* || "$ALLOWED_FILE" == *"$FILE_PATH"* ]]; then

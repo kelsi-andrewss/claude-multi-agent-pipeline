@@ -27,7 +27,7 @@ Your job is to initiate the full development pipeline. Do NOT implement the chan
 
    **C. NEEDS_PLANNING** → Enter the planning loop (ORCHESTRATION.md §4.1):
    1. Group the orchestrator's questions into categories (scope, approach, schema, UX).
-   2. Select model: Opus if Complexity is "high", Touches includes "AI tools"/"Firestore schema", or Files explored > 10. Sonnet otherwise.
+   2. Select model: Opus if Complexity is "high" AND Touches includes "AI tools" or "Firestore schema". Sonnet otherwise.
    3. Derive `<todo-slug>` (kebab-case, ≤5 words) from the task description.
    4. Launch `epic-planner` agent (foreground, selected model) with planning prompt including MODE: planning, the original task, orchestrator findings, and grouped questions.
    5. Wait for planner to complete, then read `$TMPDIR/planning-<todo-slug>.md`.
