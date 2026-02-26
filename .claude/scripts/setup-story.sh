@@ -21,27 +21,37 @@ cd "$PROJECT_ROOT"
 
 CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "HEAD")
 
+# Sync local main to origin before branching
+git fetch origin main > /dev/null 2>&1 || true
+git update-ref refs/heads/main origin/main 2>/dev/null || true
+
+# Sync epic branch from origin if it exists remotely
+git fetch origin "${EPIC_BRANCH}" > /dev/null 2>&1 && \
+  git update-ref "refs/heads/${EPIC_BRANCH}" "origin/${EPIC_BRANCH}" 2>/dev/null || true
+
 # Create epic branch if it doesn't exist — use branch operation only, no checkout
 if git show-ref --verify --quiet "refs/heads/${EPIC_BRANCH}"; then
-  echo "Epic branch ${EPIC_BRANCH} already exists"
+  [ -n "$VERBOSE" ] && echo "Epic branch ${EPIC_BRANCH} already exists"
 else
-  echo "Creating epic branch ${EPIC_BRANCH} from main"
+  [ -n "$VERBOSE" ] && echo "Creating epic branch ${EPIC_BRANCH} from main"
   git branch "$EPIC_BRANCH" main
 fi
 
 # Create story worktree — never checks out in main worktree
 if [ -d "$WORKTREE_PATH" ]; then
-  echo "Worktree ${WORKTREE_PATH} already exists"
+  [ -n "$VERBOSE" ] && echo "Worktree ${WORKTREE_PATH} already exists"
 else
   if git show-ref --verify --quiet "refs/heads/${STORY_BRANCH}"; then
-    echo "Story branch ${STORY_BRANCH} already exists — adding worktree"
-    git worktree add "$WORKTREE_PATH" "$STORY_BRANCH"
+    [ -n "$VERBOSE" ] && echo "Story branch ${STORY_BRANCH} already exists — adding worktree"
+    git worktree add "$WORKTREE_PATH" "$STORY_BRANCH" > /dev/null 2>&1
   else
-    echo "Creating story branch ${STORY_BRANCH} from ${EPIC_BRANCH}"
-    git worktree add -b "$STORY_BRANCH" "$WORKTREE_PATH" "$EPIC_BRANCH"
+    [ -n "$VERBOSE" ] && echo "Creating story branch ${STORY_BRANCH} from ${EPIC_BRANCH}"
+    git worktree add -b "$STORY_BRANCH" "$WORKTREE_PATH" "$EPIC_BRANCH" > /dev/null 2>&1
   fi
+  trap 'git worktree remove --force "$WORKTREE_PATH" 2>/dev/null || true; git branch -D "$STORY_BRANCH" 2>/dev/null || true' ERR
 fi
 
-echo "Main worktree remains on: ${CURRENT_BRANCH}"
+trap - ERR
+[ -n "$VERBOSE" ] && echo "Main worktree remains on: ${CURRENT_BRANCH}"
 echo "Setup complete: worktree at ${WORKTREE_PATH}"
 exit 0
