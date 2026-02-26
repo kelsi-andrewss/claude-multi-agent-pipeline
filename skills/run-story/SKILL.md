@@ -56,6 +56,12 @@ Execute the full run trigger sequence per ORCHESTRATION.md §9.
 
 7. **Launch coder** (background, `run_in_background: true`) with appropriate prompt per ORCHESTRATION.md §10. Agent type and model from story's orchestrator recommendation. Track via `TaskCreate`/`TaskUpdate`.
 
+   The coder prompt MUST include the worktree enforcement block from ORCHESTRATION.md §10 with:
+   - `<absolute-worktree-path>` = `<project-root>/.claude/worktrees/<story-branch>`
+   - `<story-branch>` = the story's branch name
+   All write-target file paths in the prompt must be given as absolute paths under the worktree, e.g.:
+   `<project-root>/.claude/worktrees/<story-branch>/src/foo.py`
+
 8. **Update story state** to `in-progress` via `update-epics.sh`.
 
 9. Warn the user if the session is not in auto-edit mode before launching the coder.

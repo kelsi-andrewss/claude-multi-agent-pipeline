@@ -217,11 +217,19 @@ Launch: parallel where no overlap, sequential where dependent.
 
 **Coder prompt requirements** (every prompt must include):
 - Todo descriptions (list every todo explicitly)
-- Write-target files and read-only context files
+- Write-target files and read-only context files (as absolute paths under the worktree)
 - Edge cases from codebase research
 - **Pitfalls section** — see pitfalls routing table below
 - Specific invariants and known gotchas
-- **CWD mismatch note**: "Use absolute paths only — your CWD may not match the target directory."
+- **Worktree enforcement block** (copy verbatim, substituting actual paths):
+  ```
+  WORKTREE: <absolute-worktree-path>
+  All file reads and writes MUST use paths under this directory.
+  Example: edit <absolute-worktree-path>/src/foo.py — NOT /Users/.../project/src/foo.py
+  Before doing anything else, verify: run `git -C <absolute-worktree-path> branch --show-current`
+  and confirm it prints `<story-branch>`. If it prints anything else, STOP and report the branch mismatch.
+  Do NOT commit or edit files outside this worktree.
+  ```
 
 ### Pitfalls routing table
 
