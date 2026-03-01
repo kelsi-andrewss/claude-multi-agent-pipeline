@@ -1,3 +1,13 @@
+# Database
+.claude/epics.db
+.claude/epics.db-shm
+.claude/epics.db-wal
+.claude/epics.json.bak
+.claude/hotfix-log.md
+
+# Temp/test files
+tracking/test.*
+
 # Runtime / private data
 history.jsonl
 stats-cache.json
