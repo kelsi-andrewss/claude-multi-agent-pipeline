@@ -4,7 +4,8 @@
 # If cost exceeds the configured threshold, prints a warning to stderr.
 # Exit 0 always (advisory only).
 
-CONFIG_FILE="/Users/kelsiandrews/.claude/hooks/cost-alert-config.json"
+CLAUDE_ROOT="$(git -C "$(dirname "$(realpath "$0")")" rev-parse --show-toplevel)"
+CONFIG_FILE="${CLAUDE_ROOT}/hooks/cost-alert-config.json"
 TRACKER_DIR="/opt/homebrew/opt/claude-code-tracker/libexec/src"
 
 # Read threshold from config
