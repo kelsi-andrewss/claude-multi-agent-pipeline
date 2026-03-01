@@ -7,7 +7,8 @@ SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
 MARKER="/tmp/orch-read-${SESSION_ID}"
 
 if [ ! -f "$MARKER" ]; then
-  echo "ORCHESTRATION.md has not been explicitly Read this session. Use the Read tool on /Users/kelsiandrews/.claude/ORCHESTRATION.md before making code changes." >&2
+  CLAUDE_ROOT="$(git -C "$(dirname "$(realpath "$0")")" rev-parse --show-toplevel)"
+  echo "ORCHESTRATION.md has not been explicitly Read this session. Use the Read tool on ${CLAUDE_ROOT}/ORCHESTRATION.md before making code changes." >&2
   exit 2
 fi
 

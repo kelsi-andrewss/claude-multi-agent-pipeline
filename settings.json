@@ -2,9 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(/opt/homebrew/opt/claude-code-tracker/libexec/src/stop-hook.sh*)",
-      "Bash(/Users/kelsiandrews/.claude/hooks/context-check.sh*)",
-      "Bash(/Users/kelsiandrews/.claude/hooks/cost-alert.sh*)",
-      "Bash(/Users/kelsiandrews/.claude/hooks/guard-protected-files.sh*)"
+      "Bash(~/.claude/hooks/context-check.sh*)",
+      "Bash(~/.claude/hooks/cost-alert.sh*)",
+      "Bash(~/.claude/hooks/guard-protected-files.sh*)"
     ]
   },
   "model": "sonnet",
@@ -15,12 +15,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/hooks/guard-direct-edit.sh",
+            "command": "~/.claude/hooks/guard-direct-edit.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/hooks/guard-protected-files.sh",
+            "command": "~/.claude/hooks/guard-protected-files.sh",
             "timeout": 5
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/hooks/require-orch-read.sh",
+            "command": "~/.claude/hooks/require-orch-read.sh",
             "timeout": 5
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/hooks/warn-sync-heavy-bash.sh",
+            "command": "~/.claude/hooks/warn-sync-heavy-bash.sh",
             "timeout": 5,
             "async": true
           }
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/hooks/mark-orch-read.sh",
+            "command": "~/.claude/hooks/mark-orch-read.sh",
             "timeout": 5,
             "async": true
           }
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/hooks/context-check.sh",
+            "command": "~/.claude/hooks/context-check.sh",
             "timeout": 5,
             "async": true
           }
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/hooks/cost-alert.sh",
+            "command": "~/.claude/hooks/cost-alert.sh",
             "timeout": 10,
             "async": true
           }
@@ -108,7 +108,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/hooks/load-session-context.sh",
+            "command": "~/.claude/hooks/load-session-context.sh",
             "timeout": 10
           }
         ]
