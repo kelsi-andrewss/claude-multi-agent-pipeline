@@ -1,6 +1,6 @@
 # Claude Multi-Agent Development Pipeline
 
-A structured multi-agent workflow for software development using Claude Code. Epics group related stories, each story gets an isolated worktree branched off the epic feature branch, and specialized agents handle each pipeline stage. In-session tracking uses Claude's built-in `TaskCreate`/`TaskList`/`TaskUpdate` tools; cross-session recovery relies on `epics.json` + git state.
+A structured multi-agent workflow for software development using Claude Code. Epics group related stories, each story gets an isolated worktree branched off the epic feature branch, and specialized agents handle each pipeline stage. In-session tracking uses Claude's built-in `TaskCreate`/`TaskList`/`TaskUpdate` tools; cross-session recovery relies on `epics.db` + git state.
 
 ---
 
@@ -23,26 +23,68 @@ This repo is the live `~/.claude/` configuration — the actual files Claude Cod
 +-- skills/                # Slash commands (invoked via /todo, /run-story, etc.)
 |   +-- todo/              # Start any code change -- runs the orchestrator
 |   +-- run-story/         # Execute the run trigger sequence for a story
-|   +-- merge/             # Merge one or more stories into their epic branch
+|   +-- merge-story/       # Merge a story into its epic branch
+|   +-- merge-epic/        # Merge an epic into main via squash PR
 |   +-- status/            # Show pipeline state (epics, stories, flags)
 |   +-- recover/           # Cross-session recovery for in-flight stories
 |   +-- clear-guide/       # Check if it's safe to /clear right now
 |   +-- pre-response-check/# Hook: read ORCHESTRATION.md before workflow answers
 |   +-- view-tracking/     # Open charts dashboard and today's key-prompts file
+|   +-- audit/             # Code audit skill
+|   +-- lint/              # Run linter
+|   +-- hotfix/            # Hotfix workflow
+|   +-- ingest/            # Ingest content
+|   +-- quickfix/          # Quick fix workflow
+|   +-- checklist/         # Checklist skill
+|   +-- promote-learning/  # Capture learnings
+|   +-- roadmap/           # Roadmap skill
+|   +-- roadmap-progress/  # Roadmap progress tracking
+|   +-- quick/             # Quick task skill
+|   +-- flutter-audit/     # Flutter codebase audit
 +-- hooks/                 # Shell hooks (PreToolUse / PostToolUse)
 |   +-- load-session-context.sh   # Loads CLAUDE.md + ORCHESTRATION.md at session start
 |   +-- require-orch-read.sh      # Blocks workflow answers until ORCHESTRATION.md is read
 |   +-- mark-orch-read.sh         # Marks ORCHESTRATION.md as read in /tmp
 |   +-- guard-direct-edit.sh      # Warns when edits bypass the pipeline
+|   +-- guard-protected-files.sh  # Blocks edits to protected files
 |   +-- warn-sync-heavy-bash.sh   # Flags bash commands that should run in background
+|   +-- context-check.sh          # Context window usage check
+|   +-- cost-alert.sh             # Session cost alert
 +-- tracking/              # Session tracking scripts
 |   +-- generate-charts.py
 |   +-- cost-summary.py
 |   +-- backfill.py
 |   +-- update-prompts-index.py
 |   +-- stop-hook.sh
+|   +-- patch-durations.py
+|   +-- init-templates.sh
++-- guides/                # Reference PDFs on specific pipeline topics
+|   +-- Improved-Session-Persistence-for-Multi-Agent-Pipeline.pdf
+|   +-- Orchestrator-Context-Management-in-Claude-Code.pdf
 +-- plans/                 # Ephemeral planning docs from past sessions
 +-- settings.json          # Claude Code settings (hooks config, permissions)
+
+<project>/.claude/         # Per-project pipeline data
++-- epics.db               # Epic + story state (SQLite, sole persistent tracking file)
++-- scripts/               # Pipeline shell scripts
+|   +-- setup-story.sh
+|   +-- diff-gate.sh
+|   +-- merge-story.sh
+|   +-- merge-queue.sh
+|   +-- merge-epic.sh
+|   +-- update-epics.sh
+|   +-- generate-pr-body.sh
++-- hooks/
+|   +-- story-timer.sh
++-- skills/                # Project-specific skills
+|   +-- deps/
+|   +-- health/
++-- prompts/               # Project-specific prompts
+|   +-- architect.md
+|   +-- quick-fixer.md
++-- tracking/
+|   +-- story-times.md
++-- worktrees/             # Active story worktrees (cleaned up after merge)
 ```
 
 **Not tracked** (gitignored): `history.jsonl`, `todos/`, `session-env/`, `projects/`, `cache/`, `debug/`, `paste-cache/`, `shell-snapshots/`, `telemetry/`, `plugins/`.
@@ -90,11 +132,11 @@ User Request
 
 | Level | Unit | Persistence |
 |-------|------|-------------|
-| **Epic** | Broad theme (e.g. "UI Polish") | `.claude/epics.json` (on disk) |
-| **Story** | Scoped deliverable, owns a branch + worktree | `.claude/epics.json` (on disk) |
+| **Epic** | Broad theme (e.g. "UI Polish") | `.claude/epics.db` (SQLite, on disk) |
+| **Story** | Scoped deliverable, owns a branch + worktree | `.claude/epics.db` (SQLite, on disk) |
 | **Todo** | Atomic task under a story | `TaskCreate`/`TaskList` (in-session only) |
 
-Todos are **session-scoped** -- tracked via Claude's built-in task tools during the session, not persisted to disk. Cross-session recovery uses `epics.json` + git worktree/branch state.
+Todos are **session-scoped** -- tracked via Claude's built-in task tools during the session, not persisted to disk. Cross-session recovery uses `epics.db` + git worktree/branch state.
 
 ---
 
@@ -121,6 +163,16 @@ reviewer      -> Haiku  (Sonnet only if coder was Opus)
 unit-tester   -> Haiku  always
 git-ops       -> Haiku  always (never escalated)
 ```
+
+---
+
+## MCP Servers
+
+| Server | Location | Purpose |
+|--------|----------|---------|
+| `gemini` | `mcp-servers/gemini/server.py` | Gemini AI integration: generate, chat, analyze, plan, audit, PM tools |
+
+The Gemini MCP server exposes tools for code generation, project management (epics, stories, tasks), code review, and analysis via the Gemini API.
 
 ---
 
@@ -230,7 +282,7 @@ draft --> ready --> in-progress --> [in-review] --> approved --> done
 User: "run story-X"
        |
        v
-1. Read story from epics.json, create TaskCreate entries for todos
+1. Read story from epics.db, create TaskCreate entries for todos
        |
        v
 2. Create/update epic branch
@@ -282,7 +334,7 @@ User: "run story-X"
     Each story: diff-gate -> rebase -> git checkout epic/<slug> -> merge --ff-only -> push -> cleanup
        |
        v
-11. Write epics.json snapshot (story -> done)
+11. Write epics.db snapshot (story -> done)
        |
        v
 12. Create/update epic PR
@@ -309,7 +361,7 @@ TaskList    -> see all todos and their status
 TaskOutput  -> check on background agents (block: false for non-blocking)
 ```
 
-No JSON tracking files are written on every state change. `epics.json` is the sole persistent file, written only on story merge and state transitions.
+No JSON tracking files are written on every state change. `epics.db` is the sole persistent file, written only on story merge and state transitions.
 
 ---
 
@@ -318,7 +370,7 @@ No JSON tracking files are written on every state change. `epics.json` is the so
 When a session ends (crash or normal exit), the next session reconstructs state from three sources:
 
 ```
-1. epics.json on disk
+1. epics.db on disk
    -> Which stories are closed, running, or filling
 
 2. git worktree list
@@ -329,7 +381,7 @@ When a session ends (crash or normal exit), the next session reconstructs state 
 ```
 
 **Recovery flow:**
-- If `epics.json` shows a story in `running` state:
+- If `epics.db` shows a story in `running` state:
   1. Check if the story worktree still exists
   2. Check for uncommitted changes
   3. Report to user: "Story X was in-flight. Resume or discard?"
@@ -381,38 +433,36 @@ Groups A and B run in parallel (no file overlap).
 
 ---
 
-## Simplified epics.json Schema
+## Simplified epics.db Schema
 
-### Epic entry
-```json
-{
-  "id": "epic-001",
-  "title": "UI Polish",
-  "branch": "epic/ui-polish",
-  "prNumber": 42,
-  "persistent": true
-}
-```
+`epics.db` is a SQLite database. The primary tables mirror the former JSON schema:
 
-### Story entry
-```json
-{
-  "id": "story-001",
-  "epicId": "epic-001",
-  "title": "Ghost placement accuracy",
-  "state": "done",
-  "branch": "story/ghost-placement",
-  "writeFiles": ["src/handlers/stageHandlers.js"],
-  "needsTesting": false,
-  "needsReview": false,
-  "agent": "quick-fixer",
-  "model": "sonnet"
-}
-```
+### Epic record
 
-`agent` and `model` are optional — set at staging time and used by `/status` to color-code output. Existing stories without these fields display without agent/model columns.
+| Field | Description |
+|-------|-------------|
+| `id` | e.g. `epic-001` |
+| `title` | e.g. `UI Polish` |
+| `branch` | e.g. `epic/ui-polish` |
+| `prNumber` | GitHub PR number (set after first story merges) |
+| `persistent` | `true` = never auto-closed |
 
-Dropped from previous schema: `body`, `labels`, `worktree` (derivable from branch), `todos` (in TaskList), `coderGroups` (in TaskList), `reviewerRetries` (in-session only), `startedAt`, `stageStartedAt` (in-session only).
+### Story record
+
+| Field | Description |
+|-------|-------------|
+| `id` | e.g. `story-001` |
+| `epicId` | Parent epic ID |
+| `title` | e.g. `Ghost placement accuracy` |
+| `state` | `draft` / `ready` / `in-progress` / `approved` / `done` / `blocked` |
+| `branch` | e.g. `story/ghost-placement` |
+| `writeFiles` | Files the coder will modify |
+| `needsTesting` | Boolean |
+| `needsReview` | Boolean |
+| `agent` | `quick-fixer` or `architect` (optional) |
+| `model` | `haiku` / `sonnet` / `opus` (optional) |
+
+`agent` and `model` are optional — set at staging time and used by `/status` to color-code output. Dropped from previous schema: `body`, `labels`, `worktree` (derivable from branch), `todos` (in TaskList), `coderGroups` (in TaskList), `reviewerRetries` (in-session only), `startedAt`, `stageStartedAt` (in-session only).
 
 ---
 
@@ -495,7 +545,7 @@ merge-queue.sh manifest:
 For each story in order:
 1. Run `diff-gate.sh` (rebase + scope check + restore out-of-scope files)
 2. Run `merge-story.sh` (merge into epic branch + update epic PR)
-3. Print `MERGED:<storyBranch>:PR_NUMBER=<n>` for the main session to update epics.json
+3. Print `MERGED:<storyBranch>:PR_NUMBER=<n>` for the main session to update epics.db
 
 The PR number is threaded through automatically -- if the first story creates the epic PR, subsequent stories in the same manifest get that number applied.
 
@@ -519,7 +569,7 @@ A single background agent handles N stories sequentially with ~constant overhead
 
 All git pipeline work is delegated to the `git-ops` subagent (`subagent_type: "git-ops"`). It is always launched with `run_in_background: true` and executes exactly the script(s) specified in the prompt — nothing more.
 
-**Permitted:** Bash (git commands, the six pipeline scripts below, direct `epics.json` writes via node/python/jq when `update-epics.sh` is unavailable).
+**Permitted:** Bash (git commands, the pipeline scripts below, direct `epics.db` writes via sqlite3 when `update-epics.sh` is unavailable).
 
 **Forbidden:** reading or editing source files, architectural decisions, running builds or tests, committing or pushing without explicit instruction, force-deleting branches (`-D`).
 
@@ -532,7 +582,10 @@ All git pipeline work is delegated to the `git-ops` subagent (`subagent_type: "g
 | `merge-story.sh` | Single story -> epic branch merge + PR create/update + worktree cleanup |
 | `merge-queue.sh` | **Preferred** -- sequential diff-gate + merge for a list of stories |
 | `merge-epic.sh` | Epic -> main squash merge via PR |
-| `update-epics.sh` | Read/write epics.json for state transitions and field updates |
+| `update-epics.sh` | Read/write epics.db for state transitions and field updates |
+| `generate-pr-body.sh` | Generate PR body text from story metadata |
+
+All scripts live in `<project>/.claude/scripts/`.
 
 ---
 
@@ -799,7 +852,7 @@ Escalate coder to Opus (one more attempt)
 
 ## Test Failure Log
 
-When the unit-tester reports a non-trivial failure, the main session appends to `.claude/test-failure-log.md` before re-delegating. The tester is responsible for filling in root cause and analysis; the main session copies these verbatim.
+When the unit-tester reports a non-trivial failure, the main session appends to `.claude/tracking/story-times.md` (or a dedicated test-failure-log) before re-delegating. The tester is responsible for filling in root cause and analysis; the main session copies these verbatim.
 
 ```
 ## [ISO date] — [story id] — [one-line failure title]
@@ -878,59 +931,9 @@ Without this step, parallel features built in separate worktrees silently miss e
 
 ---
 
-## File Structure
-
-```
-~/.claude/                 # This repo
-+-- CLAUDE.md              # Global preferences (communication, code style, React, Firebase)
-+-- ORCHESTRATION.md       # This pipeline (main session only)
-+-- settings.json          # Claude Code settings (hooks wiring, permissions)
-+-- agents/
-|   +-- quick-fixer.md
-|   +-- architect.md
-|   +-- reviewer.md
-|   +-- unit-tester.md
-|   +-- todo-orchestrator.md
-|   +-- epic-planner.md    # Dual-mode: epic planning (background) + task planning (foreground)
-|   +-- git-ops.md         # Git pipeline executor: scripts, rules, forbidden actions
-+-- skills/
-|   +-- todo/              # /todo -- starts a code change via the orchestrator
-|   +-- run-story/         # /run-story -- run trigger sequence
-|   +-- merge/             # /merge -- merge stories into epic branch
-|   +-- status/            # /status -- pipeline state overview
-|   +-- recover/           # /recover -- cross-session recovery
-|   +-- clear-guide/       # /clear-guide -- safe-to-clear check
-|   +-- pre-response-check/# loaded before workflow answers
-|   +-- view-tracking/     # /view-tracking -- charts + key-prompts
-+-- hooks/
-|   +-- load-session-context.sh
-|   +-- require-orch-read.sh
-|   +-- mark-orch-read.sh
-|   +-- guard-direct-edit.sh
-|   +-- warn-sync-heavy-bash.sh
-+-- tracking/
-    +-- key-prompts/       # High-signal prompt logs (YYYY-MM-DD.md)
-    +-- generate-charts.py
-    +-- cost-summary.py
-    +-- backfill.py
-    +-- update-prompts-index.py
-
-<project>/.claude/
-+-- epics.json             # Epic + story state (sole persistent tracking file)
-+-- settings.local.json    # File deny rules (protected files)
-+-- scripts/               # Pipeline shell scripts (setup-story, diff-gate, merge-*, update-epics)
-+-- tracking/
-|   +-- key-prompts/
-|   +-- test-failure-log.md
-|   +-- review-findings.md
-+-- worktrees/             # Active story worktrees (cleaned up after merge)
-```
-
----
-
 ## Guides
 
-Reference documents on specific pipeline topics, available as PDFs in the `guides/` directory:
+Reference documents on specific pipeline topics, available in the `guides/` directory:
 
 | Guide | Description |
 |-------|-------------|
@@ -958,13 +961,13 @@ New feature request (ambiguous)
 Coder done
   +-- diff gate -> [unit-tester (vitest --related)] -> [reviewer]
       -> merge-queue.sh (one agent, sequential per epic branch)
-      -> epics.json snapshot -> epic PR updated
+      -> epics.db snapshot -> epic PR updated
 
 "merge epic X"
   +-- epic branch rebases main -> gh pr merge --squash
       -> main updated (epic branch deleted)
 
 Session crash recovery
-  +-- epics.json + git worktree list + git branch --list
+  +-- epics.db + git worktree list + git branch --list
       -> detect in-flight stories -> ask user: resume or discard?
 ```
