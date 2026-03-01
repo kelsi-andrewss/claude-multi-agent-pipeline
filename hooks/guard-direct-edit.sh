@@ -30,7 +30,7 @@ print(path)
 " 2>/dev/null)
 
 # Allow edits to ~/.claude/ config files (skills, hooks, settings, CLAUDE.md at user level)
-if [[ "$FILE_PATH" == /Users/kelsiandrews/.claude/* ]]; then
+if [[ "$FILE_PATH" == "$HOME/.claude/"* ]]; then
   exit 0
 fi
 
@@ -61,7 +61,7 @@ fi
 
 # Enhanced check: look up the active story's write_targets in epics.db.
 # If a running story exists, check whether this file is in scope.
-DB_FILE="/Users/kelsiandrews/.claude/.claude/epics.db"
+DB_FILE="$HOME/.claude/.claude/epics.db"
 
 if [[ -f "$DB_FILE" ]]; then
   RESULT=$(python3 -c "
