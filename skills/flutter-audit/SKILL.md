@@ -64,9 +64,8 @@ If `pubspec.yaml` does not exist, set `state_mgmt = unknown`.
 Exactly one of the following applies (in priority order):
 
 **A. story_id is set:**
-- Read `.claude/epics.json` from the project root.
-- Find the story entry whose `id` matches story_id. Extract its `branch` field.
-- If branch is null or not found, stop and report: "story_id not found in epics.json or has no branch."
+- Run: `sqlite3 ~/.claude/.claude/epics.db "SELECT branch FROM stories WHERE id='<story_id>' AND archived=0 LIMIT 1;"`
+- If no result or branch is null, stop and report: "story_id not found in epics.db or has no branch."
 - Run: `git -C <project-root> diff main...story/<branch> --name-only`
 - Collect the output lines as the target file list.
 - If the list is empty, report: "No files changed in story/<branch> vs main." and stop.
@@ -94,13 +93,15 @@ In order:
 
 If flag_no_completeness is set, override to null regardless.
 
-### 5. Load epics.json for cross-reference
+### 5. Load open stories for cross-reference
 
-Read `.claude/epics.json`. Build a map:
+Run: `sqlite3 -json ~/.claude/.claude/epics.db "SELECT id, title, write_files FROM stories WHERE state NOT IN ('done','shipped','archived') AND archived=0;"`
+
+Build a map:
 ```
 open_story_map = { story_id: { title, writeFiles[] } }
 ```
-Include only stories where `state` is NOT `done`. This is used in step 9.
+Parse `write_files` as a JSON array. This is used in step 9.
 
 ### 6. Build the audit prompt
 
