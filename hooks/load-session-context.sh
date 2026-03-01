@@ -7,15 +7,15 @@ echo "The following files have been loaded into your context. You MUST treat the
 echo "rules as active constraints before responding to any message this session."
 echo ""
 echo "--- ~/.claude/CLAUDE.md ---"
-cat /Users/kelsiandrews/.claude/CLAUDE.md
+cat "$HOME/.claude/CLAUDE.md"
 echo ""
 echo "--- ~/.claude/ORCHESTRATION.md ---"
-cat /Users/kelsiandrews/.claude/ORCHESTRATION.md
+cat "$HOME/.claude/ORCHESTRATION.md"
 echo ""
 echo "=== MANDATORY TOOL CALL REQUIREMENT ==="
 echo "Before answering ANY question about workflow, pipeline, or how you would handle a task,"
 echo "you MUST use the Read tool to read these files — do NOT answer from memory or loaded context alone:"
-echo "  1. Read /Users/kelsiandrews/.claude/ORCHESTRATION.md"
+echo "  1. Read ~/.claude/ORCHESTRATION.md"
 echo "  2. Read the project CLAUDE.md (find it via Glob if path unknown)"
 echo "Answering without calling Read first is a violation of these rules."
 echo "=== END SESSION CONTEXT ==="
@@ -27,11 +27,11 @@ touch "/tmp/orch-read-${SESSION_ID}"
 # Stale story check: warn if any story has been in a running-like state for >24h.
 # "Running-like" = in-progress, in-review, approved (anything not draft/ready/done/shipped).
 # Uses the story branch's last git commit time as a proxy for last activity.
-DB_FILE="/Users/kelsiandrews/.claude/.claude/epics.db"
+DB_FILE="$HOME/.claude/.claude/epics.db"
 
 if [[ -f "$DB_FILE" ]]; then
 python3 - "$DB_FILE" <<'PYEOF'
-import subprocess, sys, time
+import os, subprocess, sys, time
 
 STALE_SECONDS = 86400  # 24 hours
 RUNNING_STATES = "('in-progress','in-review','approved','running','testing','reviewing','merging')"
@@ -39,7 +39,7 @@ now = time.time()
 stale = []
 
 db_path = sys.argv[1]
-project_root = "/Users/kelsiandrews/.claude"
+project_root = os.path.expanduser("~/.claude")
 
 try:
     result = subprocess.run(
