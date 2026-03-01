@@ -8,6 +8,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -594,6 +595,93 @@ async def audit(
     return report
 
 
+@mcp.tool()
+async def find_bug(
+    symptom: str,
+    paths: list[str] | None = None,
+    model: str | None = None,
+) -> str:
+    """Find the root cause of a bug using Gemini's large context window. Returns a structured diagnosis: root cause, contributing factors, how to confirm, and fix direction. Never generates code.
+
+    Args:
+        symptom: Description of the observed bug behavior or error.
+        paths: Optional list of files or directories to scope the search. If provided, skips the hypothesis pass and loads only these files.
+        model: Optional Gemini model ID override.
+    """
+    FIND_BUG_SYSTEM = (
+        "You are a senior debugging engineer performing root cause analysis. "
+        + NO_CODE_INSTRUCTION
+    )
+
+    audit_context = _load_audit_context()
+    candidate_paths = paths
+    pass1_response = ""
+
+    # Pass 1: hypothesis — only if no explicit paths provided
+    if not candidate_paths:
+        hypothesis_prompt = (
+            f"[System: {FIND_BUG_SYSTEM}]\n\n"
+            "## Task\n\n"
+            "Given the symptom below, identify which source files are most likely involved "
+            "and provide a one-sentence root cause hypothesis. "
+            "List the file paths relative to the project root, one per line, preceded by '- '.\n\n"
+            f"## Symptom\n\n{symptom}"
+        )
+        if audit_context:
+            hypothesis_prompt += f"\n\n## Project Context\n\n{audit_context}"
+
+        pass1_response = await _gemini(hypothesis_prompt, model=model)
+
+        if not pass1_response.startswith("[gemini error"):
+            # Parse candidate file paths from pass 1 response
+            candidate_paths = []
+            for line in pass1_response.splitlines():
+                line = line.strip()
+                if line.startswith("- "):
+                    candidate = line[2:].strip()
+                    if candidate and not candidate.startswith("["):
+                        candidate_paths.append(candidate)
+            if not candidate_paths:
+                candidate_paths = None  # fall back to full discovery
+
+    # Pass 2: diagnosis with targeted files
+    files = _discover_files(candidate_paths)
+    if not files:
+        # Try full discovery as last resort
+        files = _discover_files(None)
+
+    code_content, skipped = _read_files_within_budget(files, MAX_CODE_BYTES)
+
+    diagnosis_system = (
+        f"{FIND_BUG_SYSTEM}\n\n"
+        "Structure your diagnosis with exactly these four sections:\n"
+        "1. **Root cause** — most likely location (file + function/area)\n"
+        "2. **Contributing factors** — conditions that make this fail\n"
+        "3. **How to confirm** — minimal reproduction step or log to look for\n"
+        "4. **Fix direction** — natural language description of the fix"
+    )
+
+    prompt_parts = [f"[System: {diagnosis_system}]"]
+    prompt_parts.append(f"## Symptom\n\n{symptom}")
+
+    if pass1_response and not pass1_response.startswith("[gemini error"):
+        prompt_parts.append(f"## Hypothesis (from initial analysis)\n\n{pass1_response}")
+
+    if audit_context:
+        prompt_parts.append(f"## Project Context\n\n{audit_context}")
+
+    prompt_parts.append(f"## Candidate Source Files\n\n{code_content}")
+
+    if skipped:
+        skipped_list = "\n".join(
+            f"- {p.relative_to(PROJECT_ROOT)}" for p in skipped
+        )
+        prompt_parts.append(f"## Skipped Files (exceeded budget)\n\n{skipped_list}")
+
+    full_prompt = "\n\n".join(prompt_parts)
+    return await _gemini(full_prompt, model=model)
+
+
 def _detect_framework(path: Path) -> str:
     """Detect the frontend framework used at the given project root."""
     if (path / "pubspec.yaml").exists():
@@ -914,6 +1002,7 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
+    _ensure_knowledge_tables(conn)
     return conn
 
 
@@ -976,6 +1065,54 @@ def _ensure_order_idx_column(conn: sqlite3.Connection) -> None:
         pass  # Already exists
 
 
+def _ensure_knowledge_tables(conn: sqlite3.Connection) -> None:
+    """Create decisions, decision_scopes, and patterns tables if they don't exist."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS decisions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            chose TEXT NOT NULL,
+            rejected TEXT,
+            reasoning TEXT,
+            status TEXT DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'reversed')),
+            decided_at TEXT DEFAULT (date('now')),
+            superseded_by TEXT,
+            story_id TEXT,
+            FOREIGN KEY (story_id) REFERENCES stories(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS decision_scopes (
+            decision_id TEXT NOT NULL,
+            scope_type TEXT NOT NULL CHECK (scope_type IN ('file', 'pattern', 'tech')),
+            scope_value TEXT NOT NULL,
+            PRIMARY KEY (decision_id, scope_type, scope_value),
+            FOREIGN KEY (decision_id) REFERENCES decisions(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS patterns (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            category TEXT NOT NULL CHECK (category IN ('react', 'firebase', 'css', 'konva', 'architecture', 'general')),
+            severity TEXT DEFAULT 'must' CHECK (severity IN ('must', 'should', 'prefer')),
+            source TEXT,
+            status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deprecated')),
+            created_at TEXT DEFAULT (date('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_decisions_status ON decisions(status);
+        CREATE INDEX IF NOT EXISTS idx_decisions_story ON decisions(story_id);
+        CREATE INDEX IF NOT EXISTS idx_patterns_category ON patterns(category);
+        CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status) WHERE status = 'active';
+
+        CREATE TABLE IF NOT EXISTS pending_proposals (
+            id    TEXT PRIMARY KEY,
+            data  TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    """)
+
+
 # ---------------------------------------------------------------------------
 # PM Read/Query MCP tools (6 tools)
 # ---------------------------------------------------------------------------
@@ -1016,7 +1153,7 @@ async def pm_list_epics(
                 ).fetchone()[0]
                 ed["total_active_stories"] = total
             result.append(ed)
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         conn.close()
 
@@ -1052,7 +1189,7 @@ async def pm_get_epic(epic_id: str) -> str:
             story_list.append(sd)
 
         ed["stories"] = story_list
-        return json.dumps(ed, indent=2)
+        return json.dumps(ed)
     finally:
         conn.close()
 
@@ -1100,7 +1237,7 @@ async def pm_list_stories(
             f"SELECT * FROM stories WHERE {where} ORDER BY COALESCE(order_idx, 2147483647), id", params
         ).fetchall()
 
-        return json.dumps([_story_to_dict(s) for s in stories], indent=2)
+        return json.dumps([_story_to_dict(s) for s in stories])
     finally:
         conn.close()
 
@@ -1132,7 +1269,7 @@ async def pm_get_story(story_id: str) -> str:
         if blocked_by_me:
             sd["blocks"] = [{"id": r["id"], "title": r["title"], "state": r["state"]} for r in blocked_by_me]
 
-        return json.dumps(sd, indent=2)
+        return json.dumps(sd)
     finally:
         conn.close()
 
@@ -1183,7 +1320,7 @@ async def pm_board(epic_id: str | None = None) -> str:
         if blocked:
             summary["blocked_items"] = blocked
 
-        return json.dumps(summary, indent=2)
+        return json.dumps(summary)
     finally:
         conn.close()
 
@@ -1227,7 +1364,7 @@ async def pm_search(query: str, scope: str | None = None) -> str:
             for t in tasks:
                 results.append({"type": "task", **dict(t)})
 
-        return json.dumps(results, indent=2)
+        return json.dumps(results)
     finally:
         conn.close()
 
@@ -1365,7 +1502,7 @@ async def pm_view(
             "wip": wip,
             "callouts": callouts,
         }
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         conn.close()
 
@@ -1398,18 +1535,21 @@ def _build_plan_prompt(subject: str, context_block: str, code_block: str) -> str
 async def pm_plan(
     epic_id: str | None = None,
     story_id: str | None = None,
+    story_ids: list[str] | None = None,
     paths: list[str] | None = None,
 ) -> str:
     """AI-powered planning tool that reads the codebase and generates task breakdowns, agent assignments, and execution order for epics and stories.
 
-    Three modes:
+    Four modes:
     - Story mode (story_id set): generate tasks + agent + write_files for one story
+    - Multi-story mode (story_ids set): plan a specific set of stories in one call
     - Epic mode (epic_id set, no story_id): plan all draft stories in an epic
     - Bulk mode (neither set): return full roadmap JSON for all active epics/stories
 
     Args:
         epic_id: Scope planning to one epic (epic mode).
         story_id: Scope planning to one story (story mode). Takes priority over epic_id.
+        story_ids: Plan a specific set of stories in one Gemini call (multi-story mode). Takes priority over epic_id.
         paths: Source file paths to pass as codebase context (default: PROJECT_ROOT).
     """
     conn = _get_db()
@@ -1489,6 +1629,85 @@ async def pm_plan(
                 "write_files": plan_data.get("write_files", []),
                 "tasks_created": len(plan_data.get("tasks", [])),
             })
+
+        # ---------------------------------------------------------------
+        # Multi-story mode
+        # ---------------------------------------------------------------
+        if story_ids:
+            errors = []
+            story_list = []
+            for sid in story_ids:
+                row = conn.execute("SELECT * FROM stories WHERE id = ?", (sid,)).fetchone()
+                if not row:
+                    errors.append(f"Story '{sid}' not found.")
+                    continue
+                sd = _story_to_dict(row)
+                if sd["state"] not in ("draft", "ready"):
+                    errors.append(f"Story '{sid}' has state '{sd['state']}' — skipping (only draft/ready planned).")
+                    continue
+                story_list.append(sd)
+
+            if not story_list:
+                return json.dumps({"error": "No plannable stories found.", "details": errors})
+
+            subject_lines = [f"- Story {s['id']}: {s['title']}" for s in story_list]
+            subject = (
+                "Stories to plan (return a JSON array, one object per story in the same order):\n"
+                + "\n".join(subject_lines)
+                + "\n\nEach array element must have: story_id, agent, write_files, tasks, parallel_group, depends_on."
+            )
+
+            prompt = _build_plan_prompt(subject, audit_context, code_content)
+            plan_file = Path(tempfile.mktemp(suffix=".md", prefix="pm_plan_"))
+            raw = await _gemini(prompt)
+            plan_file.write_text(raw, encoding="utf-8")
+
+            try:
+                plans = json.loads(plan_file.read_text(encoding="utf-8"))
+                if not isinstance(plans, list):
+                    plans = [plans]
+            except (json.JSONDecodeError, ValueError):
+                return json.dumps({
+                    "error": "Gemini returned malformed JSON.",
+                    "plan_file": str(plan_file),
+                })
+
+            summary = []
+            for s, plan_data in zip(story_list, plans):
+                sid = s["id"]
+                for task_title in plan_data.get("tasks", []):
+                    row = conn.execute(
+                        "SELECT MAX(CAST(SUBSTR(id, 2) AS INTEGER)) FROM tasks WHERE story_id = ?",
+                        (sid,)
+                    ).fetchone()
+                    next_num = (row[0] or 0) + 1
+                    conn.execute(
+                        "INSERT INTO tasks (id, story_id, title, state, blocked_by) VALUES (?, ?, ?, 'todo', NULL)",
+                        (f"t{next_num}", sid, task_title)
+                    )
+                conn.execute(
+                    "UPDATE stories SET agent = ?, write_files = ? WHERE id = ?",
+                    (
+                        plan_data.get("agent"),
+                        json.dumps(plan_data.get("write_files", [])),
+                        sid,
+                    )
+                )
+                summary.append({
+                    "story_id": sid,
+                    "title": s["title"],
+                    "agent": plan_data.get("agent"),
+                    "tasks_created": len(plan_data.get("tasks", [])),
+                    "parallel_group": plan_data.get("parallel_group", 1),
+                    "depends_on": plan_data.get("depends_on", []),
+                })
+
+            conn.commit()
+
+            result = {"mode": "multi-story", "stories": summary}
+            if errors:
+                result["warnings"] = errors
+            return json.dumps(result)
 
         # ---------------------------------------------------------------
         # Epic mode
@@ -1573,7 +1792,7 @@ async def pm_plan(
                 "mode": "epic",
                 "epic_id": epic_id,
                 "stories": summary,
-            }, indent=2)
+            })
 
         # ---------------------------------------------------------------
         # Bulk mode
@@ -1629,7 +1848,7 @@ async def pm_plan(
 
         roadmap["generated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
         roadmap["mode"] = "bulk"
-        return json.dumps(roadmap, indent=2)
+        return json.dumps(roadmap)
 
     finally:
         conn.close()
@@ -1977,6 +2196,7 @@ async def pm_plan_items(
     epic_id: str | None = None,
     confirmed: bool = False,
     proposal: dict | None = None,
+    proposal_id: str | None = None,
 ) -> str:
     """Bulk planning tool for unstructured todos. Groups items into stories and tasks.
 
@@ -1988,10 +2208,11 @@ async def pm_plan_items(
         items: Raw todo strings to plan.
         epic_id: Optional target epic for all proposed stories.
         confirmed: If True, commit the proposal to the DB.
-        proposal: The proposal dict returned by a prior Phase 1 call (required when confirmed=True).
+        proposal: The proposal dict from Phase 1 (legacy fallback).
+        proposal_id: The proposal_id returned by Phase 1 (preferred over proposal).
     """
-    if confirmed and not proposal:
-        return "Pass the 'proposal' dict from the Phase 1 call when confirmed=True."
+    if confirmed and not proposal and not proposal_id:
+        return "Pass 'proposal_id' (from Phase 1) when confirmed=True."
 
     conn = _get_db()
     try:
@@ -2008,19 +2229,35 @@ async def pm_plan_items(
                 for s in prop["proposed_stories"]:
                     s["epic_id"] = epic_id
 
+            proposal_id = f"prop-{int(time.time())}"
+            conn.execute(
+                "INSERT INTO pending_proposals (id, data) VALUES (?, ?)",
+                (proposal_id, json.dumps(prop))
+            )
+            conn.commit()
+
             return json.dumps({
                 "phase": "proposal",
+                "proposal_id": proposal_id,
                 "item_count": len(items),
                 "story_count": len(prop["proposed_stories"]),
-                "proposal": prop,
+                "proposed_stories": [s["title"] for s in prop["proposed_stories"]],
                 "instructions": (
-                    "Review the proposal. Answer any questions, then call pm_plan_items again "
-                    "with confirmed=True and this proposal (optionally modified) to commit."
+                    "Review titles above. Call pm_plan_items with confirmed=True and proposal_id to commit."
                 ),
-            }, indent=2)
+            })
 
         # Phase 2 — commit
-        prop = proposal
+        if proposal_id:
+            row = conn.execute(
+                "SELECT data FROM pending_proposals WHERE id = ?", (proposal_id,)
+            ).fetchone()
+            if not row:
+                return f"proposal_id '{proposal_id}' not found or already used."
+            prop = json.loads(row["data"])
+            conn.execute("DELETE FROM pending_proposals WHERE id = ?", (proposal_id,))
+        else:
+            prop = proposal
         created_epics: list[dict] = []
         created_stories: list[dict] = []
         created_tasks: list[dict] = []
@@ -2082,7 +2319,7 @@ async def pm_plan_items(
                 f"{len(created_stories)} story(ies), "
                 f"{len(created_tasks)} task(s)."
             ),
-        }, indent=2)
+        })
     finally:
         conn.close()
 
@@ -2096,6 +2333,7 @@ async def pm_update_story(
     model: str | None = None,
     write_files: list[str] | None = None,
     branch: str | None = None,
+    plan_file: str | None = None,
     move_to_epic: str | None = None,
     force: bool = False,
 ) -> str:
@@ -2109,6 +2347,7 @@ async def pm_update_story(
         model: New model.
         write_files: New list of write files.
         branch: New branch name.
+        plan_file: Path to the Claude-written plan file for this story.
         move_to_epic: Epic ID to move the story to.
         force: Skip state transition validation.
     """
@@ -2162,6 +2401,10 @@ async def pm_update_story(
             updates.append("branch = ?")
             params.append(branch)
 
+        if plan_file is not None:
+            updates.append("plan_file = ?")
+            params.append(plan_file)
+
         if move_to_epic is not None:
             epic = conn.execute("SELECT id FROM epics WHERE id = ?", (move_to_epic,)).fetchone()
             if not epic:
@@ -2180,7 +2423,7 @@ async def pm_update_story(
 
         # Return updated story
         updated = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
-        return json.dumps(_story_to_dict(updated), indent=2)
+        return json.dumps(_story_to_dict(updated))
     finally:
         conn.close()
 
@@ -2249,7 +2492,7 @@ async def pm_update_epic(
         conn.commit()
 
         updated = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
-        return json.dumps(_epic_to_dict(updated), indent=2)
+        return json.dumps(_epic_to_dict(updated))
     finally:
         conn.close()
 
@@ -2304,7 +2547,7 @@ async def pm_update_task(
         updated = conn.execute(
             "SELECT * FROM tasks WHERE story_id = ? AND id = ?", (story_id, task_id)
         ).fetchone()
-        return json.dumps(dict(updated), indent=2)
+        return json.dumps(dict(updated))
     finally:
         conn.close()
 
@@ -2393,7 +2636,7 @@ async def pm_organize(
                         (target_epic,)
                     ).fetchall()
                     result_stories = [dict(r) for r in rows]
-                return json.dumps({"mode": "reorder", "warnings": warnings, "stories": result_stories}, indent=2)
+                return json.dumps({"mode": "reorder", "warnings": warnings, "stories": result_stories})
 
             # Single-story placement
             if not story_id:
@@ -2448,7 +2691,7 @@ async def pm_organize(
                 "SELECT id, title, state, order_idx FROM stories WHERE epic_id = ? AND archived = 0 ORDER BY COALESCE(order_idx, 2147483647), id",
                 (target_epic,)
             ).fetchall()
-            return json.dumps({"mode": "reorder", "epic_id": target_epic, "stories": [dict(r) for r in rows]}, indent=2)
+            return json.dumps({"mode": "reorder", "epic_id": target_epic, "stories": [dict(r) for r in rows]})
 
         # ---------------------------------------------------------------
         # Mode: triage
@@ -2526,7 +2769,7 @@ async def pm_organize(
                 "clustering_proposal": clustering_proposal,
                 "suggested_moves": suggested_moves,
                 "instructions": "Use pm_update_story(move_to_epic=...) or pm_plan_items to act on these.",
-            }, indent=2)
+            })
 
         # ---------------------------------------------------------------
         # Mode: cleanup
@@ -2595,7 +2838,7 @@ async def pm_organize(
                     "would_close_epics": would_close,
                     "stale_stories": stale_stories,
                     "task_mismatches": task_mismatches,
-                }, indent=2)
+                })
 
             # Commit
             archived_ids = [r["id"] for r in would_archive]
@@ -2619,7 +2862,7 @@ async def pm_organize(
                 "closed_epics": closed_epic_ids,
                 "stale_stories": stale_stories,
                 "task_mismatches": task_mismatches,
-            }, indent=2)
+            })
 
         # ---------------------------------------------------------------
         # Mode: regroup
@@ -2724,7 +2967,7 @@ async def pm_organize(
                         "Review the proposal, then call pm_organize(mode='regroup', confirmed=True, proposal=<this>) "
                         "to commit. You may modify the proposal before passing it back."
                     ),
-                }, indent=2)
+                })
 
             # Phase 2: commit
             if not proposal:
@@ -2785,7 +3028,7 @@ async def pm_organize(
                 "moved": moved,
                 "created_epics": created_epics,
                 "skipped": skipped,
-            }, indent=2)
+            })
 
         return f"Unhandled mode '{mode}'."
     finally:
@@ -2835,7 +3078,7 @@ async def pm_wip(epic_id: str | None = None) -> str:
             "total_active": sum(r["cnt"] for r in by_state),
             "blocked": [{"id": r["id"], "title": r["title"], "epic_id": r["epic_id"]} for r in blocked],
         }
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         conn.close()
 
@@ -2895,7 +3138,7 @@ async def pm_cycle_time(epic_id: str | None = None, since: str | None = None) ->
             "count": len(items),
             "average_cycle_hours": avg_hours,
         }
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         conn.close()
 
@@ -2942,15 +3185,359 @@ async def pm_throughput(period: str = "week", lookback: int = 4) -> str:
             "total": total,
             "average_per_period": avg,
         }
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Knowledge DB: Decisions MCP tools
+# ---------------------------------------------------------------------------
+
+DECISION_STATUSES = {"active", "superseded", "reversed"}
+SCOPE_TYPES = {"file", "pattern", "tech"}
+
+
+@mcp.tool()
+async def pm_add_decision(
+    title: str,
+    chose: str,
+    rejected: str | None = None,
+    reasoning: str | None = None,
+    scopes: list[dict[str, str]] | None = None,
+    story_id: str | None = None,
+) -> str:
+    """Record an architectural decision with optional file/tech scopes.
+
+    Args:
+        title: Short description of the decision.
+        chose: What was chosen.
+        rejected: What alternatives were rejected.
+        reasoning: Why this choice was made.
+        scopes: List of scope dicts with 'type' (file|pattern|tech) and 'value' keys.
+        story_id: Optional story ID this decision was made during.
+    """
+    conn = _get_db()
+    try:
+        decision_id = _next_id(conn, "decisions", "decision-")
+        conn.execute(
+            """INSERT INTO decisions (id, title, chose, rejected, reasoning, story_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (decision_id, title, chose, rejected, reasoning, story_id),
+        )
+        if scopes:
+            for scope in scopes:
+                scope_type = scope.get("type", "")
+                scope_value = scope.get("value", "")
+                if scope_type not in SCOPE_TYPES:
+                    conn.rollback()
+                    return f"Invalid scope type '{scope_type}'. Valid: {sorted(SCOPE_TYPES)}"
+                conn.execute(
+                    """INSERT INTO decision_scopes (decision_id, scope_type, scope_value)
+                       VALUES (?, ?, ?)""",
+                    (decision_id, scope_type, scope_value),
+                )
+        conn.commit()
+        result = {
+            "id": decision_id,
+            "title": title,
+            "chose": chose,
+            "rejected": rejected,
+            "reasoning": reasoning,
+            "scopes": scopes or [],
+            "story_id": story_id,
+        }
+        return json.dumps(result)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+async def pm_list_decisions(
+    scope_value: str | None = None,
+    scope_type: str | None = None,
+    status: str | None = "active",
+    story_id: str | None = None,
+) -> str:
+    """List decisions, optionally filtered by scope, status, or story.
+
+    Args:
+        scope_value: Filter by scope value (supports LIKE patterns, e.g. 'src/hooks/%').
+        scope_type: Filter by scope type (file, pattern, tech).
+        status: Filter by status (default: 'active'). Set to None/empty for all.
+        story_id: Filter by story ID.
+    """
+    conn = _get_db()
+    try:
+        conditions = []
+        params: list[str] = []
+
+        if scope_value:
+            conditions.append(
+                """d.id IN (SELECT decision_id FROM decision_scopes
+                           WHERE scope_value LIKE ?)"""
+            )
+            params.append(scope_value)
+        if scope_type:
+            if scope_type not in SCOPE_TYPES:
+                return f"Invalid scope_type '{scope_type}'. Valid: {sorted(SCOPE_TYPES)}"
+            conditions.append(
+                """d.id IN (SELECT decision_id FROM decision_scopes
+                           WHERE scope_type = ?)"""
+            )
+            params.append(scope_type)
+        if status:
+            if status not in DECISION_STATUSES:
+                return f"Invalid status '{status}'. Valid: {sorted(DECISION_STATUSES)}"
+            conditions.append("d.status = ?")
+            params.append(status)
+        if story_id:
+            conditions.append("d.story_id = ?")
+            params.append(story_id)
+
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        rows = conn.execute(
+            f"SELECT * FROM decisions d{where} ORDER BY decided_at DESC", params
+        ).fetchall()
+
+        results = []
+        for row in rows:
+            d = dict(row)
+            scope_rows = conn.execute(
+                "SELECT scope_type, scope_value FROM decision_scopes WHERE decision_id = ?",
+                (d["id"],),
+            ).fetchall()
+            d["scopes"] = [{"type": s["scope_type"], "value": s["scope_value"]} for s in scope_rows]
+            results.append(d)
+
+        return json.dumps(results)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+async def pm_supersede_decision(
+    decision_id: str,
+    new_decision_id: str,
+    reason: str | None = None,
+) -> str:
+    """Mark a decision as superseded by a newer one.
+
+    Args:
+        decision_id: The decision being superseded.
+        new_decision_id: The decision that replaces it.
+        reason: Optional explanation for the change.
+    """
+    conn = _get_db()
+    try:
+        old = conn.execute("SELECT id FROM decisions WHERE id = ?", (decision_id,)).fetchone()
+        if not old:
+            return f"Decision '{decision_id}' not found."
+        new = conn.execute("SELECT id FROM decisions WHERE id = ?", (new_decision_id,)).fetchone()
+        if not new:
+            return f"New decision '{new_decision_id}' not found."
+        conn.execute(
+            "UPDATE decisions SET status = 'superseded', superseded_by = ? WHERE id = ?",
+            (new_decision_id, decision_id),
+        )
+        conn.commit()
+        msg = f"Decision '{decision_id}' superseded by '{new_decision_id}'."
+        if reason:
+            msg += f" Reason: {reason}"
+        return msg
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Knowledge DB: Patterns MCP tools
+# ---------------------------------------------------------------------------
+
+PATTERN_CATEGORIES = {"react", "firebase", "css", "konva", "architecture", "general"}
+PATTERN_SEVERITIES = {"must", "should", "prefer"}
+PATTERN_STATUSES = {"active", "deprecated"}
+
+
+@mcp.tool()
+async def pm_add_pattern(
+    title: str,
+    description: str,
+    category: str,
+    severity: str = "must",
+    source: str | None = None,
+) -> str:
+    """Add a coding pattern or pitfall to the knowledge DB.
+
+    Args:
+        title: Short name for the pattern.
+        description: Full description of the pattern or pitfall.
+        category: One of: react, firebase, css, konva, architecture, general.
+        severity: One of: must, should, prefer (default: must).
+        source: Where this pattern came from (e.g. filename, story ID).
+    """
+    if category not in PATTERN_CATEGORIES:
+        return f"Invalid category '{category}'. Valid: {sorted(PATTERN_CATEGORIES)}"
+    if severity not in PATTERN_SEVERITIES:
+        return f"Invalid severity '{severity}'. Valid: {sorted(PATTERN_SEVERITIES)}"
+    conn = _get_db()
+    try:
+        pattern_id = _next_id(conn, "patterns", "pattern-")
+        conn.execute(
+            """INSERT INTO patterns (id, title, description, category, severity, source)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (pattern_id, title, description, category, severity, source),
+        )
+        conn.commit()
+        result = {
+            "id": pattern_id,
+            "title": title,
+            "description": description,
+            "category": category,
+            "severity": severity,
+            "source": source,
+        }
+        return json.dumps(result)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+async def pm_list_patterns(
+    category: str | None = None,
+    severity: str | None = None,
+    status: str | None = "active",
+) -> str:
+    """List patterns/pitfalls, optionally filtered by category, severity, or status.
+
+    Args:
+        category: Filter by category (react, firebase, css, konva, architecture, general).
+        severity: Filter by severity (must, should, prefer).
+        status: Filter by status (default: 'active'). Set to None/empty for all.
+    """
+    conn = _get_db()
+    try:
+        conditions = []
+        params: list[str] = []
+
+        if category:
+            if category not in PATTERN_CATEGORIES:
+                return f"Invalid category '{category}'. Valid: {sorted(PATTERN_CATEGORIES)}"
+            conditions.append("category = ?")
+            params.append(category)
+        if severity:
+            if severity not in PATTERN_SEVERITIES:
+                return f"Invalid severity '{severity}'. Valid: {sorted(PATTERN_SEVERITIES)}"
+            conditions.append("severity = ?")
+            params.append(severity)
+        if status:
+            if status not in PATTERN_STATUSES:
+                return f"Invalid status '{status}'. Valid: {sorted(PATTERN_STATUSES)}"
+            conditions.append("status = ?")
+            params.append(status)
+
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        rows = conn.execute(
+            f"SELECT * FROM patterns{where} ORDER BY category, severity", params
+        ).fetchall()
+
+        return json.dumps([dict(r) for r in rows])
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+async def pm_deprecate_pattern(
+    pattern_id: str,
+    reason: str | None = None,
+) -> str:
+    """Mark a pattern as deprecated.
+
+    Args:
+        pattern_id: The pattern to deprecate.
+        reason: Optional explanation for deprecation.
+    """
+    conn = _get_db()
+    try:
+        row = conn.execute("SELECT id FROM patterns WHERE id = ?", (pattern_id,)).fetchone()
+        if not row:
+            return f"Pattern '{pattern_id}' not found."
+        conn.execute("UPDATE patterns SET status = 'deprecated' WHERE id = ?", (pattern_id,))
+        conn.commit()
+        msg = f"Pattern '{pattern_id}' deprecated."
+        if reason:
+            msg += f" Reason: {reason}"
+        return msg
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Knowledge DB: Pitfalls migration
+# ---------------------------------------------------------------------------
+
+PITFALLS_DIR = Path.home() / ".claude" / "refs"
+PITFALLS_CATEGORY_MAP = {
+    "pitfalls-react.md": "react",
+    "pitfalls-firebase.md": "firebase",
+    "pitfalls-css.md": "css",
+    "pitfalls-konva.md": "konva",
+}
+
+
+def _migrate_pitfalls(conn: sqlite3.Connection) -> dict:
+    """Parse pitfalls markdown files and insert as patterns. Returns summary."""
+    counts: dict[str, int] = {}
+    for filename, category in PITFALLS_CATEGORY_MAP.items():
+        filepath = PITFALLS_DIR / filename
+        if not filepath.exists():
+            continue
+        lines = filepath.read_text(encoding="utf-8").splitlines()
+        inserted = 0
+        for line in lines:
+            line = line.strip()
+            if not line.startswith("- "):
+                continue
+            description = line[2:].strip()
+            # Title = first sentence/clause (up to first — or period)
+            for sep in (" — ", ". ", " – "):
+                if sep in description:
+                    title = description[:description.index(sep)]
+                    break
+            else:
+                title = description[:80]
+            # Skip duplicates
+            existing = conn.execute(
+                "SELECT id FROM patterns WHERE description = ? AND category = ?",
+                (description, category),
+            ).fetchone()
+            if existing:
+                continue
+            pattern_id = _next_id(conn, "patterns", "pattern-")
+            conn.execute(
+                """INSERT INTO patterns (id, title, description, category, severity, source)
+                   VALUES (?, ?, ?, ?, 'must', ?)""",
+                (pattern_id, title, description, category, filename),
+            )
+            inserted += 1
+        counts[category] = inserted
+    conn.commit()
+    return counts
 
 
 if __name__ == "__main__":
     import sys
 
-    if "--http" in sys.argv:
+    if "--migrate-pitfalls" in sys.argv:
+        conn = _get_db()
+        try:
+            counts = _migrate_pitfalls(conn)
+            total = sum(counts.values())
+            print(f"Migrated {total} patterns:")
+            for cat, n in sorted(counts.items()):
+                print(f"  {cat}: {n}")
+        finally:
+            conn.close()
+    elif "--http" in sys.argv:
         mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")
