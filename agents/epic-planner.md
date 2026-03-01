@@ -72,12 +72,11 @@ Triggered by "plan epic: ..." or when a requirements doc needs decomposition int
 
 ### Inputs
 - Epic description or requirements doc content
-- Absolute path to `epics.json` (for dedup check)
 - Absolute path to project root (for Glob/Grep)
 - Output path (typically `$TMPDIR/epic-plan-<epic-slug>.md`)
 
 ### Behavior
-1. Read `epics.json` and deduplicate against existing open stories before proposing new ones.
+1. Query `pm_list_stories` to deduplicate against existing open stories before proposing new ones.
 2. Research the codebase to understand scope, patterns, and dependencies.
 3. Decompose the epic into stories. Each story should have clear write-targets and a one-sentence plan.
 4. Group stories by write-file overlap (same grouping logic as ORCHESTRATION.md ss10) and note dependencies.
@@ -136,7 +135,7 @@ This step is REQUIRED. Apply the algorithm from ORCHESTRATION.md §19.2:
 
 ## Shared constraints
 - Research only. Never edit/write source files, run builds, run tests, commit, or push.
-- Do NOT write to `epics.json` — that is the main session's job after user approval.
+- Do NOT write to `epics.db` directly — use `pm_*` MCP tools or report results for the main session to commit.
 - Use absolute paths for all Glob/Grep/Read calls.
 
 ## CollabBoard architecture awareness
