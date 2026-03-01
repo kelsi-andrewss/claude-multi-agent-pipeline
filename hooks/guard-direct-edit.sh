@@ -4,9 +4,9 @@
 # (.claude/worktrees/). Blocks direct edits to project source files from
 # the main session.
 #
-# Enhanced: also checks the active story's writeFiles list in epics.json.
-# If the file is not in writeFiles AND not in an allowed path, blocks with
-# a scope-creep message. Falls back to warn-only if epics.json is unavailable.
+# Enhanced: also checks the active story's write_targets list in epics.db.
+# If the file is not in write_targets AND not in an allowed path, blocks with
+# a scope-creep message. Falls back to warn-only if epics.db is unavailable.
 #
 # Coder agents running inside a worktree pass automatically because their
 # file paths resolve under the worktree directory.
@@ -39,7 +39,7 @@ if [[ "$FILE_PATH" == */\.claude/worktrees/* ]]; then
   exit 0
 fi
 
-# Allow edits to the project's own .claude/ directory (epics.json, settings, etc.)
+# Allow edits to the project's own .claude/ directory (settings, etc.)
 if [[ "$FILE_PATH" == */\.claude/* ]]; then
   exit 0
 fi
@@ -59,38 +59,42 @@ if [[ -f "$HOTFIX_SENTINEL" ]]; then
   fi
 fi
 
-# Enhanced check: look up the active story's writeFiles in epics.json.
+# Enhanced check: look up the active story's write_targets in epics.db.
 # If a running story exists, check whether this file is in scope.
-EPICS_JSON=$(find /Users/kelsiandrews -maxdepth 5 -name "epics.json" -path "*/.claude/epics.json" 2>/dev/null | head -1)
+DB_FILE="/Users/kelsiandrews/.claude/.claude/epics.db"
 
-if [[ -n "$EPICS_JSON" && -f "$EPICS_JSON" ]]; then
+if [[ -f "$DB_FILE" ]]; then
   RESULT=$(python3 -c "
-import sys, json
+import subprocess, sys
 
-epics_path = '$EPICS_JSON'
+db_path = '$DB_FILE'
 file_path = '$FILE_PATH'
 
+running_states = \"('in-progress','in-review','approved','running','testing','reviewing','merging')\"
+
 try:
-    with open(epics_path) as f:
-        data = json.load(f)
-except:
+    r = subprocess.run(
+        ['sqlite3', db_path,
+         f'SELECT write_targets FROM stories WHERE state IN {running_states} AND archived=0;'],
+        capture_output=True, text=True, timeout=5
+    )
+    rows = [line.strip() for line in r.stdout.strip().splitlines() if line.strip()]
+except Exception:
     print('EPICS_UNAVAILABLE')
     sys.exit(0)
 
-stories = data.get('stories', [])
-running_stories = [s for s in stories if s.get('state') in ('in-progress', 'in-review', 'approved', 'running', 'testing', 'reviewing', 'merging')]
-
-if not running_stories:
-    # No story running — use legacy block behavior
+if not rows:
     print('NO_RUNNING_STORY')
     sys.exit(0)
 
-# Check if file is in any running story's writeFiles
+# write_targets is a newline or comma-separated list of file paths
 all_write_files = []
-for s in running_stories:
-    all_write_files.extend(s.get('writeFiles', []))
+for row in rows:
+    for wf in row.replace(',', '\n').splitlines():
+        wf = wf.strip()
+        if wf:
+            all_write_files.append(wf)
 
-# Normalize: check if file_path ends with any write file path component
 for wf in all_write_files:
     if file_path.endswith(wf) or wf in file_path:
         print('IN_WRITE_FILES')

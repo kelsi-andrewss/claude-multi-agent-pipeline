@@ -55,7 +55,7 @@ if [[ "$RUN_IN_BG" != "true" ]]; then
   if [[ "$HEAVY" == "1" ]]; then
     echo "" >&2
     echo "PARALLELISM WARNING: '$REASON' is running synchronously." >&2
-    echo "  If there is independent work (file reads, worktree setup, epics.json updates)," >&2
+    echo "  If there is independent work (file reads, worktree setup, DB queries)," >&2
     echo "  use run_in_background: true and proceed immediately." >&2
     echo "  Corrected call example:" >&2
     echo "    Bash(command: \"${COMMAND}\", run_in_background: true)" >&2

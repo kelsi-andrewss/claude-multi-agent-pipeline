@@ -36,7 +36,7 @@ echo "$COUNT" > "$COUNTER_FILE"
 # Emit clearing message when threshold is reached
 if [[ "$COUNT" -ge 3 ]]; then
   echo "" >&2
-  echo "Context checkpoint reached (3 stories closed this session). Run \`/clear\` to reset the session. All epic and story state is saved in epics.json." >&2
+  echo "Context checkpoint reached (3 stories closed this session). Run \`/clear\` to reset the session. All epic and story state is saved in epics.db." >&2
 fi
 
 exit 0
