@@ -32,3 +32,4 @@ ide/
 
 # Sensitive / machine-specific
 *.local
+.credentials.json
