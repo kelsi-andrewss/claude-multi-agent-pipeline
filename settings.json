@@ -8,6 +8,7 @@
     ],
     "defaultMode": "default"
   },
+  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -118,5 +119,6 @@
   "enabledPlugins": {
     "ralph-loop@claude-plugins-official": true
   },
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "alwaysThinkingEnabled": false
 }

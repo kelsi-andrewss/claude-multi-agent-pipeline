@@ -30,6 +30,9 @@ todos/
 backups/
 ide/
 
+# Plan files
+plans/
+
 # Sensitive / machine-specific
 *.local
 .credentials.json

@@ -6,7 +6,7 @@ These rules govern the main Claude Code session. Spawned agents (coders, reviewe
 
 ## 1. ROLES
 
-**Claude** — main session agent. Calls Gemini for research and planning, analyzes results, writes plan files, manages worktrees, launches coders, merges. The only DB write Claude makes directly is linking a plan file to a story via `pm_update_story(plan_file=...)`.
+**Claude** — main session agent. Calls Gemini for research and planning, analyzes results, writes plan files, manages worktrees, launches coders, merges. Claude writes `plan_file` and `state` via `pm_update_story(...)` — no other direct DB mutations.
 
 **Gemini** — large-context research and planning engine, accessed via MCP tools (`pm_*`, `gemini_*`). Handles: epic/story/task creation, codebase research, bug finding, audits, and generating implementation plans. Writes to `epics.db` via its own MCP tools.
 
@@ -42,16 +42,18 @@ The full lifecycle from idea to merged code:
 ```
 1. QUEUE     /todo "thing to build"        → appends to .claude/todos.md
 2. PLAN      /todo plan                    → Gemini reads queue, writes epics/stories/tasks to epics.db
-3. DRAFT     /draft-plan story-NNN         → Gemini researches + plans (Claude does NOT pre-explore) → Claude critiques + writes plan file
+3. DRAFT     /draft-plan story-NNN         → Gemini researches + plans → Claude verifies, critiques, + writes plan file
 4. RUN       auto-triggered after draft (see §5)                      → Claude launches coders in isolated worktrees
 5. MERGE     /merge-worktree story-NNN     → Claude merges worktree branch into dev branch
 ```
 
 **Queue** is a scratchpad. Nothing is committed to the DB until `/todo plan` runs.
 
-**Draft** is the critical gate. Gemini provides the large-context research and initial plan; Claude independently analyzes it, identifies gaps or risks, and writes the final plan file. Claude's plan file is what coders execute — not Gemini's raw output.
+**Draft** is the critical gate. Gemini provides the large-context research and initial plan; Claude independently analyzes it, identifies gaps or risks, and writes the final plan file. Claude's plan file is what coders execute — not Gemini's raw output. Claude may do targeted reads of write-target files and their immediate dependencies during critique. This is verification, not redundant research — Gemini does the broad sweep, Claude spot-checks what matters.
 
 **Run** is auto-triggered after `/draft-plan` completes (see §5). No confirmation gate — coders launch immediately.
+
+**Fast-path planning:** Stories meeting ALL criteria — agent is `quick-fixer`, ≤2 write-target files, no protected files, tasks already defined in DB — may skip Gemini research. Claude writes the plan file directly from the story's DB metadata. Fast-path plans still use the standard format (Context / What changes / Verification) and go through the §6 critique checklist.
 
 **One-shot alternative:**
 ```
@@ -65,7 +67,7 @@ The full lifecycle from idea to merged code:
 `epics.db` lives at `~/.claude/.claude/epics.db`. CLI at `~/.claude/.claude/scripts/epics-cli.sh`.
 
 - **Gemini** writes epics, stories, and tasks via `pm_*` MCP tools.
-- **Claude** writes only `plan_file` via `pm_update_story(plan_file=...)`. No other direct DB mutations.
+- **Claude** writes `plan_file` and `state` via `pm_update_story(...)`. No other direct DB mutations (story/task creation, epic management → Gemini).
 - **Read queries** (for recovery, status checks): `sqlite3 ~/.claude/.claude/epics.db "<query>"` or `pm_get_story` / `pm_list_stories`.
 - Never issue raw `INSERT`/`UPDATE`/`DELETE` from the main session except through `epics-cli.sh`.
 
@@ -98,6 +100,8 @@ Before writing the plan file, Claude must independently review Gemini's output a
 - **Past decisions**: query `pm_list_decisions` for decisions scoped to the story's write-target files or tech stack. Surface any conflicts.
 
 If Claude finds significant issues, it surfaces them to the user before writing the plan file. Minor gaps are incorporated silently into the plan file.
+
+**Disagreement model:** Claude states its position with reasoning — on anything, not just high-risk items. Say "this is wrong" not "have you considered." Hold until the user either changes Claude's assessment with new information or explicitly overrides. On override: request rationale per the disagreement protocol in CLAUDE.md, then comply and log. Never re-raise the same concern. Severity determines how long the conversation goes, not whether it happens.
 
 **Model disagreement escalation**: If Claude's critique substantially contradicts Gemini's plan (different files, different approach, conflicting scope), Claude MUST surface both perspectives to the user rather than silently overriding. Format:
 ```
@@ -148,11 +152,30 @@ Every coder prompt must include:
 
 **Validation-first (opt-in)**: Stories with `validation_first: true` require the coder to write a failing test before modifying any write target. The test must capture the expected behavior change, fail for the right reason, then pass after implementation. Include a `## Validation-first` section in the coder prompt when this flag is set. Set this flag during `/draft-plan` when the story has testable behavior and existing test infrastructure.
 
+**Clarification channel (NEED_DECISION):** If a coder encounters a blocking ambiguity the plan doesn't resolve (e.g., plan says "use existing utility" but none exists with that name), the coder may return exactly once per story:
+
+```
+NEED_DECISION: <one-line blocker description>
+Option A: <concrete option>
+Option B: <concrete option>
+[Option C: <concrete option>]
+```
+
+The main session picks an option and resumes the coder agent with the decision. If all options are inadequate, Claude may propose one alternative (Option Claude) with brief reasoning. This is a single concrete alternative, not a replan. A second NEED_DECISION in the same story is treated as BLOCKED.
+
+**Escalation interaction:** NEED_DECISION does not count toward the 2-BLOCKING escalation threshold in §9. Only BLOCKED returns count. A story that returns NEED_DECISION → (resumed) → DONE has zero BLOCKING round-trips.
+
 ---
 
 ## 9. MERGE SEQUENCE
 
 After a coder completes:
+
+**NEED_DECISION handling:** If a coder returns NEED_DECISION:
+1. Story stays `in-progress`. Worktree is preserved.
+2. Claude reviews the options and picks one (with brief reasoning).
+3. Claude resumes the coder agent with: "Decision: Option <X>. Continue implementation."
+4. Coder completes normally (DONE or BLOCKED). Proceed to step 0.
 
 0. Before merging: verify story state is `done` or `approved`. If `in-progress`, wait for coder to finish or ask user to confirm forcing the merge.
 1. Diff gate: confirm only expected files changed.
@@ -163,6 +186,19 @@ After a coder completes:
 6. Auto-launch: immediately run `/run-stories` for any stories that became unblocked and are `ready` with a plan file. Do NOT ask for confirmation — just print a summary of what's launching and invoke the skill.
 
 **Escalation**: 2 BLOCKING round-trips → escalate coder to Opus (architect stories only). Opus still BLOCKING → story → `blocked`, report to user.
+
+**Restart (plan-level failure):** If a coder fails because the plan was wrong — targeted the wrong files, assumed a utility that doesn't exist, or scoped the change incorrectly — escalating the model won't help. Instead:
+1. Reset the worktree: `git -C <worktree> reset --hard HEAD && git -C <worktree> clean -fd`
+2. Write a new plan file incorporating what the failed attempt revealed. Reference the failure explicitly: "Previous plan assumed X, but Y is actually the case."
+3. Relaunch coder at the same model level (this is a pivot, not an escalation).
+4. Max 1 restart per story. A second plan-level failure → story `blocked`, report to user.
+
+Restart is distinct from escalation. Escalation says "the coder wasn't capable enough." Restart says "the plan was wrong." Claude decides which applies based on the coder's output — if the coder did exactly what the plan said and it didn't work, that's a restart. If the coder couldn't execute a sound plan, that's escalation.
+
+**Outcome logging**: Every terminal transition through this section gets logged to `~/.claude/outcomes.md`:
+- Merged (after `/merge-worktree`) → logged by merge-worktree Step 5.5
+- Blocked (after escalation exhausted or failed restart) → append with `**Result**: blocked` and the blocking reason
+- Rejected by user → append with `**Result**: rejected` and the user's stated reason
 
 **Parallel stories**: run if no write-target overlap. First to finish merges first; second rebases. Conflict → pause, report.
 
