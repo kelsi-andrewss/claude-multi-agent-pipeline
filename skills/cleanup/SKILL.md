@@ -67,8 +67,8 @@ For each `story-NNN` in the parsed story IDs:
 
 For each `epic-NNN` in the parsed epic IDs:
 
-1. Call `pm_get_epic(epic_id)` → extract `title`, `state`.
-2. Compute `epic-slug`: lowercase title, replace spaces and non-alphanumeric chars with `-`, collapse consecutive `-`, truncate to 40 chars.
+1. Call `pm_dev_branch(epic_id)` → extract `dev_branch`, `epic_slug`.
+2. Call `pm_get_epic(epic_id)` → extract `title`, `state`.
 3. Call `pm_list_stories(epic_id=epic_id)` → get all stories.
 4. For each story not yet in a terminal state (`done`, `shipped`, `archived`):
    - Call `pm_update_story(story_id, state="done", force=True)`.
@@ -76,9 +76,9 @@ For each `epic-NNN` in the parsed epic IDs:
 5. Call `pm_update_epic(epic_id, state="done")`.
 6. Delete epic dev branch on remote:
    ```bash
-   git push origin --delete dev/<epic-slug> 2>/dev/null || true
+   git push origin --delete <dev_branch> 2>/dev/null || true
    ```
-   Add `dev/<epic-slug>` to `deleted_branches` if the slug was non-empty.
+   Add `<dev_branch>` to `deleted_branches` if `dev_branch` is not `"dev"`.
 7. Add `epic-NNN "<title>"` to `closed_epics`.
 
 ---
