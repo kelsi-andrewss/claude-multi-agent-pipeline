@@ -223,8 +223,11 @@ def _load_audit_prompt() -> str:
     )
 
 
-async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL) -> str:
+async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_instruction: str | None = None) -> str:
     """Call gemini CLI in headless mode and return the response text."""
+    final_prompt = prompt
+    if system_instruction:
+        final_prompt = f"[System: {system_instruction}]\n\n{prompt}"
     cmd: list[str] = ["gemini"]
     if model:
         cmd.extend(["-m", model])
@@ -235,7 +238,7 @@ async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL) -> str:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await proc.communicate(input=prompt.encode())
+    stdout, stderr = await proc.communicate(input=final_prompt.encode())
     if proc.returncode != 0:
         err = stderr.decode().strip()
         return f"[gemini error (exit {proc.returncode})]: {err}"
@@ -262,8 +265,7 @@ async def gemini_generate(
     combined_instruction = NO_CODE_INSTRUCTION
     if system_instruction:
         combined_instruction = f"{NO_CODE_INSTRUCTION}\n\n{system_instruction}"
-    full_prompt = f"[System: {combined_instruction}]\n\n{prompt}"
-    return await _gemini(full_prompt, model=model)
+    return await _gemini(prompt, model=model, system_instruction=combined_instruction)
 
 
 @mcp.tool()
@@ -288,8 +290,7 @@ async def gemini_chat(
     combined_instruction = NO_CODE_INSTRUCTION
     if system_instruction:
         combined_instruction = f"{NO_CODE_INSTRUCTION}\n\n{system_instruction}"
-    full_prompt = f"[System: {combined_instruction}]\n\n{conversation}"
-    return await _gemini(full_prompt, model=model)
+    return await _gemini(conversation, model=model, system_instruction=combined_instruction)
 
 
 @mcp.tool()
@@ -351,16 +352,14 @@ async def plan(
         "2. Key risks or edge cases to watch for\n"
         "3. Testing strategy (what to test, how)\n"
         "4. Dependencies or prerequisites\n"
-        "Keep it actionable — no hand-waving.\n\n"
-        f"{NO_CODE_INSTRUCTION}"
+        "Keep it actionable — no hand-waving."
     )
 
-    full_prompt = (
-        f"[System: {system_instruction}]\n\n"
+    prompt = (
         f"## Task\n{task}\n\n"
         f"## Project Context\n{context_block}"
     )
-    return await _gemini(full_prompt)
+    return await _gemini(prompt, system_instruction=system_instruction)
 
 
 @mcp.tool()
@@ -388,12 +387,11 @@ async def analyze(
         "Give a verdict: APPROVE, NEEDS CHANGES, or REJECT with specific line-level feedback.\n\n"
         "For DESIGN: evaluate feasibility, alignment with project architecture, trade-offs. "
         "Give a verdict: PROCEED, REVISE, or RECONSIDER with concrete reasoning.\n\n"
-        "Be opinionated and direct. Reference project conventions where relevant.\n\n"
-        f"{NO_CODE_INSTRUCTION}"
+        "Be opinionated and direct. Reference project conventions where relevant."
     )
 
-    full_prompt = f"[System: {system_instruction}]\n\n" + "\n\n".join(prompt_parts)
-    return await _gemini(full_prompt)
+    prompt = "\n\n".join(prompt_parts)
+    return await _gemini(prompt, system_instruction=system_instruction)
 
 
 async def _run_tests(
@@ -1522,7 +1520,7 @@ PLAN_SYSTEM_INSTRUCTION = (
 
 def _build_plan_prompt(subject: str, context_block: str, code_block: str) -> str:
     """Build a Gemini prompt for planning epics/stories. Returns valid-JSON-only prompt."""
-    parts = [f"[System: {PLAN_SYSTEM_INSTRUCTION}]"]
+    parts = []
     if context_block:
         parts.append(f"## Project Context\n\n{context_block}")
     if code_block:
@@ -1589,7 +1587,7 @@ async def pm_plan(
 
             prompt = _build_plan_prompt(subject, audit_context, code_content)
             plan_file = Path(tempfile.mktemp(suffix=".md", prefix="pm_plan_"))
-            raw = await _gemini(prompt)
+            raw = await _gemini(prompt, system_instruction=PLAN_SYSTEM_INSTRUCTION)
             plan_file.write_text(raw, encoding="utf-8")
 
             try:
@@ -1659,7 +1657,7 @@ async def pm_plan(
 
             prompt = _build_plan_prompt(subject, audit_context, code_content)
             plan_file = Path(tempfile.mktemp(suffix=".md", prefix="pm_plan_"))
-            raw = await _gemini(prompt)
+            raw = await _gemini(prompt, system_instruction=PLAN_SYSTEM_INSTRUCTION)
             plan_file.write_text(raw, encoding="utf-8")
 
             try:
@@ -1743,7 +1741,7 @@ async def pm_plan(
 
             prompt = _build_plan_prompt(subject, audit_context, code_content)
             plan_file = Path(tempfile.mktemp(suffix=".md", prefix="pm_plan_"))
-            raw = await _gemini(prompt)
+            raw = await _gemini(prompt, system_instruction=PLAN_SYSTEM_INSTRUCTION)
             plan_file.write_text(raw, encoding="utf-8")
 
             try:
@@ -1835,7 +1833,7 @@ async def pm_plan(
 
         prompt = _build_plan_prompt(subject, audit_context, code_content)
         plan_file = Path(tempfile.mktemp(suffix=".md", prefix="pm_plan_"))
-        raw = await _gemini(prompt)
+        raw = await _gemini(prompt, system_instruction=PLAN_SYSTEM_INSTRUCTION)
         plan_file.write_text(raw, encoding="utf-8")
 
         try:
