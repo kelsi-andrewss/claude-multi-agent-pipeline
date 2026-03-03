@@ -2,6 +2,12 @@
 .claude/epics.db
 .claude/epics.db-shm
 .claude/epics.db-wal
+
+# OpenMemory
+.claude/openmemory.sqlite
+.claude/openmemory.sqlite-wal
+.claude/openmemory.sqlite-shm
+.claude/openmemory-server/
 .claude/epics.json.bak
 .claude/hotfix-log.md
 
@@ -36,3 +42,4 @@ plans/
 # Sensitive / machine-specific
 *.local
 .credentials.json
+plugins/marketplaces/

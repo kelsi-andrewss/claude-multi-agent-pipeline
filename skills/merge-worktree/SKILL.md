@@ -205,12 +205,35 @@ Call `pm_update_epic(epic_id, auto_close=True)`.
 
 ## Step 5.5: Log outcome
 
+Determine outcome metadata:
+- `agent`: from `pm_get_story(story_id)` agent field
+- `model`: infer from coder launch context this session (haiku/sonnet/opus). If unknown, "unknown".
+- `cycle_time`: compute from epics.db — time between story state entering `in-progress` and
+  current timestamp. Format as hours (e.g., "2.1h"). If timestamps unavailable, "unknown".
+- `coder_effort`: read `/tmp/coder-effort-<story_id>.json` (written by run-stories Step 5 on
+  agent completion). Format as "[model] · [tokens] tokens · [calls] calls · [duration]s".
+  If the file doesn't exist (story was run outside run-stories, or pre-dates this change),
+  write "not captured". Delete the temp file after reading.
+- `skills_list`: read `~/.claude/.claude/tracking/skill-telemetry.jsonl`, filter by current
+  session_id, collect distinct skill values. If missing, use "merge-worktree".
+- `friction_summary`: read `~/.claude/friction-log.md`, count entries matching this story_id.
+  Format as "N: cat1, cat2" or "0 (clean)".
+- `memory_list`: recall OpenMemory queries during this session's plan critique or coder prompt
+  construction for this story. If any influenced a decision, list topics. Otherwise "none".
+
 Append to `~/.claude/outcomes.md`:
 
 ```
 ## [ISO date] -- [story_id] -- [title]
 **Intent**: [story title from DB]
 **Result**: merged
+**Agent**: [agent]
+**Model**: [model]
+**Cycle time**: [cycle_time]
+**Coder effort**: [coder_effort]
+**Skills used**: [skills_list]
+**Friction events**: [friction_summary]
+**Memory attributed**: [memory_list]
 **What worked**: [brief — infer from merge process: clean execution, or note if escalation/restart occurred]
 **What failed**: [brief — "nothing" or summarize any coder failures/restarts that preceded the merge]
 ```

@@ -4,11 +4,16 @@
       "Bash(/opt/homebrew/opt/claude-code-tracker/libexec/src/stop-hook.sh*)",
       "Bash(~/.claude/hooks/context-check.sh*)",
       "Bash(~/.claude/hooks/cost-alert.sh*)",
-      "Bash(~/.claude/hooks/guard-protected-files.sh*)"
+      "Bash(~/.claude/hooks/guard-protected-files.sh*)",
+      "Bash(~/.claude/hooks/block-enter-worktree.sh*)",
+      "Bash(~/.claude/hooks/block-env-read.sh*)",
+      "Bash(~/.claude/hooks/session-learning-check.sh*)",
+      "Bash(~/.claude/hooks/log-skill-invocation.sh*)",
+      "mcp__openmemory__openmemory_store",
+      "mcp__openmemory__openmemory_query"
     ],
     "defaultMode": "default"
   },
-  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -46,6 +51,26 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/block-enter-worktree.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/block-env-read.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -70,6 +95,17 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/log-skill-invocation.sh",
+            "timeout": 5,
+            "async": true
+          }
+        ]
       }
     ],
     "Stop": [
@@ -88,6 +124,16 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/cost-alert.sh",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/session-learning-check.sh",
             "timeout": 10,
             "async": true
           }
@@ -119,6 +165,5 @@
   "enabledPlugins": {
     "ralph-loop@claude-plugins-official": true
   },
-  "skipDangerousModePermissionPrompt": true,
-  "alwaysThinkingEnabled": false
+  "skipDangerousModePermissionPrompt": true
 }

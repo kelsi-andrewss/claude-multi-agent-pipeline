@@ -1,6 +1,7 @@
 #!/bin/bash
-# Injects CLAUDE.md and ORCHESTRATION.md into Claude's context at session start.
-# This ensures pipeline rules are loaded before the first user message.
+# Injects CLAUDE.md into Claude's context at session start.
+# Orchestration-specific context (ORCHESTRATION.md, behavioral-prefs, agenda)
+# is only loaded when working inside the ~/.claude/ project.
 
 echo "=== SESSION CONTEXT: MANDATORY PRE-READ ==="
 echo "The following files have been loaded into your context. You MUST treat their"
@@ -9,36 +10,63 @@ echo ""
 echo "--- ~/.claude/CLAUDE.md ---"
 cat "$HOME/.claude/CLAUDE.md"
 echo ""
-echo "--- ~/.claude/ORCHESTRATION.md ---"
-cat "$HOME/.claude/ORCHESTRATION.md"
-echo ""
-if [[ -f "$HOME/.claude/behavioral-prefs.md" ]]; then
-  echo "--- ~/.claude/behavioral-prefs.md ---"
-  cat "$HOME/.claude/behavioral-prefs.md"
+
+# Orchestration context — only when working in the ~/.claude/ project
+if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
+  echo "--- ~/.claude/ORCHESTRATION.md ---"
+  cat "$HOME/.claude/ORCHESTRATION.md"
   echo ""
-fi
-if [[ -f "$HOME/.claude/session-handoff.md" ]]; then
-  echo "=== SESSION HANDOFF (from previous session) ==="
-  cat "$HOME/.claude/session-handoff.md"
-  echo ""
-fi
-echo "=== MANDATORY TOOL CALL REQUIREMENT ==="
-echo "Before answering ANY question about workflow, pipeline, or how you would handle a task,"
-echo "you MUST use the Read tool to read these files — do NOT answer from memory or loaded context alone:"
-echo "  1. Read ~/.claude/ORCHESTRATION.md"
-echo "  2. Read the project CLAUDE.md (find it via Glob if path unknown)"
-echo "Answering without calling Read first is a violation of these rules."
-echo "=== END SESSION CONTEXT ==="
+  if [[ -f "$HOME/.claude/behavioral-prefs.md" ]]; then
+    echo "--- ~/.claude/behavioral-prefs.md ---"
+    cat "$HOME/.claude/behavioral-prefs.md"
+    echo ""
+  fi
+  if [[ -f "$HOME/.claude/session-handoff.md" ]]; then
+    echo "=== SESSION HANDOFF (from previous session) ==="
+    cat "$HOME/.claude/session-handoff.md"
+    echo ""
+  fi
+  echo "=== MANDATORY TOOL CALL REQUIREMENT ==="
+  echo "Before answering ANY question about workflow, pipeline, or how you would handle a task,"
+  echo "you MUST use the Read tool to read these files — do NOT answer from memory or loaded context alone:"
+  echo "  1. Read ~/.claude/ORCHESTRATION.md"
+  echo "  2. Read the project CLAUDE.md (find it via Glob if path unknown)"
+  echo "Answering without calling Read first is a violation of these rules."
 
-# Satisfy the orch-read guard so no explicit Read is required this session
-SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
-touch "/tmp/orch-read-${SESSION_ID}"
+  # Satisfy the orch-read guard so no explicit Read is required this session
+  SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
+  touch "/tmp/orch-read-${SESSION_ID}"
 
-# Session agenda + stale detection + distillation trigger (single Python block)
-DB_FILE="$HOME/.claude/.claude/epics.db"
+  # OpenMemory health check — warn if Ollama is unreachable
+  if ! curl -s --connect-timeout 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
+    echo ""
+    echo "=== OPENMEMORY WARNING ==="
+    echo "  Ollama not reachable at localhost:11434."
+    echo "  Memory queries disabled this session. Run: ollama serve"
+    echo ""
+  fi
 
-if [[ -f "$DB_FILE" ]]; then
-python3 - "$DB_FILE" "$HOME/.claude" <<'PYEOF'
+  # Snapshot behavioral file mtimes for session-learning-check Stop hook
+  if stat -f %m / >/dev/null 2>&1; then
+    _mtime() { stat -f %m "$1" 2>/dev/null || echo "0"; }
+  elif stat -c %Y / >/dev/null 2>&1; then
+    _mtime() { stat -c %Y "$1" 2>/dev/null || echo "0"; }
+  else
+    _mtime() { python3 -c "import os; print(int(os.path.getmtime('$1')))" 2>/dev/null || echo "0"; }
+  fi
+  SNAPSHOT="/tmp/session-mtimes-${SESSION_ID}"
+  DISAGREE_MTIME=$(_mtime "$HOME/.claude/disagreements.md")
+  OUTCOMES_MTIME=$(_mtime "$HOME/.claude/outcomes.md")
+  cat > "$SNAPSHOT" <<SNAP
+DISAGREE_MTIME=$DISAGREE_MTIME
+OUTCOMES_MTIME=$OUTCOMES_MTIME
+SNAP
+
+  # Session agenda + stale detection + distillation trigger (single Python block)
+  DB_FILE="$HOME/.claude/.claude/epics.db"
+
+  if [[ -f "$DB_FILE" ]]; then
+  python3 - "$DB_FILE" "$HOME/.claude" <<'PYEOF'
 import os, subprocess, sys, time, re
 from datetime import datetime, timezone
 
@@ -213,6 +241,9 @@ if unprocessed >= 5:
     print("  Review and distill before starting work.")
     print("")
 PYEOF
+  fi
 fi
+
+echo "=== END SESSION CONTEXT ==="
 
 exit 0
