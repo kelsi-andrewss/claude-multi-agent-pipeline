@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from tools_pm_helpers import _get_db
+from tools_pm_helpers import _db_op
 
 
 def register(mcp):
@@ -30,8 +30,7 @@ def register(mcp):
         if metric not in valid_metrics:
             return f"Invalid metric '{metric}'. Valid: {sorted(valid_metrics)}"
 
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             epic_filter = ""
             params: list = []
             if epic_id:
@@ -207,5 +206,3 @@ def register(mcp):
                     "trend": trend,
                 },
             })
-        finally:
-            conn.close()

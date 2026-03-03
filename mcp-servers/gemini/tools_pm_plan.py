@@ -8,7 +8,7 @@ from pathlib import Path
 
 from constants import MAX_CODE_BYTES
 from gemini_client import _discover_files, _gemini, _load_audit_context, _read_files_within_budget
-from tools_pm_helpers import _add_task_to_story, _apply_plan_to_story, _build_plan_prompt, _get_db, _story_to_dict
+from tools_pm_helpers import _add_task_to_story, _apply_plan_to_story, _build_plan_prompt, _db_op, _story_to_dict
 
 
 def register(mcp):
@@ -40,8 +40,7 @@ def register(mcp):
             context: Optional requirements/PRD text to inject into the Gemini planning prompt as user context.
         """
         _root = Path(project_root).resolve() if project_root else None
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             per_story_paths: dict[str, list[str]] | None = None
             if stories:
                 story_ids = [s["story_id"] for s in stories]
@@ -100,7 +99,6 @@ def register(mcp):
                         story_id,
                     )
                 )
-                conn.commit()
                 return json.dumps({
                     "mode": "story",
                     "story_id": story_id,
@@ -188,8 +186,6 @@ def register(mcp):
                         continue
                     summary.append({"title": s["title"], **_apply_plan_to_story(conn, sid, plan_data)})
 
-                conn.commit()
-
                 result = {"mode": "multi-story", "stories": summary}
                 if errors:
                     result["warnings"] = errors
@@ -253,8 +249,6 @@ def register(mcp):
                         continue
                     summary.append({"title": s["title"], **_apply_plan_to_story(conn, sid, plan_data)})
 
-                conn.commit()
-
                 return json.dumps({
                     "mode": "epic",
                     "epic_id": epic_id,
@@ -313,9 +307,6 @@ def register(mcp):
             roadmap["mode"] = "bulk"
             return json.dumps(roadmap)
 
-        finally:
-            conn.close()
-
     @mcp.tool()
     async def pm_critique(
         story_ids: list[str],
@@ -335,8 +326,7 @@ def register(mcp):
             model: Optional Gemini model ID override.
         """
         _root = Path(project_root).resolve() if project_root else None
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             stories_info = []
             for i, sid in enumerate(story_ids):
                 row = conn.execute("SELECT * FROM stories WHERE id = ?", (sid,)).fetchone()
@@ -452,8 +442,6 @@ def register(mcp):
                 "finding_count": len(findings),
                 "blocking_count": sum(1 for f in findings if f.get("severity") == "blocking"),
             })
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_check_conflicts(story_ids: list[str]) -> str:
@@ -462,8 +450,7 @@ def register(mcp):
         Args:
             story_ids: List of story IDs to check for conflicts.
         """
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             stories_data = {}
             for sid in story_ids:
                 row = conn.execute("SELECT id, write_files FROM stories WHERE id = ?", (sid,)).fetchone()
@@ -499,5 +486,3 @@ def register(mcp):
                 "safe_parallel": safe_parallel,
                 "sequential": sequential,
             })
-        finally:
-            conn.close()

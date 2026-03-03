@@ -6,8 +6,7 @@ import json
 from datetime import datetime, timedelta
 
 from tools_pm_helpers import (
-    _ensure_order_idx_column,
-    _get_db,
+    _db_op,
     _group_items,
     _next_id,
     _score_stories_by_similarity,
@@ -43,10 +42,7 @@ def register(mcp):
             ranked: Full ordered list of story IDs for bulk ranking.
             epic_id: Scope for reorder when using anchor params.
         """
-        conn = _get_db()
-        try:
-            _ensure_order_idx_column(conn)
-
+        with _db_op() as conn:
             if ranked is not None:
                 if not ranked:
                     return "ranked list is empty."
@@ -57,7 +53,6 @@ def register(mcp):
                         unknowns.append(sid)
                         continue
                     conn.execute("UPDATE stories SET order_idx = ? WHERE id = ?", (i, sid))
-                conn.commit()
                 warnings = [f"Unknown story IDs skipped: {unknowns}"] if unknowns else []
                 first_known = next((sid for sid in ranked if sid not in unknowns), None)
                 if first_known:
@@ -99,7 +94,6 @@ def register(mcp):
             ).fetchone()[0]
             if has_nulls:
                 _renumber_epic_stories(conn, target_epic)
-                conn.commit()
 
             anchor_row = conn.execute("SELECT order_idx FROM stories WHERE id = ?", (anchor_id,)).fetchone()
             anchor_idx = anchor_row["order_idx"]
@@ -110,7 +104,6 @@ def register(mcp):
                 new_idx = anchor_idx + 1
 
             conn.execute("UPDATE stories SET order_idx = ? WHERE id = ?", (new_idx, story_id))
-            conn.commit()
 
             collision = conn.execute(
                 "SELECT COUNT(*) FROM stories WHERE epic_id = ? AND archived = 0 AND order_idx = ? AND id != ?",
@@ -118,15 +111,12 @@ def register(mcp):
             ).fetchone()[0]
             if collision:
                 _renumber_epic_stories(conn, target_epic)
-                conn.commit()
 
             rows = conn.execute(
                 "SELECT id, title, state, order_idx FROM stories WHERE epic_id = ? AND archived = 0 ORDER BY COALESCE(order_idx, 2147483647), id",
                 (target_epic,)
             ).fetchall()
             return json.dumps({"mode": "reorder", "epic_id": target_epic, "stories": [dict(r) for r in rows]})
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_housekeep(
@@ -151,10 +141,7 @@ def register(mcp):
         if mode not in valid_modes:
             return f"Invalid mode '{mode}'. Valid modes: {sorted(valid_modes)}"
 
-        conn = _get_db()
-        try:
-            _ensure_order_idx_column(conn)
-
+        with _db_op() as conn:
             # Mode: triage
             if mode == "triage":
                 epic_filter = " AND s.epic_id = ?" if epic_id else ""
@@ -291,7 +278,6 @@ def register(mcp):
                     if remaining == 0:
                         conn.execute("UPDATE epics SET state = 'done' WHERE id = ?", (eid,))
 
-                conn.commit()
                 return json.dumps({
                     "mode": "cleanup",
                     "dry_run": False,
@@ -441,7 +427,6 @@ def register(mcp):
                     conn.execute("UPDATE stories SET epic_id = ? WHERE id = ?", (to_epic, sid))
                     moved.append({"story_id": sid, "to_epic": to_epic})
 
-                conn.commit()
                 return json.dumps({
                     "mode": "regroup",
                     "phase": "committed",
@@ -451,5 +436,3 @@ def register(mcp):
                 })
 
             return f"Unhandled mode '{mode}'."
-        finally:
-            conn.close()

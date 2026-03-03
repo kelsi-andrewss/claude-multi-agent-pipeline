@@ -14,7 +14,7 @@ from constants import (
     PITFALLS_DIR,
     SCOPE_TYPES,
 )
-from tools_pm_helpers import _get_db, _next_id
+from tools_pm_helpers import _db_op, _next_id
 
 
 def _migrate_pitfalls(conn) -> dict:
@@ -75,8 +75,7 @@ def register(mcp):
             scopes: List of scope dicts with 'type' (file|pattern|tech) and 'value' keys.
             story_id: Optional story ID this decision was made during.
         """
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             decision_id = _next_id(conn, "decisions", "decision-")
             conn.execute(
                 """INSERT INTO decisions (id, title, chose, rejected, reasoning, story_id)
@@ -95,7 +94,6 @@ def register(mcp):
                            VALUES (?, ?, ?)""",
                         (decision_id, scope_type, scope_value),
                     )
-            conn.commit()
             result = {
                 "id": decision_id,
                 "title": title,
@@ -106,8 +104,6 @@ def register(mcp):
                 "story_id": story_id,
             }
             return json.dumps(result)
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_list_decisions(
@@ -124,8 +120,7 @@ def register(mcp):
             status: Filter by status (default: 'active'). Set to None/empty for all.
             story_id: Filter by story ID.
         """
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             conditions = []
             params: list[str] = []
 
@@ -168,8 +163,6 @@ def register(mcp):
                 results.append(d)
 
             return json.dumps(results)
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_supersede_decision(
@@ -184,8 +177,7 @@ def register(mcp):
             new_decision_id: The decision that replaces it.
             reason: Optional explanation for the change.
         """
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             old = conn.execute("SELECT id FROM decisions WHERE id = ?", (decision_id,)).fetchone()
             if not old:
                 return f"Decision '{decision_id}' not found."
@@ -196,13 +188,10 @@ def register(mcp):
                 "UPDATE decisions SET status = 'superseded', superseded_by = ? WHERE id = ?",
                 (new_decision_id, decision_id),
             )
-            conn.commit()
             msg = f"Decision '{decision_id}' superseded by '{new_decision_id}'."
             if reason:
                 msg += f" Reason: {reason}"
             return msg
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_add_pattern(
@@ -225,15 +214,13 @@ def register(mcp):
             return f"Invalid category '{category}'. Valid: {sorted(PATTERN_CATEGORIES)}"
         if severity not in PATTERN_SEVERITIES:
             return f"Invalid severity '{severity}'. Valid: {sorted(PATTERN_SEVERITIES)}"
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             pattern_id = _next_id(conn, "patterns", "pattern-")
             conn.execute(
                 """INSERT INTO patterns (id, title, description, category, severity, source)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (pattern_id, title, description, category, severity, source),
             )
-            conn.commit()
             result = {
                 "id": pattern_id,
                 "title": title,
@@ -243,8 +230,6 @@ def register(mcp):
                 "source": source,
             }
             return json.dumps(result)
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_list_patterns(
@@ -259,8 +244,7 @@ def register(mcp):
             severity: Filter by severity (must, should, prefer).
             status: Filter by status (default: 'active'). Set to None/empty for all.
         """
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             conditions = []
             params: list[str] = []
 
@@ -286,8 +270,6 @@ def register(mcp):
             ).fetchall()
 
             return json.dumps([dict(r) for r in rows])
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_deprecate_pattern(
@@ -300,16 +282,12 @@ def register(mcp):
             pattern_id: The pattern to deprecate.
             reason: Optional explanation for deprecation.
         """
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             row = conn.execute("SELECT id FROM patterns WHERE id = ?", (pattern_id,)).fetchone()
             if not row:
                 return f"Pattern '{pattern_id}' not found."
             conn.execute("UPDATE patterns SET status = 'deprecated' WHERE id = ?", (pattern_id,))
-            conn.commit()
             msg = f"Pattern '{pattern_id}' deprecated."
             if reason:
                 msg += f" Reason: {reason}"
             return msg
-        finally:
-            conn.close()

@@ -12,8 +12,8 @@ from tools_pm_helpers import (
     _add_task_to_story,
     _apply_plan_to_story,
     _build_plan_prompt,
+    _db_op,
     _ensure_backlog_epic,
-    _get_db,
     _group_items,
     _next_id,
     _story_to_dict,
@@ -53,8 +53,7 @@ def register(mcp):
             proposal_id: Commit a previously stored proposal. Requires auto_commit=True.
         """
         _root = Path(project_root).resolve() if project_root else None
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             # --- Resume from pending proposal ---
             if proposal_id and auto_commit:
                 row = conn.execute(
@@ -142,7 +141,6 @@ def register(mcp):
                     "INSERT INTO pending_proposals (id, data) VALUES (?, ?)",
                     (pid, json.dumps(proposal))
                 )
-                conn.commit()
                 return json.dumps({
                     "phase": "proposal",
                     "proposal_id": pid,
@@ -166,9 +164,6 @@ def register(mcp):
                 _root,
                 context,
             )
-
-        finally:
-            conn.close()
 
     async def _commit_and_plan(conn, proposal: dict, root: Path | None, context: str | None) -> str:
         """Create stories/tasks in DB, then run Gemini planning on them."""
@@ -207,8 +202,6 @@ def register(mcp):
                 "tasks": s.get("tasks", []),
             })
 
-        conn.commit()
-
         story_list = []
         for cs in created_stories:
             row = conn.execute("SELECT * FROM stories WHERE id = ?", (cs["id"],)).fetchone()
@@ -243,7 +236,6 @@ def register(mcp):
             if not isinstance(plans, list):
                 plans = [plans]
         except (json.JSONDecodeError, ValueError):
-            conn.commit()
             return json.dumps({
                 "epic_id": epic_id,
                 "epic_title": epic_title,
@@ -285,8 +277,6 @@ def register(mcp):
                 "parallel_group": summary["parallel_group"],
                 "depends_on": summary["depends_on"],
             })
-
-        conn.commit()
 
         # Build execution plan from parallel groups
         group_map: dict[int, list[str]] = {}
