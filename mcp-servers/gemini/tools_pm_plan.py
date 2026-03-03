@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from constants import MAX_CODE_BYTES, NO_CODE_INSTRUCTION
+from constants import MAX_CODE_BYTES
 from gemini_client import _discover_files, _gemini, _load_audit_context, _read_files_within_budget
 from tools_pm_helpers import _add_task_to_story, _apply_plan_to_story, _build_plan_prompt, _get_db, _story_to_dict
 
@@ -405,8 +405,7 @@ def register(mcp):
                     orch_content = full_orch[start:end] if end > start else full_orch[start:]
 
             # Build critique prompt
-            system_instruction = (
-                f"{NO_CODE_INSTRUCTION}\n\n"
+            critique_system = (
                 "You are a senior architect critiquing implementation plans. "
                 "For each story, check against the critique checklist below and return a JSON array "
                 "of finding objects.\n\n"
@@ -429,14 +428,13 @@ def register(mcp):
                     stories_block += f"\nPlan:\n{s['plan_content'][:5000]}\n"
 
             full_prompt = (
-                f"[System: {system_instruction}]\n\n"
                 f"## Critique Checklist\n\n{orch_content}\n\n"
                 f"## Stories Under Review\n{stories_block}\n\n"
                 f"## In-Progress Stories (check for conflicts)\n{json.dumps(in_progress_info)}\n\n"
                 f"## Active Decisions (check for contradictions)\n{decisions_text}"
             )
 
-            raw = await _gemini(full_prompt, model=model)
+            raw = await _gemini(full_prompt, model=model, system_instruction=critique_system)
 
             if raw.startswith("[gemini error") or raw.startswith("[gemini parse error"):
                 return json.dumps({"error": raw, "story_ids": story_ids})

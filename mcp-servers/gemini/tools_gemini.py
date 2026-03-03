@@ -23,8 +23,7 @@ def register(mcp):
         combined_instruction = NO_CODE_INSTRUCTION
         if system_instruction:
             combined_instruction = f"{NO_CODE_INSTRUCTION}\n\n{system_instruction}"
-        full_prompt = f"[System: {combined_instruction}]\n\n{prompt}"
-        return await _gemini(full_prompt, model=model)
+        return await _gemini(prompt, model=model, system_instruction=combined_instruction)
 
     @mcp.tool()
     async def gemini_chat(
@@ -48,8 +47,7 @@ def register(mcp):
         combined_instruction = NO_CODE_INSTRUCTION
         if system_instruction:
             combined_instruction = f"{NO_CODE_INSTRUCTION}\n\n{system_instruction}"
-        full_prompt = f"[System: {combined_instruction}]\n\n{conversation}"
-        return await _gemini(full_prompt, model=model)
+        return await _gemini(conversation, model=model, system_instruction=combined_instruction)
 
     @mcp.tool()
     async def fetch_doc(document: str = "list") -> str:
@@ -102,7 +100,7 @@ def register(mcp):
 
         context_block = "\n\n---\n\n".join(context_parts)
 
-        system_instruction = (
+        plan_system = (
             "You are a senior developer on this project. Given the task and project context, "
             "produce a concrete implementation plan. Include:\n"
             "1. Numbered steps with specific file paths and function names\n"
@@ -114,11 +112,10 @@ def register(mcp):
         )
 
         full_prompt = (
-            f"[System: {system_instruction}]\n\n"
             f"## Task\n{task}\n\n"
             f"## Project Context\n{context_block}"
         )
-        return await _gemini(full_prompt)
+        return await _gemini(full_prompt, system_instruction=plan_system)
 
     @mcp.tool()
     async def analyze(
@@ -138,7 +135,7 @@ def register(mcp):
             prompt_parts.append(f"## Additional Context\n\n{context}")
         prompt_parts.append(f"## Project Conventions\n\n{project_conventions}")
 
-        system_instruction = (
+        analyze_system = (
             "You are a senior architect reviewing submissions for this project. "
             "Auto-detect whether the input is code or a design proposal.\n\n"
             "For CODE: review for correctness, style adherence, edge cases, security. "
@@ -149,8 +146,8 @@ def register(mcp):
             f"{NO_CODE_INSTRUCTION}"
         )
 
-        full_prompt = f"[System: {system_instruction}]\n\n" + "\n\n".join(prompt_parts)
-        return await _gemini(full_prompt)
+        full_prompt = "\n\n".join(prompt_parts)
+        return await _gemini(full_prompt, system_instruction=analyze_system)
 
     return {
         "gemini_chat": gemini_chat,
