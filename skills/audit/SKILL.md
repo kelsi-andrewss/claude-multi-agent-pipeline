@@ -50,8 +50,8 @@ Identify the project root as the directory containing the nearest `.git` folder 
 Exactly one of the following applies (in priority order):
 
 **A. story_id is set:**
-- Run: `sqlite3 ~/.claude/.claude/epics.db "SELECT branch FROM stories WHERE id='<story_id>' AND archived=0 LIMIT 1;"`
-- If no result or branch is null, stop and report: "story_id not found in epics.db or has no branch."
+- Call `pm_get_story("<story_id>")` → extract `branch` from the response JSON.
+- If the story is not found or `branch` is null, stop and report: "story_id not found or has no branch."
 - Run: `git -C <project-root> diff main...story/<branch> --name-only`
 - Collect the output lines as the target file list.
 - If the list is empty, report: "No files changed in story/<branch> vs main." and stop.
@@ -81,13 +81,13 @@ If flag_no_completeness is set, override to null regardless.
 
 ### 5. Load open stories for cross-reference
 
-Run: `sqlite3 -json ~/.claude/.claude/epics.db "SELECT id, title, write_files FROM stories WHERE state NOT IN ('done','shipped','archived') AND archived=0;"`
+Call `pm_list_stories()` (no filters — defaults to non-archived). From the returned JSON array, filter to stories where `state` is not `done`, `shipped`, or `archived`.
 
 Build a map:
 ```
 open_story_map = { story_id: { title, writeFiles[] } }
 ```
-Parse `write_files` as a JSON array. This is used in step 8.
+Parse each story's `write_files` as a JSON array. This is used in step 8.
 
 ### 6. Build the audit prompt
 
