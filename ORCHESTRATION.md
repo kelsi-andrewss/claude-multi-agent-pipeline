@@ -6,7 +6,7 @@ These rules govern the main Claude Code session. Spawned agents (coders, reviewe
 
 ## 1. ROLES
 
-**Claude** — main session agent. Calls Gemini for research and planning, analyzes results, writes plan files, manages worktrees, launches coders, merges. The only DB write Claude makes directly is linking a plan file to a story via `pm_set_plan_file`.
+**Claude** — main session agent. Calls Gemini for research and planning, analyzes results, writes plan files, manages worktrees, launches coders, merges. The only DB write Claude makes directly is linking a plan file to a story via `pm_update_story(plan_file=...)`.
 
 **Gemini** — large-context research and planning engine, accessed via MCP tools (`pm_*`, `gemini_*`). Handles: epic/story/task creation, codebase research, bug finding, audits, and generating implementation plans. Writes to `epics.db` via its own MCP tools.
 
@@ -42,8 +42,8 @@ The full lifecycle from idea to merged code:
 ```
 1. QUEUE     /todo "thing to build"        → appends to .claude/todos.md
 2. PLAN      /todo plan                    → Gemini reads queue, writes epics/stories/tasks to epics.db
-3. DRAFT     /draft-plan story-NNN         → Gemini researches + plans → Claude critiques + writes plan file
-4. RUN       auto-triggered after draft    → Claude launches coders in isolated worktrees
+3. DRAFT     /draft-plan story-NNN         → Gemini researches + plans (Claude does NOT pre-explore) → Claude critiques + writes plan file
+4. RUN       auto-triggered after draft (see §5)                      → Claude launches coders in isolated worktrees
 5. MERGE     /merge-worktree story-NNN     → Claude merges worktree branch into dev branch
 ```
 
@@ -51,7 +51,12 @@ The full lifecycle from idea to merged code:
 
 **Draft** is the critical gate. Gemini provides the large-context research and initial plan; Claude independently analyzes it, identifies gaps or risks, and writes the final plan file. Claude's plan file is what coders execute — not Gemini's raw output.
 
-**Run** is auto-triggered after `/draft-plan` completes (see §5). One confirmation gate before coders launch.
+**Run** is auto-triggered after `/draft-plan` completes (see §5). No confirmation gate — coders launch immediately.
+
+**One-shot alternative:**
+```
+/ship "title" features...     → pm_ship creates epic+stories → Claude writes plans → /run-stories executes
+```
 
 ---
 
@@ -60,7 +65,7 @@ The full lifecycle from idea to merged code:
 `epics.db` lives at `~/.claude/.claude/epics.db`. CLI at `~/.claude/.claude/scripts/epics-cli.sh`.
 
 - **Gemini** writes epics, stories, and tasks via `pm_*` MCP tools.
-- **Claude** writes only `plan_file` via `pm_set_plan_file`. No other direct DB mutations.
+- **Claude** writes only `plan_file` via `pm_update_story(plan_file=...)`. No other direct DB mutations.
 - **Read queries** (for recovery, status checks): `sqlite3 ~/.claude/.claude/epics.db "<query>"` or `pm_get_story` / `pm_list_stories`.
 - Never issue raw `INSERT`/`UPDATE`/`DELETE` from the main session except through `epics-cli.sh`.
 
@@ -72,16 +77,11 @@ After `/draft-plan` completes for all targeted stories:
 
 1. Claude summarizes what's about to run:
    ```
-   Ready to run N stories:
+   Running N stories:
      story-NNN — <title> — <agent> — plan: plans/<file>.md
      ...
-   Proceed?
    ```
-2. User confirms (AskUserQuestion: "Run now" / "Not yet").
-3. On confirmation → invoke `/run-stories <story-ids>`.
-4. On "not yet" → stop. User can run manually later.
-
-If `/draft-plan` was called for a single story and the user has already seen the plan summary, Claude may skip the `AskUserQuestion` and proceed directly if the user's intent was clearly "plan and run."
+2. Immediately invoke `/run-stories <story-ids>` — no confirmation needed.
 
 ---
 
@@ -94,6 +94,8 @@ Before writing the plan file, Claude must independently review Gemini's output a
 - **Conflicts**: do any write targets overlap with in-progress stories?
 - **Project conventions**: does the plan follow patterns in this codebase (naming, structure, tooling)?
 - **Edge cases**: are there known gotchas (see `~/.claude/refs/`) that apply?
+- **Existing utilities**: does the plan propose new code where an existing function, hook, or utility already covers the need? Search project `src/` and `refs/` before accepting new abstractions.
+- **Past decisions**: query `pm_list_decisions` for decisions scoped to the story's write-target files or tech stack. Surface any conflicts.
 
 If Claude finds significant issues, it surfaces them to the user before writing the plan file. Minor gaps are incorporated silently into the plan file.
 
@@ -130,7 +132,7 @@ Every coder prompt must include:
 - Write-target files (absolute paths under the worktree)
 - Read-only context files
 - Agent approach (`quick-fixer`: surgical only; `architect`: full structural changes)
-- Relevant pitfalls from `~/.claude/refs/` based on file types
+- Relevant pitfalls from `pm_list_patterns` filtered by categories matching the story's file types (e.g., `.jsx` → react + konva; `.css` → css; Firestore operations → firebase)
 - **Worktree enforcement block**:
   ```
   WORKTREE: <absolute-worktree-path>
@@ -144,17 +146,21 @@ Every coder prompt must include:
 
 **Size ceiling**: >5 write-target files or >200 lines estimated → split story before running.
 
+**Validation-first (opt-in)**: Stories with `validation_first: true` require the coder to write a failing test before modifying any write target. The test must capture the expected behavior change, fail for the right reason, then pass after implementation. Include a `## Validation-first` section in the coder prompt when this flag is set. Set this flag during `/draft-plan` when the story has testable behavior and existing test infrastructure.
+
 ---
 
 ## 9. MERGE SEQUENCE
 
 After a coder completes:
 
+0. Before merging: verify story state is `done` or `approved`. If `in-progress`, wait for coder to finish or ask user to confirm forcing the merge.
 1. Diff gate: confirm only expected files changed.
 2. If `needs_testing`: launch unit-tester (background). PASS → `approved`. FAIL non-trivial → back to coder.
 3. If `needs_review`: launch reviewer (background, after tester passes). BLOCKING → back to coder.
 4. On `approved`: run `/merge-worktree story-NNN`.
 5. Story → `done`. Check if epic can auto-close. Unblock dependent stories.
+6. Auto-launch: immediately run `/run-stories` for any stories that became unblocked and are `ready` with a plan file. Do NOT ask for confirmation — just print a summary of what's launching and invoke the skill.
 
 **Escalation**: 2 BLOCKING round-trips → escalate coder to Opus (architect stories only). Opus still BLOCKING → story → `blocked`, report to user.
 
@@ -172,7 +178,7 @@ After a coder completes:
 **What survives `/clear`**: git branches, worktrees, `epics.db`, plan files, all disk state.
 **What is lost**: in-session memory, coder task status.
 
-**Recovery**: query `epics.db` + `git worktree list` + `git branch --list 'story/*' 'dev/*'`.
+**Recovery**: query `epics.db` + `git worktree list` + `git branch --list 'dev/*'` (epic branches) + `git branch --list '*/*'` (story branches).
 
 **Clearing prompt**: "Context checkpoint reached [reason]. Run `/clear` to reset. All state is in `epics.db`."
 
@@ -197,7 +203,8 @@ On session start (or after `/clear` with in-flight work):
 ```bash
 sqlite3 ~/.claude/.claude/epics.db "SELECT id, title, state, branch FROM stories WHERE state NOT IN ('done','shipped') AND archived=0;"
 git worktree list
-git branch --list 'dev/*'
+git branch --list 'dev/*'         # epic dev branches
+git branch --list '*/*'           # story branches (<epic-slug>/<story-slug>)
 ```
 
 Stories in `in-progress` with an existing worktree → resume from coder step.
@@ -230,3 +237,50 @@ Read from `<project>/.claude/protected-files.md`. If missing, fall back to:
 
 Stories touching protected files require explicit user confirmation before launching coders.
 Stories NOT touching protected files: include in coder prompt — "Do not edit any protected files."
+
+---
+
+## 15. SPECULATIVE EXECUTION
+
+For architect stories where the best approach is genuinely unclear, the user may request speculative execution: two coders run in parallel with different approaches.
+
+**Requirements:**
+- User explicitly requests it ("try both approaches")
+- Two separate plan files exist (e.g., `plans/story-NNN-approach-a.md`, `plans/story-NNN-approach-b.md`)
+- Both run in separate worktrees from the same base branch
+
+**Process:**
+1. `/draft-plan` produces two plan files with different approaches
+2. User approves both
+3. `/run-stories` launches both in parallel worktrees
+4. When both complete, Claude summarizes:
+   - Lines changed, files touched, approach taken
+   - Test results (if applicable)
+   - Recommendation with reasoning
+5. User picks one. The other worktree is cleaned up.
+
+**Limits:**
+- Max 1 speculative execution per session (token cost is 2x)
+- Only for architect stories, never quick-fixer
+- If one approach fails outright, the other wins by default
+
+---
+
+## 16. ONE-SHOT PIPELINE (`/ship`)
+
+`/ship` collapses QUEUE→PLAN→DRAFT→RUN→MERGE into one invocation.
+Calls `pm_ship` (server-side orchestration) for epic/story/task creation and Gemini planning.
+Claude writes plan files and controls coder execution — Gemini never codes.
+
+**Accepts:** inline feature lists, PRD files, existing plan files, epic IDs.
+
+**What it skips:**
+- Confirmation gates (auto-commits)
+- Clarification questions (defaults: agent=architect)
+- Claude's §6 critique (user explicitly chose speed)
+
+**When to use:** Greenfield projects, MVPs, prototypes.
+**When NOT to use:** Production code, protected files, high-risk changes.
+
+**Recovery:** `pm_ship` creates epic + stories in epics.db. Resume with `/ship epic-NNN`,
+or fall back to `/draft-plan` + `/run-stories` for individual stories.

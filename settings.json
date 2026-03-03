@@ -5,9 +5,9 @@
       "Bash(~/.claude/hooks/context-check.sh*)",
       "Bash(~/.claude/hooks/cost-alert.sh*)",
       "Bash(~/.claude/hooks/guard-protected-files.sh*)"
-    ]
+    ],
+    "defaultMode": "default"
   },
-  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -118,6 +118,5 @@
   "enabledPlugins": {
     "ralph-loop@claude-plugins-official": true
   },
-  "alwaysThinkingEnabled": false,
   "skipDangerousModePermissionPrompt": true
 }

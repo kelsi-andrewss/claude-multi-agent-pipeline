@@ -14,9 +14,16 @@ triggers:
   - ask gemini to plan
 ---
 
+## CRITICAL: Do not explore the codebase before calling Gemini.
+Your first action is ALWAYS to call Gemini (`pm_plan` or `pm_plan_items`) with the user's intent.
+Do NOT read source files, run Glob/Grep, or enter plan mode before Gemini returns its output.
+Gemini is the researcher. You are the critic. Exploration happens only during your post-Gemini critique (§6 of ORCHESTRATION.md).
+
+---
+
 Run Gemini planning (`pm_plan`) on the target stories/epic, then immediately convert
 the Gemini output into Claude-style plan files (`plans/<whimsical-name>.md`) and store
-the filename back in the DB via `pm_set_plan_file`.
+the filename back in the DB via `pm_update_story`.
 
 ## Args
 
@@ -46,24 +53,38 @@ Load the Gemini MCP tools:
 ```
 ToolSearch: select:mcp__gemini__pm_plan
 ToolSearch: select:mcp__gemini__pm_list_stories
-ToolSearch: select:mcp__gemini__pm_plan_view
+ToolSearch: select:mcp__gemini__pm_get_story
+ToolSearch: select:mcp__gemini__pm_check_conflicts
+ToolSearch: select:mcp__gemini__pm_critique
 ```
-
-Call `pm_plan` for **all story IDs and epic IDs in a single message** (parallel tool calls):
-- Stories: `pm_plan(story_id=<id>)` for each
-- Epics: `pm_plan(epic_id=<id>)` for each
-
-Wait for **all** calls to complete before proceeding.
 
 **For file paths** (`.md`):
 - Read the file and search for `story-\d+`.
-- If a story ID is found, add it to the story list and run `pm_plan(story_id=...)` for it.
+- If a story ID is found, add it to the story list and run `pm_plan(story_id=...)` for it (skip grouping below for these).
 - If no story ID found, ask the user: "Could not find a story ID in `<path>`. Which story does this plan belong to?"
+
+**For explicit epic IDs** (from Step 1): call `pm_plan(epic_id=<id>)` directly — no grouping check needed.
+
+**For story IDs** — use epic-grouped planning where safe:
+
+1. **Fetch epic membership** (parallel): call `pm_get_story(story_id=<id>)` for each story ID to get its `epic_id`. Do all in a single message.
+
+2. **Group stories by epic_id.**
+
+3. **Determine call mode per epic** (parallel): for each unique epic, call `pm_list_stories(epic_id=<id>)` to get all non-archived stories in that epic. Do all in a single message.
+
+4. **Decide per epic**:
+   - If **all** `draft`/`ready` stories in the epic are in the target list → use epic mode: `pm_plan(epic_id=<id>)`
+   - Otherwise → fall back to multi-story mode: `pm_plan(story_ids=[<id>, ...])`  with all targeted stories from that epic in one call
+
+5. **Call `pm_plan` in a single message** (parallel tool calls) — one call per epic in epic mode, one `story_ids` call per partial-epic group in multi-story mode. Include any file-path stories and explicit epic IDs from above.
+
+Wait for **all** calls to complete before proceeding.
 
 After all `pm_plan` calls complete, resolve the full concrete story list:
 
 - Story IDs: already resolved.
-- Epic IDs: call `pm_list_stories(epic_id=...)`, filter to non-archived, add to story list.
+- Epic IDs (explicit from Step 1): call `pm_list_stories(epic_id=...)`, filter to non-archived, add to story list.
 
 Deduplicate. If the story list is empty, stop and report: "No stories found. Nothing to plan."
 
@@ -72,7 +93,7 @@ Deduplicate. If the story list is empty, stop and report: "No stories found. Not
 ## Step 3: Verify plan data exists
 
 For each story in the final list:
-- Call `pm_plan_view(story_id)`.
+- Call `pm_get_story(story_id)`.
 - If the output contains no agent assignment and no tasks, warn: "story-NNN: pm_plan returned no data — skipping." and remove from list.
 
 If the list is empty after filtering, stop and report: "No stories with plan data. Nothing to convert."
@@ -93,7 +114,7 @@ Skip this step entirely if all stories already have agent assignments and the us
 
 ## Step 5: Write plan files inline
 
-Load `ToolSearch: select:mcp__gemini__pm_set_plan_file`.
+Load `ToolSearch: select:mcp__gemini__pm_update_story`.
 
 Do all of the following **in the main session** (no background agents):
 
@@ -112,10 +133,10 @@ Do all of the following **in the main session** (no background agents):
    ## Verification
    <how to verify the implementation is correct>
    ```
-   Content comes from the `pm_plan_view` output collected in Step 3.
+   Content comes from the `pm_get_story` output collected in Step 3.
 
-3. **Call `pm_set_plan_file` for all stories in a single message** (parallel tool calls):
-   - `pm_set_plan_file("<story_id>", "plans/<whimsical-name>.md")` for each
+3. **Call `pm_update_story` for all stories in a single message** (parallel tool calls):
+   - `pm_update_story("<story_id>", plan_file="plans/<whimsical-name>.md")` for each
 
 4. **Delete any source `.md` files** (from the file path list in Step 1) using `Bash: rm <path>`.
 
@@ -137,13 +158,28 @@ If any agent failed or returned an error, list it under an "Errors:" section.
 
 ---
 
-## Step 7: What's next?
+## Step 7: Run
 
-Use `AskUserQuestion` to ask:
+Call `pm_check_conflicts(story_ids=[...all story IDs...])` to check for write-target overlaps.
 
-> "Planning complete for N stories. What would you like to do next?"
+**If `conflicts` is empty** (no overlaps), output a summary and immediately invoke `/run-stories`:
 
-Options:
-- "Run these stories now" → immediately invoke `/run-stories <story-ids>`
-- "Add more items to the queue" → invoke `/todo` so the user can queue more work
-- "Done for now" → stop
+```
+Running N stories:
+  story-NNN — <title> — <agent> — plan: plans/<file>.md
+  ...
+```
+
+Then invoke `/run-stories <all-story-ids>`.
+
+**If `conflicts` is non-empty**, output the conflict summary first:
+
+```
+Conflict: story-238 and story-240 both write <file-path>
+```
+
+List one line per conflict pair. Then:
+- Invoke `/run-stories` with the `safe_parallel` set immediately.
+- Note which `sequential` stories to run after merge: "Run story-240 after story-238 merges."
+
+Use "run X after Y merges" (not "skip X until Y merges") when describing deferred stories.

@@ -29,6 +29,12 @@ if not path:
 print(path)
 " 2>/dev/null)
 
+# Allow edits in non-git directories — guard only applies to git-tracked projects
+FILE_DIR=$(dirname "$FILE_PATH")
+if [[ -n "$FILE_DIR" ]] && ! git -C "$FILE_DIR" rev-parse --git-dir &>/dev/null 2>&1; then
+  exit 0
+fi
+
 # Allow edits to ~/.claude/ config files (skills, hooks, settings, CLAUDE.md at user level)
 if [[ "$FILE_PATH" == "$HOME/.claude/"* ]]; then
   exit 0
@@ -44,8 +50,13 @@ if [[ "$FILE_PATH" == */\.claude/* ]]; then
   exit 0
 fi
 
-# Allow edits to temp/plan files
+# Allow edits to temp files
 if [[ "$FILE_PATH" == /tmp/* || "$FILE_PATH" == "$TMPDIR"* ]]; then
+  exit 0
+fi
+
+# Allow edits to plan files (orchestration artifacts written by draft-plan)
+if [[ "$FILE_PATH" == */plans/*.md ]]; then
   exit 0
 fi
 

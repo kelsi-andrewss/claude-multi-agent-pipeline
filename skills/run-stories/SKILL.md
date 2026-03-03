@@ -20,13 +20,19 @@ User has requested: `/run-stories {{args}}`
 
 ---
 
+## Output policy
+- Do not emit any text between tool calls. Run all tools silently.
+- The only output is the final summary (Step 5). No execution plan block, no progress narration.
+
+---
+
 ## Step 1: Resolve story list
 
 Parse each token in `{{args}}`:
 
 - **`story-\d+`** → call `pm_get_story(id)`, collect the story object
 - **`epic-\d+`** → call `pm_list_stories(epic_id=...)`, collect all non-archived stories
-- **No args** → call `pm_list_epics(state="active", include_stories=true)`, collect all stories where `state` is `draft` or `ready`
+- **No args** → call `pm_view(detail="summary")`, collect all stories where `state` is `draft` or `ready`
 
 After collecting, validate each story and **skip with a warning** if any of the following:
 - `plan_file` is null or empty:
@@ -38,6 +44,8 @@ After collecting, validate each story and **skip with a warning** if any of the 
 - `agent` is null or empty — warn: "story-NNN has no agent assigned — set it with pm_update_story"
 - `agent` is `"manual"` — note: "story-NNN requires manual execution — skipping"
 - `state` is `done`, `archived`, or `in-progress` — note: "story-NNN is already {state} — skipping"
+
+> **Note:** Stories in `ready` state are the primary target — do NOT skip them. Only skip states that indicate the story is already complete (`done`, `archived`) or already running elsewhere (`in-progress`).
 
 Deduplicate by story ID. If the list is empty after validation, stop and report all skips with reasons.
 
@@ -52,33 +60,23 @@ Build an execution plan from two analyses:
 - **Group 0**: stories with no `depends_on`, or all dependencies already `done`
 - **Group 1**: stories whose `depends_on` entries are all in Group 0
 - **Group N**: stories whose `depends_on` entries are all in earlier groups
-- If a story's dependency is in a **different epic** and not yet `done`, warn the user:
-  > "story-NNN depends on story-MMM from a different epic that is not done. Run that story first, or proceed anyway?"
-  Use `AskUserQuestion` to ask whether to skip or include it. If skip → add to skips.
+- If a story's dependency is in a **different epic** and not yet `done`, place it in a named deferred group and explain when it will run:
+  > "story-NNN deferred: depends on story-MMM (different epic, not done). Will run after story-MMM is merged."
+- **Never skip a story just because it has dependencies** — place it in the correct dependency group. Every story passed to `/run-stories` MUST appear in the execution plan, either in a parallel batch or a sequential deferred group with a clear "runs after story-NNN merges" label.
 
 ### 2b. File conflict detection (within each dependency group)
 
-For each dependency group:
-1. Collect `write_files` arrays for all stories in the group
-2. Build a conflict map: story A conflicts with story B if they share any path in `write_files`
-3. Split the group into **parallel batches** using a greedy graph coloring approach:
-   - Batch 0: stories with no conflicts among themselves
-   - Subsequent batches: stories that conflict with something in batch 0 (run after batch 0 finishes)
-   - Continue until all stories in the group are placed
-4. Within each sequential batch, order stories by ID (lowest first) for determinism
+Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each dependency group:
 
-**Display the full execution plan before running:**
-```
-Execution plan:
-  [Dep Group 0 | Batch 0 — parallel]        story-001, story-003
-  [Dep Group 0 | Batch 1 — sequential]      story-002  (conflicts: src/foo.js with story-001)
-  [Dep Group 0 | Batch 2 — sequential]      story-004  (no direct conflict with story-002, but story-005 conflicts with both — serialized for safety)
-  [Dep Group 1 | Batch 0 — after group 0]   story-005
-```
+1. Collect all story IDs in the group and call `pm_check_conflicts(story_ids=[...])`.
+2. The response contains:
+   - `conflicts`: list of `{file, stories}` overlap entries
+   - `safe_parallel`: story IDs with no write-file overlaps (launch together)
+   - `sequential`: story IDs that must run after conflicting stories merge
+3. Use `safe_parallel` as batch 0. For `sequential` stories, chain them after their conflicting partner from `safe_parallel` finishes.
+4. Within each batch, order stories by ID (lowest first) for determinism.
 
 > **Note:** A story may be placed in a later sequential batch even if it doesn't directly conflict with the story immediately before it. This happens when a downstream story conflicts with *both*, forcing them into a strict order. Stories are always chained safely to prevent merge conflicts.
-
-If any skips occurred, list them after the plan. Ask the user to confirm before proceeding.
 
 ---
 
@@ -95,16 +93,18 @@ git push -u origin dev 2>/dev/null || true
 For each unique epic referenced by the stories being run:
 
 1. Compute `dev-branch`:
-   - Call `pm_get_epic(epic_id)` to get the epic title
-   - Slugify: lowercase, replace spaces and non-alphanumeric chars with `-`, collapse consecutive `-`, truncate to 40 chars
-   - Result: `dev/<slugified-title>` (e.g., `dev/my-feature-epic`)
-   - If slugification fails or title is empty, fall back to `dev/<epic_id>` (e.g., `dev/epic-007`)
+   - If `epic_id == "epic-backlog"`: `dev-branch = "dev"` (backlog stories always target the integration branch directly — skip remaining sub-steps)
+   - Otherwise: call `pm_get_epic(epic_id)` to get the epic title
+     - Slugify: lowercase, replace spaces and non-alphanumeric chars with `-`, collapse consecutive `-`, truncate to 40 chars
+     - Result: `dev/<slugified-title>` (e.g., `dev/my-feature-epic`)
+     - If slugification fails or title is empty, fall back to `dev/<epic_id>` (e.g., `dev/epic-007`)
 
-2. Run these git commands (in the project root):
+2. If `dev-branch != "dev"`, run these git commands (in the project root):
    ```bash
-   git show-ref --verify --quiet refs/heads/dev/<slug> || git branch dev/<slug> dev
-   git push -u origin dev/<slug> 2>/dev/null || true
+   git show-ref --verify --quiet refs/heads/<dev-branch> || git branch <dev-branch> dev
+   git push -u origin <dev-branch> 2>/dev/null || true
    ```
+   (Skip when `dev-branch == "dev"` — the integration branch already exists.)
 
 Store the mapping: `epic_id → dev-branch` for use in step 4.
 
@@ -121,7 +121,7 @@ Launch all stories in the batch in **a single message** as `general-purpose` age
 Compute for each story:
 - `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars
 - `epic-slug`: the slugified epic title used in step 3 (same slugification rule)
-- `story-branch`: `dev/<epic-slug>/<story-slug>`
+- `story-branch`: `<epic-slug>/<story-slug>`
 - `worktree-path`: `<project-root>/.claude/worktrees/story/<story-slug>`
 - `dev-branch`: from the epic mapping computed in step 3
 - `agent-approach`: based on the `agent` field:
@@ -172,11 +172,18 @@ Project root: <project-root>
    git -C <worktree-path> push -u origin <story-branch>
    ```
 
-7. Update the story state in the database:
+7. Write the resolved story branch back to the DB:
+   Call: pm_update_story("<story_id>", branch="<story-branch>")
+
+8. Mark the story in-progress before starting implementation:
+   Call: pm_update_story("<story_id>", state="in-progress", force=True)
+   (Use force=True so this succeeds regardless of whether the story is in ready or draft state)
+
+9. After all changes are committed and pushed, mark done:
    Call: pm_update_story("<story_id>", state="done")
 
-8. Return exactly one of:
-   - Success: "DONE: <story-branch> pushed. Commit: <short-hash>. Notes: <any relevant notes or 'none'>"
+10. Return exactly one of:
+   - Success: "DONE: <story-branch> pushed. Commit: <short-hash>. State: done. Notes: <any relevant notes or 'none'>"
    - Failure: "BLOCKED: <clear reason why the story could not be completed>"
 ```
 
@@ -205,23 +212,29 @@ After the previous batch completes, before launching the next story:
 Wait for all background agents to complete. Then print a final summary:
 
 ```
-Run complete.
+Run complete.  Dev branch: dev/my-feature
 
-Dev branch(es): dev/my-feature
-
-story-001 → dev/my-feature/fix-auth-flow        DONE    commit abc1234
-story-003 → dev/my-feature/update-dashboard     DONE    commit def5678
-story-002 → dev/my-feature/refactor-handlers    DONE    commit ghi9012  [sequential — conflicted with story-001 on src/handlers/foo.js]
-story-005 → dev/my-feature/add-search           BLOCKED plan file references missing utility
+story-001  batch 0   my-feature/fix-auth-flow      DONE    abc1234
+story-003  batch 0   my-feature/update-dashboard   DONE    def5678
+story-002  batch 1   my-feature/refactor-handlers  DONE    ghi9012  (conflicted with story-001 on src/handlers/foo.js)
+story-005  batch 0   my-feature/add-search         BLOCKED plan file references missing utility
 
 Skipped (validation):
-  story-004: no plan file — run `/draft-plan` first
   story-006: state is 'done' — already complete
+
+Deferred (dependency not yet merged):
+  story-007: runs after story-005 merges
 
 Blocked during execution:
   story-005: plan file references missing utility function `buildSearchIndex`
 ```
 
+The `batch` column shows the parallel batch each story ran in (batch 0 = first parallel wave; batch 1 = ran after batch 0 due to conflict; `deferred` = cross-epic dependency not yet merged).
+
 If all stories complete successfully, print: "All stories executed successfully."
 
 If any story is BLOCKED, list it with its reason in a "Blocked" section. Never stop other stories due to one failure — they run independently.
+
+If at least one story completed with DONE status, immediately invoke `/merge-worktree` for each DONE story (pass all DONE story IDs space-separated as args).
+
+If all stories were BLOCKED or skipped (zero DONE), stop after printing the summary.

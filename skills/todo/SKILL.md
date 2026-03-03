@@ -73,14 +73,8 @@ Treat all of `{{args}}` as raw todo text (one item, or a newline/comma-separated
        ...
    ```
 
-6. Ask the user to confirm:
-   ```
-   AskUserQuestion: "Commit this plan to the database?"
-   Options: "Yes, commit" / "No, discard"
-   ```
+6. Call `pm_plan_items(items=[...], confirmed=True, proposal_id=<proposal_id from step 4>)` — auto-commit.
 
-7. If confirmed → call `pm_plan_items(items=[...], confirmed=True, proposal=<proposal from step 4>)`.
-   - Print: "Plan committed. Run `/run-stories` to execute."
-   - Delete `.claude/todos.md`.
-
-8. If discarded → print: "Plan discarded. Queue preserved in .claude/todos.md." and stop.
+7. Delete `.claude/todos.md`.
+   - Collect the story IDs returned from the committed plan.
+   - Immediately invoke `/draft-plan <story-ids>` (space-separated). Do not ask.

@@ -18,19 +18,32 @@ User has requested: `/merge-worktree {{args}}`
 
 ---
 
+## Output policy
+- Do not emit any text between tool calls. Run all tools silently.
+- The only output is the final report (Step 6).
+
+---
+
 ## Step 1: Resolve the story and worktree
 
 **If `{{args}}` contains a story ID matching `story-\d+`:**
 
-1. Call `pm_get_story("{{args}}")` → extract `branch`, `epic_id`, `title`, `id`
-2. Run:
+1. Call `pm_get_story("{{args}}")` → extract `db_branch`, `epic_id`, `title`, `id`
+2. Compute canonical `story-branch`:
+   a. If `epic_id` is non-null: call `pm_get_epic(epic_id)` → `epic_title`
+      - `epic-slug` = slugify(`epic_title`): lowercase, replace spaces/non-alphanumeric with `-`, collapse consecutive `-`, truncate to 40 chars
+      - `story-slug` = slugify(`title`): same rules
+      - `story-branch` = `<epic-slug>/<story-slug>`
+   b. If `epic_id` is null or slugification fails: `story-branch` = `db_branch` (verbatim)
+3. Run:
    ```bash
    git worktree list --porcelain
    ```
-3. Find the worktree block whose `branch` line equals `refs/heads/<branch>`
-4. The `worktree` line in that block is `worktree-path`
-5. If no worktree found for that branch, stop and report:
-   > "No worktree found for branch `<branch>`. Has `/run-stories` been run for this story?"
+4. Find the worktree block whose `branch` line equals `refs/heads/<story-branch>`
+   - If not found, also try `refs/heads/<db_branch>` (handles legacy/old-format branches)
+   - If still not found, stop and report:
+     > "No worktree found for branch `<story-branch>` (or legacy `<db_branch>`). Has `/run-stories` been run for this story?"
+5. The `worktree` line in the matched block is `worktree-path`
 
 **If no args (or args is empty/whitespace):**
 
@@ -52,10 +65,12 @@ User has requested: `/merge-worktree {{args}}`
 
 **At the end of Step 1 you must have:**
 - `worktree-path`: absolute path to the story worktree
-- `story-branch`: e.g., `dev/my-feature-epic/fix-auth-flow`
+- `story-branch`: e.g., `my-feature-epic/fix-auth-flow`
 - `story_id` (may be null)
 - `epic_id` (may be null)
 - `title`: display name for commit message
+
+> **Note:** If `branch` is null in the DB, compute the story branch from the worktree list — this is normal for stories created via `/todo` before a worktree was set up.
 
 ---
 
@@ -63,14 +78,17 @@ User has requested: `/merge-worktree {{args}}`
 
 **If `epic_id` is non-null:**
 
-1. Call `pm_get_epic(epic_id)` → get `title` as `epic-title`
-2. Slugify `epic-title`:
+> Note: `pm_get_epic` was already called in Step 1 if `epic_id` was non-null. Reuse those results here.
+
+1. If `epic_id == "epic-backlog"`: `dev-branch = "dev"` — skip steps 2–5.
+2. Use `epic_title` from Step 1 (already fetched)
+3. Slugify `epic-title`:
    - lowercase
    - replace spaces and non-alphanumeric characters with `-`
    - collapse consecutive `-` into one
    - truncate to 40 characters
-3. `dev-branch` = `dev/<slug>`  (e.g., `dev/my-feature-epic`)
-4. Fallback if `epic-title` is missing or empty: `dev-branch` = `dev/<epic_id>` (e.g., `dev/epic-007`)
+4. `dev-branch` = `dev/<slug>`  (e.g., `dev/my-feature-epic`)
+5. Fallback if `epic-title` is missing or empty: `dev-branch` = `dev/<epic_id>` (e.g., `dev/epic-007`)
 
 **If `epic_id` is null (git-only mode):**
 
@@ -87,7 +105,7 @@ User has requested: `/merge-worktree {{args}}`
 git fetch origin <dev-branch>
 ```
 
-If this fails (branch not found on origin), stop and report:
+If this fails (branch not found on origin), try `dev-branch = dev/<epic_id>` (e.g., `dev/epic-007`) as fallback before stopping. If the fallback also fails, stop and report:
 > "Dev branch `<dev-branch>` does not exist on origin. Create it first or run `/run-stories` for this epic."
 
 ---
@@ -95,24 +113,33 @@ If this fails (branch not found on origin), stop and report:
 ## Step 3: Merge story branch into dev
 
 ```bash
-# Create a temp worktree for the dev branch
-TEMP=$(mktemp -d /tmp/merge-dev-XXXXXX)
-git worktree add "$TEMP" <dev-branch>
+# Check if dev-branch is already the current branch in the main worktree
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" = "<dev-branch>" ]; then
+  # dev branch is already checked out here — merge directly, no temp worktree needed
+  git merge --no-ff <story-branch> -m "merge: <title>"
+  git push origin <dev-branch>
+  HASH=$(git rev-parse --short HEAD)
+else
+  # Create a temp worktree for the dev branch
+  TEMP=$(mktemp -d /tmp/merge-dev-XXXXXX)
+  git worktree add "$TEMP" <dev-branch>
 
-# Merge with --no-ff for clear history
-git -C "$TEMP" merge --no-ff <story-branch> -m "merge: <title>"
+  # Merge with --no-ff for clear history
+  git -C "$TEMP" merge --no-ff <story-branch> -m "merge: <title>"
+fi
 ```
 
 **If the merge exits non-zero (conflict):**
 1. Capture and display the conflict output
-2. Clean up the temp worktree:
+2. If using temp worktree, clean it up:
    ```bash
    git worktree remove --force "$TEMP"
    ```
 3. Stop and report:
    > "Merge conflict while merging `<story-branch>` into `<dev-branch>`. The story worktree has NOT been removed. Resolve the conflict manually and re-run."
 
-**If the merge succeeds:**
+**If the merge succeeds (temp worktree path):**
 
 ```bash
 # Push dev branch
@@ -150,8 +177,19 @@ If any cleanup command fails, note the failure in the report but do not stop —
 If `story_id` is non-null:
 
 ```
+# Transition through in-progress if needed, then to done.
+# force=True makes the in-progress call safe regardless of current state
+# (ready, approved, or already in-progress all succeed).
+pm_update_story(story_id, state="in-progress", force=True)
 pm_update_story(story_id, state="done")
 ```
+
+**Epic auto-close check** (only if `epic_id` is non-null):
+
+Call `pm_update_epic(epic_id, auto_close=True)`.
+
+- If `closed: true`: note in the report: `Epic <epic_id> → done (all stories complete)`.
+- If `closed: false`: skip. The response includes `reason` (e.g., persistent epic, remaining stories).
 
 ---
 
@@ -164,6 +202,7 @@ Merged: <story-branch> → <dev-branch>  (commit <HASH>)
 Worktree removed: <worktree-path>
 Branch deleted: <story-branch> (local + remote)
 Story updated: <story_id> → done
+Epic updated:   <epic_id> → done (all stories complete)   ← only if auto-closed
 ```
 
 If `story_id` was null, omit the "Story updated" line and add a note:

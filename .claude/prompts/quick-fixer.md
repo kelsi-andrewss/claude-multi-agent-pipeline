@@ -15,6 +15,12 @@ Use absolute paths only. CWD may not match target directory.
 - [ ] [Todo 1 description]
 - [ ] [Todo 2 description]
 
+## Validation-first
+
+[Include this section ONLY if the story has validation_first: true. Delete it otherwise.]
+
+Before modifying any write target, write a failing test that captures the expected behavior for each todo. Run the test. Confirm it fails for the right reason. Then implement. Then confirm it passes. If no test infrastructure exists for the target files, skip this step and note it in your return message.
+
 ## Write targets
 
 [Files the coder will modify — one per line.]
@@ -34,17 +40,13 @@ Use absolute paths only. CWD may not match target directory.
 - [Edge case 1]
 - [Edge case 2]
 
+## Ambiguity protocol
+
+If any todo requires a judgment call not covered by this plan (naming, UX behavior, business logic), implement the most conservative option and leave a `// DECISION: [description of what was chosen and why]` comment. Do NOT guess at intent. Report all DECISION comments in your return message.
+
 ## Pitfalls
 
-- Konva Groups return `0` from `.width()` and `.height()` — use `.getClientRect()` for live bounding box
-- `onDragMove` / async callbacks must read state from refs (`.current`), not closed-over props
-- If adding `:focus-visible` CSS, ensure the outline color contrasts with the button background
-- Firestore `batch.update` throws if the document is also being deleted in the same batch — use `batch.set({merge:true})` or guard with a deleteSet check
-- Frame `childIds` and child `frameId` must always be updated atomically in the same `writeBatch`
-- For new object types: include the CLAUDE.md 6-step checklist
-- For CSS alignment fixes: verify the parent container has `display: flex` before adding flex-child properties
-- For any new props/params: do not destructure or accept props/params you don't use. Verify every new prop is referenced.
-- For any new `async` event handler: capture all React state and props you need into local `const` variables before the first `await`. Never read state after an `await`.
+[Query `pm_list_patterns` with categories matching this story's file types. Include only active patterns with severity 'must' or 'should'. Do not include the full static list — query for relevance.]
 
 [Add any story-specific pitfalls below:]
 

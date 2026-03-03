@@ -22,13 +22,21 @@ User has requested: `/find-bug {{args}}`
 
 Parse `{{args}}` into:
 
-- **symptom**: all text before any `--` flag — this is required; if empty, ask the user to describe the bug symptom
+- **symptom**: all text before any `--` flag — this is required; if empty, call:
+  ```
+  AskUserQuestion: "What bug should I investigate?"
+  ```
+  (free text — no fixed options; wait for the user's response, then use it as `symptom`)
+  Do not proceed to Step 2 until a symptom is provided.
 - **model**: value after `--model` if present; otherwise `null`
 
 ### 2. Load the Gemini find_bug tool
 
-Call `ToolSearch` with query `select:mcp__gemini__find_bug` to load the deferred tool before use.
-This step is **required** — the tool is not available until loaded.
+**REQUIRED — do not skip or work around this step.**
+Call `ToolSearch` with query `select:mcp__gemini__find_bug` to load the deferred tool.
+The tool does not exist in your available tools until this call completes.
+Do NOT read files, search code, or attempt any other diagnosis approach.
+If `ToolSearch` fails or returns no results: output exactly "Gemini MCP is unavailable." and STOP. Do not proceed to any other step. Do not read files. Do not search code. Do not attempt diagnosis by any other means.
 
 ### 3. Call `mcp__gemini__find_bug`
 
@@ -48,8 +56,17 @@ If the tool returned an error, report it clearly and suggest corrective action (
 ### 4. Choose epic
 
 Call `ToolSearch("mcp__gemini__pm")` then `mcp__gemini__pm_list_epics`.
-- If epics exist: ask which epic (list id + title, plus "Create new epic" / "No epic").
-- If none: use `epic_id = null`.
+
+If epics exist, call `AskUserQuestion` with:
+- question: "Which epic should this bug story live in?"
+- options: one entry per epic (`<epic_id> — <title>`), plus:
+  - label "Create new epic", description "I'll name it after the bug area"
+  - label "No epic (backlog)", description "Skip epic assignment"
+
+If the user picks "Create new epic", call a second `AskUserQuestion`:
+- question: "What should the new epic be called?"
+
+If no epics exist: use `epic_id = null` and skip the question.
 
 ### 6. Launch background agent
 

@@ -45,16 +45,8 @@
 - When a planning session ends without implementation (plan rejected, approach changed, or pure research), still write a tracking entry — mark it as architecture category and note what was decided against and why.
 - Do not ask permission — just append after significant work.
 
-## Decision logs
-- After architectural decisions, record via `pm_add_decision` with appropriate scopes (file paths, tech stack, patterns affected).
-- The main session records decisions during `/draft-plan` critique. Coders record decisions during architect stories.
-- Query existing decisions with `pm_list_decisions` before proposing approaches that may conflict.
-
-## Integration surfaces
-When a project ships a feature that exposes a registry, hook, or plugin API that other features must wire into (e.g. command palette, context menu, keyboard shortcut registry, settings panel sections), add or update an `## Integration surfaces` section in that project's CLAUDE.md. Each entry names the surface, its owner file(s), and the registration pattern. This section is read by the epic-planner (see ORCHESTRATION.md §19.2) to auto-generate integration stories when parallel features share a surface. If the section does not exist in a project's CLAUDE.md, create it when the first surface ships.
-
-## Project structure
-`~/.claude/` is itself a git project. Claude Code treats `~/.claude/.claude/` as its project-level config folder. That subfolder contains the live infrastructure: `epics.db`, `scripts/epics-cli.sh`, `hooks/`, `prompts/`. Global skills and instructions live at `~/.claude/skills/` and `~/.claude/ORCHESTRATION.md` — never duplicate them into `.claude/.claude/skills/`.
-
-## Main session orchestration rules
-See ~/.claude/ORCHESTRATION.md — applies to the main session only, not to spawned agents.
+## Workflow
+- Work on the `dev` branch. Merge to `main` when ready.
+- Edit files directly — no mandatory pipeline or worktree ceremony.
+- For complex multi-file changes, launch a background coder agent (quick-fixer or architect) in a worktree. This is optional, not required.
+- Commit on `dev`, PR to `main` when the change is stable.
