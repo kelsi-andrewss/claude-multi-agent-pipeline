@@ -250,6 +250,165 @@ def _build_redesign_prompt(
     return prompt
 
 
+async def _do_audit(
+    paths: list[str] | None = None,
+    sections: list[str] | None = None,
+    summary_only: bool = False,
+    ignore_patterns: list[str] | None = None,
+    model: str | None = None,
+    project_root: str | None = None,
+) -> str:
+    """Core audit logic, callable directly without MCP registration."""
+    _root = Path(project_root).resolve() if project_root else None
+
+    if sections:
+        invalid = set(sections) - VALID_AUDIT_SECTIONS
+        if invalid:
+            return f"Error: invalid section(s): {', '.join(sorted(invalid))}. Valid: {', '.join(sorted(VALID_AUDIT_SECTIONS))}"
+
+    if paths:
+        for p in paths:
+            resolved = ((_root or PROJECT_ROOT) / p).resolve()
+            if not resolved.exists():
+                return f"Error: path not found: {p}"
+
+    files = _discover_files(paths, ignore_patterns, root=_root)
+    if not files:
+        return "Error: no source files found to audit."
+
+    code_content, skipped = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
+
+    audit_context = _load_audit_context(root=_root)
+    audit_prompt = _load_audit_prompt()
+
+    section_instruction = ""
+    if sections:
+        section_instruction = (
+            f"\n\nFocus ONLY on these sections: {', '.join(sections)}. "
+            "Omit all other sections from the report."
+        )
+
+    summary_instruction = ""
+    if summary_only:
+        summary_instruction = (
+            "\n\nReturn ONLY the Executive Summary section. "
+            "Do not include detailed findings."
+        )
+
+    system_block = (
+        f"{NO_CODE_INSTRUCTION}\n\n{audit_prompt}"
+        f"{section_instruction}{summary_instruction}"
+    )
+
+    prompt_parts = [f"[System: {system_block}]"]
+
+    if audit_context:
+        prompt_parts.append(f"## Project Context\n\n{audit_context}")
+
+    prompt_parts.append(f"## Files Under Audit\n\n{code_content}")
+
+    if skipped:
+        _display_root = _root or PROJECT_ROOT
+        skipped_list = "\n".join(
+            f"- {p.relative_to(_display_root)}" if p.is_relative_to(_display_root) else f"- {p}"
+            for p in skipped
+        )
+        prompt_parts.append(f"## Skipped Files (exceeded budget)\n\n{skipped_list}")
+
+    full_prompt = "\n\n".join(prompt_parts)
+
+    report = await _gemini(full_prompt, model=model)
+
+    if report.startswith("[gemini error") or report.startswith("[gemini parse error"):
+        return report
+
+    output_path = (_root or PROJECT_ROOT) / "AUDIT-GEMINI.md"
+    output_path.write_text(report, encoding="utf-8")
+
+    return report
+
+
+async def _do_find_bug(
+    symptom: str,
+    paths: list[str] | None = None,
+    model: str | None = None,
+    project_root: str | None = None,
+) -> str:
+    """Core find_bug logic, callable directly without MCP registration."""
+    _root = Path(project_root).resolve() if project_root else None
+
+    FIND_BUG_SYSTEM = (
+        "You are a senior debugging engineer performing root cause analysis. "
+        + NO_CODE_INSTRUCTION
+    )
+
+    audit_context = _load_audit_context(root=_root)
+    candidate_paths = paths
+    pass1_response = ""
+
+    if not candidate_paths:
+        hypothesis_prompt = (
+            f"[System: {FIND_BUG_SYSTEM}]\n\n"
+            "## Task\n\n"
+            "Given the symptom below, identify which source files are most likely involved "
+            "and provide a one-sentence root cause hypothesis. "
+            "List the file paths relative to the project root, one per line, preceded by '- '.\n\n"
+            f"## Symptom\n\n{symptom}"
+        )
+        if audit_context:
+            hypothesis_prompt += f"\n\n## Project Context\n\n{audit_context}"
+
+        pass1_response = await _gemini(hypothesis_prompt, model=model)
+
+        if not pass1_response.startswith("[gemini error"):
+            candidate_paths = []
+            for line in pass1_response.splitlines():
+                line = line.strip()
+                if line.startswith("- "):
+                    candidate = line[2:].strip()
+                    if candidate and not candidate.startswith("["):
+                        candidate_paths.append(candidate)
+            if not candidate_paths:
+                candidate_paths = None
+
+    files = _discover_files(candidate_paths, root=_root)
+    if not files:
+        files = _discover_files(None, root=_root)
+
+    code_content, skipped = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
+
+    diagnosis_system = (
+        f"{FIND_BUG_SYSTEM}\n\n"
+        "Structure your diagnosis with exactly these four sections:\n"
+        "1. **Root cause** — most likely location (file + function/area)\n"
+        "2. **Contributing factors** — conditions that make this fail\n"
+        "3. **How to confirm** — minimal reproduction step or log to look for\n"
+        "4. **Fix direction** — natural language description of the fix"
+    )
+
+    prompt_parts = [f"[System: {diagnosis_system}]"]
+    prompt_parts.append(f"## Symptom\n\n{symptom}")
+
+    if pass1_response and not pass1_response.startswith("[gemini error"):
+        prompt_parts.append(f"## Hypothesis (from initial analysis)\n\n{pass1_response}")
+
+    if audit_context:
+        prompt_parts.append(f"## Project Context\n\n{audit_context}")
+
+    prompt_parts.append(f"## Candidate Source Files\n\n{code_content}")
+
+    if skipped:
+        _display_root = _root or PROJECT_ROOT
+        skipped_list = "\n".join(
+            f"- {p.relative_to(_display_root)}" if p.is_relative_to(_display_root) else f"- {p}"
+            for p in skipped
+        )
+        prompt_parts.append(f"## Skipped Files (exceeded budget)\n\n{skipped_list}")
+
+    full_prompt = "\n\n".join(prompt_parts)
+    return await _gemini(full_prompt, model=model)
+
+
 def register(mcp):
     @mcp.tool()
     async def audit(
@@ -270,74 +429,7 @@ def register(mcp):
             model: Optional Gemini model ID override.
             project_root: Absolute path to the project root to read files from. Defaults to the server's working directory. Pass a worktree path to scope file reads to that worktree.
         """
-        _root = Path(project_root).resolve() if project_root else None
-
-        if sections:
-            invalid = set(sections) - VALID_AUDIT_SECTIONS
-            if invalid:
-                return f"Error: invalid section(s): {', '.join(sorted(invalid))}. Valid: {', '.join(sorted(VALID_AUDIT_SECTIONS))}"
-
-        if paths:
-            for p in paths:
-                resolved = ((_root or PROJECT_ROOT) / p).resolve()
-                if not resolved.exists():
-                    return f"Error: path not found: {p}"
-
-        files = _discover_files(paths, ignore_patterns, root=_root)
-        if not files:
-            return "Error: no source files found to audit."
-
-        code_content, skipped = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
-
-        audit_context = _load_audit_context(root=_root)
-        audit_prompt = _load_audit_prompt()
-
-        section_instruction = ""
-        if sections:
-            section_instruction = (
-                f"\n\nFocus ONLY on these sections: {', '.join(sections)}. "
-                "Omit all other sections from the report."
-            )
-
-        summary_instruction = ""
-        if summary_only:
-            summary_instruction = (
-                "\n\nReturn ONLY the Executive Summary section. "
-                "Do not include detailed findings."
-            )
-
-        system_block = (
-            f"{NO_CODE_INSTRUCTION}\n\n{audit_prompt}"
-            f"{section_instruction}{summary_instruction}"
-        )
-
-        prompt_parts = [f"[System: {system_block}]"]
-
-        if audit_context:
-            prompt_parts.append(f"## Project Context\n\n{audit_context}")
-
-        prompt_parts.append(f"## Files Under Audit\n\n{code_content}")
-
-        if skipped:
-            _display_root = _root or PROJECT_ROOT
-            skipped_list = "\n".join(
-                f"- {p.relative_to(_display_root)}" if p.is_relative_to(_display_root) else f"- {p}"
-                for p in skipped
-            )
-            prompt_parts.append(f"## Skipped Files (exceeded budget)\n\n{skipped_list}")
-
-        full_prompt = "\n\n".join(prompt_parts)
-
-        report = await _gemini(full_prompt, model=model)
-
-        # Fix: don't write error strings to disk
-        if report.startswith("[gemini error") or report.startswith("[gemini parse error"):
-            return report
-
-        output_path = (_root or PROJECT_ROOT) / "AUDIT-GEMINI.md"
-        output_path.write_text(report, encoding="utf-8")
-
-        return report
+        return await _do_audit(paths, sections, summary_only, ignore_patterns, model, project_root)
 
     @mcp.tool()
     async def find_bug(
@@ -354,78 +446,7 @@ def register(mcp):
             model: Optional Gemini model ID override.
             project_root: Absolute path to the project root to read files from. Defaults to the server's working directory. Pass a worktree path to scope file reads to that worktree.
         """
-        _root = Path(project_root).resolve() if project_root else None
-
-        FIND_BUG_SYSTEM = (
-            "You are a senior debugging engineer performing root cause analysis. "
-            + NO_CODE_INSTRUCTION
-        )
-
-        audit_context = _load_audit_context(root=_root)
-        candidate_paths = paths
-        pass1_response = ""
-
-        if not candidate_paths:
-            hypothesis_prompt = (
-                f"[System: {FIND_BUG_SYSTEM}]\n\n"
-                "## Task\n\n"
-                "Given the symptom below, identify which source files are most likely involved "
-                "and provide a one-sentence root cause hypothesis. "
-                "List the file paths relative to the project root, one per line, preceded by '- '.\n\n"
-                f"## Symptom\n\n{symptom}"
-            )
-            if audit_context:
-                hypothesis_prompt += f"\n\n## Project Context\n\n{audit_context}"
-
-            pass1_response = await _gemini(hypothesis_prompt, model=model)
-
-            if not pass1_response.startswith("[gemini error"):
-                candidate_paths = []
-                for line in pass1_response.splitlines():
-                    line = line.strip()
-                    if line.startswith("- "):
-                        candidate = line[2:].strip()
-                        if candidate and not candidate.startswith("["):
-                            candidate_paths.append(candidate)
-                if not candidate_paths:
-                    candidate_paths = None
-
-        files = _discover_files(candidate_paths, root=_root)
-        if not files:
-            files = _discover_files(None, root=_root)
-
-        code_content, skipped = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
-
-        diagnosis_system = (
-            f"{FIND_BUG_SYSTEM}\n\n"
-            "Structure your diagnosis with exactly these four sections:\n"
-            "1. **Root cause** — most likely location (file + function/area)\n"
-            "2. **Contributing factors** — conditions that make this fail\n"
-            "3. **How to confirm** — minimal reproduction step or log to look for\n"
-            "4. **Fix direction** — natural language description of the fix"
-        )
-
-        prompt_parts = [f"[System: {diagnosis_system}]"]
-        prompt_parts.append(f"## Symptom\n\n{symptom}")
-
-        if pass1_response and not pass1_response.startswith("[gemini error"):
-            prompt_parts.append(f"## Hypothesis (from initial analysis)\n\n{pass1_response}")
-
-        if audit_context:
-            prompt_parts.append(f"## Project Context\n\n{audit_context}")
-
-        prompt_parts.append(f"## Candidate Source Files\n\n{code_content}")
-
-        if skipped:
-            _display_root = _root or PROJECT_ROOT
-            skipped_list = "\n".join(
-                f"- {p.relative_to(_display_root)}" if p.is_relative_to(_display_root) else f"- {p}"
-                for p in skipped
-            )
-            prompt_parts.append(f"## Skipped Files (exceeded budget)\n\n{skipped_list}")
-
-        full_prompt = "\n\n".join(prompt_parts)
-        return await _gemini(full_prompt, model=model)
+        return await _do_find_bug(symptom, paths, model, project_root)
 
     @mcp.tool()
     async def gemini_redesign(

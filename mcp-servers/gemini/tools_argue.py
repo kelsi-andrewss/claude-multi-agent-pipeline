@@ -71,9 +71,7 @@ def _argue_extract_challenge(response: str) -> str:
     )
 
 
-def register(mcp, seed_tools=None):
-    seed_tools = seed_tools or {}
-
+def register(mcp):
     @mcp.tool()
     async def argue(
         topic: str,
@@ -105,16 +103,22 @@ def register(mcp, seed_tools=None):
 
         seed_output = ""
         if seed_tool:
-            tool_fn = seed_tools.get(seed_tool)
-            if tool_fn:
-                try:
-                    args = seed_tool_args or {}
-                    seed_output = await tool_fn(**args)
-                except Exception as exc:
-                    skipped.append(f"seed_tool '{seed_tool}' failed: {exc}")
-                    seed_output = ""
-            else:
-                skipped.append(f"unknown seed_tool: {seed_tool}")
+            try:
+                args = seed_tool_args or {}
+                if seed_tool == "find_bug":
+                    from tools_analysis import _do_find_bug
+                    seed_output = await _do_find_bug(**args)
+                elif seed_tool == "plan":
+                    from tools_gemini import _do_plan
+                    seed_output = await _do_plan(**args)
+                elif seed_tool == "audit":
+                    from tools_analysis import _do_audit
+                    seed_output = await _do_audit(**args)
+                else:
+                    skipped.append(f"unknown seed_tool: {seed_tool}")
+            except Exception as exc:
+                skipped.append(f"seed_tool '{seed_tool}' failed: {exc}")
+                seed_output = ""
 
         opening_parts: list[str] = []
         if seed_output:

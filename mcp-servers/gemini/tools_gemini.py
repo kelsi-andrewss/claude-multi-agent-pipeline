@@ -6,6 +6,37 @@ from constants import DOCUMENTS, NO_CODE_INSTRUCTION, PROJECT_ROOT
 from gemini_client import _gemini, _read_doc
 
 
+async def _do_plan(task: str, documents: list[str] | None = None) -> str:
+    """Core plan logic, callable directly without MCP registration."""
+    if documents is None:
+        documents = ["claude", "requirements", "architecture"]
+
+    context_parts: list[str] = []
+    for key in documents:
+        content = _read_doc(key)
+        label = DOCUMENTS.get(key, {}).get("description", key)
+        context_parts.append(f"### {label}\n\n{content}")
+
+    context_block = "\n\n---\n\n".join(context_parts)
+
+    plan_system = (
+        "You are a senior developer on this project. Given the task and project context, "
+        "produce a concrete implementation plan. Include:\n"
+        "1. Numbered steps with specific file paths and function names\n"
+        "2. Key risks or edge cases to watch for\n"
+        "3. Testing strategy (what to test, how)\n"
+        "4. Dependencies or prerequisites\n"
+        "Keep it actionable — no hand-waving.\n\n"
+        f"{NO_CODE_INSTRUCTION}"
+    )
+
+    full_prompt = (
+        f"## Task\n{task}\n\n"
+        f"## Project Context\n{context_block}"
+    )
+    return await _gemini(full_prompt, system_instruction=plan_system)
+
+
 def register(mcp):
     @mcp.tool()
     async def gemini_generate(
@@ -89,33 +120,7 @@ def register(mcp):
             documents: Document keys to include as context (default: claude, requirements, architecture).
                 Use fetch_doc(document="list") to see available keys.
         """
-        if documents is None:
-            documents = ["claude", "requirements", "architecture"]
-
-        context_parts: list[str] = []
-        for key in documents:
-            content = _read_doc(key)
-            label = DOCUMENTS.get(key, {}).get("description", key)
-            context_parts.append(f"### {label}\n\n{content}")
-
-        context_block = "\n\n---\n\n".join(context_parts)
-
-        plan_system = (
-            "You are a senior developer on this project. Given the task and project context, "
-            "produce a concrete implementation plan. Include:\n"
-            "1. Numbered steps with specific file paths and function names\n"
-            "2. Key risks or edge cases to watch for\n"
-            "3. Testing strategy (what to test, how)\n"
-            "4. Dependencies or prerequisites\n"
-            "Keep it actionable — no hand-waving.\n\n"
-            f"{NO_CODE_INSTRUCTION}"
-        )
-
-        full_prompt = (
-            f"## Task\n{task}\n\n"
-            f"## Project Context\n{context_block}"
-        )
-        return await _gemini(full_prompt, system_instruction=plan_system)
+        return await _do_plan(task, documents)
 
     @mcp.tool()
     async def analyze(
