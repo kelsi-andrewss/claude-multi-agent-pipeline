@@ -17,6 +17,10 @@ User has requested: `/ship {{args}}`
 
 Parse `{{args}}` to determine the mode:
 
+**Flags:**
+- If `--quick` appears anywhere in args, set `skip_validate = true` and `skip_verify = true`. Strip from args. Skips plan validation (analyze/argue), integrated review, and integration verify. Per-story testing always runs (it's a run-stories concern, not a ship concern).
+- If `--argue` appears anywhere in args, set `use_argue = true`. Strip from args. Uses adversarial debate instead of single-pass review for plan validation.
+
 1. **Resume mode**: first token matches `epic-\d+` → set `epic_id` to that token.
 2. **File mode**: a token ends with `.md` and the file exists → read it:
    - If path starts with `plans/` and file contains `## What changes` → **Execute mode** (existing plan file).
@@ -73,6 +77,35 @@ After Step 2 (or Step 2b), run Gemini planning as a separate step:
 
 ---
 
+## Step 2d: Plan validation
+
+**Skip when:** `skip_validate = true` (--quick flag) or Execute mode.
+
+Validate the plan and produce acceptance criteria before writing plan files:
+
+1. Fetch all stories: `pm_list_stories(epic_id=<epic_id>)`.
+2. Assemble a plan summary: for each story, list title, agent, write_files, tasks.
+
+**Default path** (no `--argue` flag):
+
+3. Load analyze: `ToolSearch: select:mcp__gemini__analyze`
+4. Call `analyze(input="Review this implementation plan for <epic title>. For each story: 1) Check decomposition, file targets, and missing dependencies. 2) Define concrete acceptance criteria — observable behaviors proving correctness (e.g., 'GET /users returns 200 with user list', 'clicking Submit shows confirmation modal'). Format acceptance criteria under per-story headings.\n\n<plan summary>")`.
+5. Parse response:
+   - Plan issues → adjust in Step 3 plan files or call `pm_update_story`.
+   - Acceptance criteria → extract per-story criteria and include in plan files (Step 3).
+
+**`--argue` path** (`use_argue = true`):
+
+3. Write plan summary to `/tmp/ship-plan-<epic-id>.md`.
+4. Load argue: `ToolSearch: select:mcp__gemini__argue`
+5. Call `argue(topic="Implementation plan for <epic title>: 1) Verify decomposition, file targets, approach, and missing dependencies. 2) For each story, define concrete acceptance criteria — observable behaviors that prove the story works correctly. Output these under a per-story ACCEPTANCE CRITERIA heading.", topic_type="plan", context_docs=["/tmp/ship-plan-<epic-id>.md"], max_rounds=3)`.
+6. Parse synthesis:
+   - Plan issues → adjust in Step 3 plan files or call `pm_update_story`.
+   - Acceptance criteria → extract per-story criteria and include in plan files (Step 3).
+7. Delete temp file: `rm /tmp/ship-plan-<epic-id>.md`
+
+---
+
 ## Step 3: Write plan files (Claude's job)
 
 For each story, call `pm_get_story(story_id=<id>)` to get the Gemini-planned tasks and write_files. Then for each story:
@@ -95,18 +128,69 @@ For each story, call `pm_get_story(story_id=<id>)` to get the Gemini-planned tas
    |---|---|
    | <write_file> | <description from tasks> |
 
+   ## Read-only context
+
+   These files inform the implementation but should not be modified:
+   - `path/to/file` — why it's relevant
+
    ## Tasks
 
    1. <task 1>
    2. <task 2>
    ...
 
+   ## Acceptance criteria
+
+   These define correctness independently of the implementation. Tests should verify these:
+   - <observable behavior 1>
+   - <observable behavior 2>
+
    ## Verification
 
    - <how to verify the changes work>
    ```
+
+   **Read-only context:** Determine from files referenced by tasks but not in the story's write_files scope. These give coders the interface contracts and utilities they need without modifying them.
+
+   **Acceptance criteria:** If plan validation ran (Step 2d), extract per-story criteria from the analyze/argue response. If validation was skipped (`--quick`), write basic criteria derived from the story's task descriptions — focus on observable behaviors, not implementation details.
+
 3. Load `ToolSearch: select:mcp__gemini__pm_update_story`
 4. Call `pm_update_story(story_id=<id>, plan_file="plans/<name>.md")` for each story.
+
+---
+
+## Step 3b: Environment preflight
+
+**Purpose**: Identify external service dependencies before coders launch. Missing env vars waste entire coder runs.
+
+**Skip when**: Execute mode (existing plan file — user manages their own env).
+
+**NEVER read `.env` files.** This step works with service *names* from plan text — never secret values.
+
+1. Scan all plan files from Step 3. In `## What changes` and `## Tasks` sections, look for indicators of external dependencies:
+   - Auth providers (Firebase Auth, Supabase, Auth0, Clerk, OAuth)
+   - Databases (Postgres, MySQL, MongoDB, Redis, Firestore)
+   - Payment (Stripe, PayPal, Square)
+   - Email/SMS (SendGrid, Twilio, Resend, Postmark)
+   - Cloud SDKs (AWS, GCP, Azure)
+   - Explicit env var references (process.env, os.environ, dotenv)
+
+2. If nothing detected → skip silently, proceed to Step 4.
+
+3. If dependencies detected → present a checklist of env var **names** (never values) and **wait for user confirmation**:
+   ```
+   Environment preflight — external services detected in plan files:
+
+   [ ] STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY — Stripe payments (story-NNN)
+   [ ] DATABASE_URL — PostgreSQL (story-NNN, story-MMM)
+   [ ] FIREBASE_API_KEY — Firebase Auth (Bootstrap)
+
+   Confirm these are set in your .env (and anywhere else needed), or say "skip".
+   ```
+
+4. For new projects: ensure the Bootstrap plan includes:
+   - `.env.example` with placeholder var names (no real values)
+   - `.env` and `.env.local` in `.gitignore`
 
 ---
 
@@ -120,14 +204,77 @@ Skill: run-stories, args: "<story-id-1> <story-id-2> ..."
 
 ---
 
-## Step 5: Report
+## Step 5a: Report execution status
 
 After `/run-stories` completes, print a summary:
 ```
 Shipped: <epic title> (<epic_id>)
-  story-NNN: <title> — <agent> — plan: plans/<name>.md
+  story-NNN: <title> — <agent> — plan: plans/<name>.md — <DONE|BLOCKED>
   ...
+```
 
-Stories are running in background worktrees.
-Use /roadmap to check progress.
+If any stories are BLOCKED, list their reasons. Continue to Step 5b only if at least one story merged successfully.
+
+---
+
+## Step 5b: Integrated review
+
+**Skip when:** `skip_verify = true` (--quick flag) or zero stories merged.
+
+After all stories merge into the dev branch, review the combined output:
+
+1. Determine `<dev-branch>` from the epic mapping and `<base>` (the commit the dev branch was created from, or `main`).
+2. Generate the full diff: `git diff <base>...<dev-branch>`
+3. Launch reviewer agent (background, **Sonnet**) on the full diff. The reviewer sees the combined output of all stories and checks for:
+   - Cross-story naming inconsistencies
+   - Duplicate code across stories
+   - Conflicting patterns or import inconsistencies
+   - Any BLOCKING issues
+4. Results:
+   - BLOCKING findings → report which story likely caused each issue. Attempt fix via coder resume or manual fix on dev branch.
+   - Warnings → log to `<project>/.claude/review-findings.md`.
+   - Max 1 review round.
+
+---
+
+## Step 5c: Integration verify
+
+**Skip when:** `skip_verify = true` (--quick flag) or no build system detected.
+
+After integrated review passes (or was skipped), verify the combined result:
+
+1. Checkout dev branch: `git checkout <dev-branch>`
+2. Detect project type and run build:
+   - `package.json` → `npm install && npm run build`
+   - `pubspec.yaml` → `flutter pub get && flutter build`
+   - `Cargo.toml` → `cargo build`
+   - `go.mod` → `go build ./...`
+   - `pyproject.toml`/`setup.py` → `pip install -e .`
+   - None detected → skip, warn "No build system detected."
+3. Build failure → report error + identify likely story cause from the diff.
+4. Run tests if infrastructure exists. Failure → report failing tests.
+5. Behavioral checks: walk acceptance criteria from all plan files. For each criterion that can be checked programmatically:
+   - API endpoints → curl/fetch and verify response shape + status
+   - CLI commands → run and verify output
+   - File output → check file exists and contents match expectations
+   - UI/visual criteria → skip, report as "manual verification needed: `<criterion>`"
+6. Report:
+   ```
+   Integration verified: build passes, N/M tests pass, K/L acceptance criteria verified, J criteria require manual check.
+   ```
+7. Return to original branch.
+
+---
+
+## Step 6: Final report
+
+Print final summary:
+```
+Ship complete: <epic title> (<epic_id>)
+  Stories: N merged, M blocked
+  Review: <pass|warnings|blocking issues found>
+  Integration: <build passes, tests pass|build failed|skipped>
+  Acceptance: K/L verified, J manual
+
+Use /roadmap to check status.
 ```

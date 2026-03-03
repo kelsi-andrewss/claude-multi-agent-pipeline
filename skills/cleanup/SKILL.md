@@ -42,10 +42,14 @@ Collect results from each step into tracking vars:
 
 For each `story-NNN` in the parsed story IDs:
 
-1. Call `pm_get_story(story_id)` → extract `state`, `branch`, `title`, `epic_id`.
+1. Call `pm_get_story(story_id)` → extract `state`, `branch`, `title`, `epic_id`, `worktree_active`.
 2. If `state` is already `archived` (or `archived=1`): note "already archived — skipping". Skip remaining sub-steps for this story.
-3. Otherwise: call `pm_update_story(story_id, state="done", force=True)`.
-4. Run `git worktree list --porcelain`. Find the block whose `branch` line equals `refs/heads/<branch>`.
+3. If `state` is `in-progress`: ask via `AskUserQuestion`:
+   > "story-NNN ('<title>') is currently in-progress. A coder may be working on it. Archive anyway?"
+   - On no: note "skipped — story is in-progress". Skip remaining sub-steps for this story.
+   - On yes: proceed.
+4. Call `pm_update_story(story_id, state="done", worktree_active=False, force=True)`.
+5. Run `git worktree list --porcelain`. Find the block whose `branch` line equals `refs/heads/<branch>`.
    - **If found and clean** (run `git -C <worktree-path> status --porcelain` → empty output):
      - Run `git worktree remove --force <worktree-path>` then `git worktree prune`.
      - Add `<worktree-path>` to `removed_worktrees`.
@@ -54,12 +58,12 @@ For each `story-NNN` in the parsed story IDs:
      - On yes: `git worktree remove --force <worktree-path>`, add to `removed_worktrees`.
      - On no: note "worktree kept — uncommitted changes".
    - **If not found**: no action.
-5. Delete remote branch if it exists:
+6. Delete remote branch if it exists:
    ```bash
    git push origin --delete <branch> 2>/dev/null || true
    ```
    If branch was non-empty and deletion was attempted, add `<branch>` to `deleted_branches`.
-6. Add `story-NNN "<title>"` to `archived_stories`.
+7. Add `story-NNN "<title>"` to `archived_stories`.
 
 ---
 
@@ -71,7 +75,11 @@ For each `epic-NNN` in the parsed epic IDs:
 2. Call `pm_get_epic(epic_id)` → extract `title`, `state`.
 3. Call `pm_list_stories(epic_id=epic_id)` → get all stories.
 4. For each story not yet in a terminal state (`done`, `shipped`, `archived`):
-   - Call `pm_update_story(story_id, state="done", force=True)`.
+   - If `state` is `in-progress`: ask via `AskUserQuestion`:
+     > "story-NNN ('<title>') is currently in-progress. A coder may be working on it. Force close?"
+     - On no: note "skipped — story is in-progress". Skip this story.
+     - On yes: proceed.
+   - Call `pm_update_story(story_id, state="done", worktree_active=False, force=True)`.
    - Add to `archived_stories`.
 5. Call `pm_update_epic(epic_id, state="done")`.
 6. Delete epic dev branch on remote:

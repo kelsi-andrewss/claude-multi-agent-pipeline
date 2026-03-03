@@ -118,6 +118,10 @@ else
   TEMP=$(mktemp -d /tmp/merge-dev-XXXXXX)
   git worktree add "$TEMP" <dev-branch>
 
+  # Ensure we have the latest dev branch state (prevents stale-push failures
+  # when multiple stories merge into the same dev branch sequentially)
+  git -C "$TEMP" pull --rebase origin <dev-branch>
+
   # Merge with --no-ff for clear history
   git -C "$TEMP" merge --no-ff <story-branch> -m "merge: <title>"
 fi
@@ -150,6 +154,14 @@ git worktree remove --force "$TEMP"
 ## Step 4: Clean up story worktree and branches
 
 ```bash
+# Check for uncommitted changes before removal (informational — the merge
+# already captured all committed work, but this surfaces unexpected state)
+DIRTY=$(git -C <worktree-path> status --porcelain 2>/dev/null)
+if [ -n "$DIRTY" ]; then
+  echo "Warning: worktree has uncommitted changes that will be lost:"
+  echo "$DIRTY"
+fi
+
 # Remove the story worktree
 git worktree remove --force <worktree-path>
 git worktree prune
@@ -167,14 +179,19 @@ If any cleanup command fails, note the failure in the report but do not stop —
 
 ## Step 5: Update story state (only if story found in DB)
 
+> **Serialization note**: When `/run-stories` calls `/merge-worktree` for multiple DONE
+> stories in the same epic, it must call them **sequentially** — wait for each merge to
+> complete before starting the next. This prevents stale-push race conditions on the dev branch.
+
 If `story_id` is non-null:
 
 ```
 # Transition through in-progress if needed, then to done.
+# Clear worktree tracking since the worktree has been removed.
 # force=True makes the in-progress call safe regardless of current state
 # (ready, approved, or already in-progress all succeed).
 pm_update_story(story_id, state="in-progress", force=True)
-pm_update_story(story_id, state="done")
+pm_update_story(story_id, state="done", worktree_active=False)
 ```
 
 **Epic auto-close check** (only if `epic_id` is non-null):
@@ -183,6 +200,43 @@ Call `pm_update_epic(epic_id, auto_close=True)`.
 
 - If `closed: true`: note in the report: `Epic <epic_id> → done (all stories complete)`.
 - If `closed: false`: skip. The response includes `reason` (e.g., persistent epic, remaining stories).
+
+---
+
+## Step 5.5: Log outcome
+
+Determine outcome metadata:
+- `agent`: from `pm_get_story(story_id)` agent field
+- `model`: infer from coder launch context this session (haiku/sonnet/opus). If unknown, "unknown".
+- `cycle_time`: compute from epics.db — time between story state entering `in-progress` and
+  current timestamp. Format as hours (e.g., "2.1h"). If timestamps unavailable, "unknown".
+- `coder_effort`: read `/tmp/coder-effort-<story_id>.json` (written by run-stories Step 5 on
+  agent completion). Format as "[model] · [tokens] tokens · [calls] calls · [duration]s".
+  If the file doesn't exist (story was run outside run-stories, or pre-dates this change),
+  write "not captured". Delete the temp file after reading.
+- `skills_list`: read `~/.claude/.claude/tracking/skill-telemetry.jsonl`, filter by current
+  session_id, collect distinct skill values. If missing, use "merge-worktree".
+- `friction_summary`: read `~/.claude/friction-log.md`, count entries matching this story_id.
+  Format as "N: cat1, cat2" or "0 (clean)".
+- `memory_list`: recall OpenMemory queries during this session's plan critique or coder prompt
+  construction for this story. If any influenced a decision, list topics. Otherwise "none".
+
+Append to `~/.claude/outcomes.md`:
+
+```
+## [ISO date] -- [story_id] -- [title]
+**Intent**: [story title from DB]
+**Result**: merged
+**Agent**: [agent]
+**Model**: [model]
+**Cycle time**: [cycle_time]
+**Coder effort**: [coder_effort]
+**Skills used**: [skills_list]
+**Friction events**: [friction_summary]
+**Memory attributed**: [memory_list]
+**What worked**: [brief — infer from merge process: clean execution, or note if escalation/restart occurred]
+**What failed**: [brief — "nothing" or summarize any coder failures/restarts that preceded the merge]
+```
 
 ---
 

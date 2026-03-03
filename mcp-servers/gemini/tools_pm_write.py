@@ -356,6 +356,8 @@ def register(mcp):
         move_to_epic: str | None = None,
         force: bool = False,
         archived: bool | None = None,
+        worktree_path: str | None = None,
+        worktree_active: bool | None = None,
     ) -> str:
         """Update story fields. Validates state transitions. Auto-timestamps on state changes.
 
@@ -371,6 +373,8 @@ def register(mcp):
             move_to_epic: Epic ID to move the story to.
             force: Skip state transition validation.
             archived: Manually archive (True) or unarchive (False) the story.
+            worktree_path: Absolute path to the story's worktree (null to clear).
+            worktree_active: Whether the worktree is currently active.
         """
         with _db_op() as conn:
             story = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
@@ -433,6 +437,14 @@ def register(mcp):
             if archived is not None:
                 updates.append("archived = ?")
                 params.append(int(archived))
+
+            if worktree_path is not None:
+                updates.append("worktree_path = ?")
+                params.append(worktree_path)
+
+            if worktree_active is not None:
+                updates.append("worktree_active = ?")
+                params.append(int(worktree_active))
 
             if not updates:
                 return "No fields to update."

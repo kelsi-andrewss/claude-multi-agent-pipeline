@@ -8,15 +8,7 @@ This is a colleague contract, not a config file. It encodes how we think togethe
 - When I ask "why did you choose X", explain the reasoning — don't restate what X is.
 - If a task is ambiguous, ask one focused clarifying question rather than listing interpretations.
 - Be concise. Skip preamble and filler.
-
-## Session start
-When you see the SESSION AGENDA, interpret it before waiting for direction:
-- If you have a clear recommendation, state it with reasoning (dependency chain, staleness, momentum)
-- If you don't have enough context to prioritize, say so — "I see these stories but can't tell why story-340 has been in-progress for 72 hours" is more useful than a guess
-- Flag anything that looks wrong (stale stories, blocked-ready with no path forward)
-- If nothing is in progress and nothing is ready, say so — don't invent work
-- If a SESSION HANDOFF is present, incorporate its context — it contains what the previous session was doing and what needs attention
-This is your "first word" — use it honestly. One paragraph, not a list.
+- Being wrong is fine. Being noncommittal is worse. Pick a position, commit to it, and adjust when new information arrives.
 
 ## Disagreement protocol
 - State your position with reasoning — on anything, not just high-risk items.
@@ -45,14 +37,13 @@ When unsure which category, default to opinion.
 ## Decisions
 - Decisions outlive the code that prompted them. Record in `pm_add_decision` so future sessions can query context. Inline comments only for code that looks like a bug but isn't.
 - Before proposing an approach, check `pm_list_decisions` — conflicting with a recorded decision wastes a round-trip.
+- After calling pm_add_decision, shadow the decision to OpenMemory for semantic search: openmemory_store with tags=["decision", "<decision-id>"], user_id="proj:<project>".
 
 ## Code philosophy
-- Changes should be scoped. Touching code outside the current task — comments, docstrings, type annotations, drive-by refactors — blurs ownership and creates noisy diffs.
-- New files add navigation cost and fragment context. Edit existing files unless the change genuinely doesn't belong anywhere.
+- Changes should be scoped. Fix what's broken in code you're modifying — including its types and docs. Don't touch code you're not otherwise changing.
 - Error handling for impossible scenarios obscures the real logic and implies the scenario is real.
 - Solve the current problem. Abstractions for hypothetical future needs add complexity now and are usually wrong later.
-- Emojis in code and commit messages read as noise in diffs and logs.
-- Framework-specific patterns (React, Firebase, CSS, Konva) live in `refs/pitfalls-*.md` and are delivered to coders via `pm_list_patterns`.
+- Test logic that can break silently — data transformations, state transitions, conditional behavior. Don't test wiring (route configs, component composition, dependency injection) — it fails obviously. Don't duplicate what the type system already catches.
 
 ## Commits
 - `git add -A` risks capturing secrets, build artifacts, or unintended changes. Stage files by name.
@@ -74,6 +65,8 @@ These files track patterns across sessions:
 - `~/.claude/disagreements.md` — overrides log (appended when I override a strong position)
 - `~/.claude/outcomes.md` — post-merge/rejection results (consulted on-demand)
 - `~/.claude/behavioral-prefs.md` — distilled preferences inferred over time (loaded every session)
+- `~/.claude/tool-learnings.md` — model/tool capability audit log (append-only, git-tracked)
+- OpenMemory (`procedural` sector) — queryable store for tool/model observations
 
 ### Distilling preferences
 When the session agenda shows "BEHAVIORAL DISTILLATION DUE" or on request:
@@ -84,11 +77,23 @@ When the session agenda shows "BEHAVIORAL DISTILLATION DUE" or on request:
 5. Update the timestamp: `<!-- last-distilled: YYYY-MM-DD -->`
 6. Preferences with fewer than 3 supporting data points get prefixed with "(tentative)"
 
+### Tool & model learnings
+When a model or tool repeatedly succeeds or fails at a specific task type (2+ occurrences):
+1. Store to OpenMemory (procedural sector, global scope) for semantic recall.
+2. Append a one-liner to `~/.claude/tool-learnings.md` as the audit trail.
+If OpenMemory is down, the log entry still captures it; the memory-queue drains later.
+These inform model selection (§2) and prompt crafting (§8).
+
 ## Integration surfaces
 Features that expose registries, hooks, or plugin APIs become implicit dependencies. When shipping one, add or update an `## Integration surfaces` section in that project's CLAUDE.md so future work knows to wire into it. Each entry names the surface, its owner file(s), and the registration pattern.
 
+### OpenMemory MCP
+- **Owner:** registered via `claude mcp add openmemory --scope user`
+- **Tools:** openmemory_store, openmemory_query, openmemory_list, openmemory_get, openmemory_reinforce, openmemory_delete
+- **Storage:** `~/.claude/.claude/openmemory.sqlite`
+- **Scoping:** user_id="global" (cross-project) or user_id="proj:<name>" (per-project)
+- **Embeddings:** Ollama nomic-embed-text (local)
+
 ## Project structure
 `~/.claude/` is itself a git project. Claude Code treats `~/.claude/.claude/` as its project-level config folder. That subfolder contains the live infrastructure: `epics.db`, `scripts/epics-cli.sh`, `hooks/`, `prompts/`. Global skills and instructions live at `~/.claude/skills/` and `~/.claude/ORCHESTRATION.md` — duplicating them into `.claude/.claude/skills/` creates drift between two sources of truth.
-
-## Main session orchestration rules
-See ~/.claude/ORCHESTRATION.md — applies to the main session only, not to spawned agents.
+- Framework-specific patterns (React, Firebase, CSS, Konva) live in `refs/pitfalls-*.md` and are delivered to coders via `pm_list_patterns`.

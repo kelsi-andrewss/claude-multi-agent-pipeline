@@ -22,7 +22,7 @@ User has requested: `/run-stories {{args}}`
 
 ## Output policy
 - Do not emit any text between tool calls. Run all tools silently.
-- The only output is the final summary (Step 5). No execution plan block, no progress narration.
+- The only output is the final summary (Step 6). No execution plan block, no progress narration.
 
 ---
 
@@ -113,7 +113,7 @@ Process each dependency group sequentially. Within each group, process conflict 
 Launch all stories in the batch in **a single message** as `general-purpose` agents with `run_in_background: true`.
 
 Compute for each story:
-- `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars
+- `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars, then append `-<NNN>` where NNN is the numeric part of the story ID (e.g., story-352 → `-352`)
 - `epic-slug`: the `epic_slug` returned by `pm_dev_branch` from Step 3
 - `story-branch`: `<epic-slug>/<story-slug>`
 - `worktree-path`: `<project-root>/.claude/worktrees/story/<story-slug>`
@@ -122,6 +122,14 @@ Compute for each story:
   - `quick-fixer` → "Make surgical, minimal changes. No refactoring beyond what the plan specifies."
   - `architect` → "Make full architectural changes as specified in the plan. Follow all structural decisions."
   - anything else → "Follow the plan exactly."
+
+**Before constructing each coder's prompt**, perform per-story enrichment:
+
+**Pitfalls:** Extract file extensions from write_files, map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
+
+**Read-only context:** Read the story's plan file, extract paths from the `## Read-only context` section (if present). Prefix paths with the worktree path.
+
+**Protected files:** Check if `<project-root>/.claude/protected-files.md` exists. If so, read it and include the list in the prompt.
 
 Each background agent receives this prompt (fill all placeholders before launching):
 
@@ -132,15 +140,25 @@ Plan file: <plan_file>
 Agent approach: <agent-approach>
 Dev branch: <dev-branch>
 Story branch: <story-branch>
-Worktree path: <worktree-path>
 Write files scope: <write_files list, or "not specified">
+Read-only context files: <read-only context paths prefixed with worktree path, or "none">
 Project root: <project-root>
+
+WORKTREE: <worktree-path>
+All reads and writes MUST use paths under this directory.
+Before doing anything else, run: git -C <worktree-path> branch --show-current
+Confirm it prints <story-branch>. If not, STOP and report branch mismatch.
+Do NOT edit files outside this worktree.
+
+Do not edit any protected files. <If protected-files.md exists: "Protected files: <list>">
+
+## Pitfalls
+
+<pitfalls from pm_list_patterns, or "No pitfalls for this story's file types.">
 
 ## Steps
 
-1. Read the plan file at `<plan_file>`. Understand what changes are required.
-
-2. Create the story worktree using direct git commands:
+1. Create the story worktree using direct git commands:
 
    ```bash
    cd <project-root>
@@ -149,35 +167,41 @@ Project root: <project-root>
    git worktree list | grep -q '<worktree-path>' || git worktree add <worktree-path> <story-branch>
    ```
 
-3. Work **exclusively** inside `<worktree-path>`. Never edit files in `<project-root>` directly.
+2. Verify worktree branch:
+   ```bash
+   git -C <worktree-path> branch --show-current
+   ```
+   Must print `<story-branch>`. If not, STOP and report branch mismatch.
 
-4. Implement the plan: <agent-approach>
+3. Mark the story in-progress and record the branch/worktree in the DB:
+   Call: pm_update_story("<story_id>", state="in-progress", branch="<story-branch>", worktree_path="<worktree-path>", worktree_active=True, force=True)
+   (Use force=True so this succeeds regardless of whether the story is in ready or draft state)
+
+4. Read the plan file at `<plan_file>`. Understand what changes are required.
+
+5. Work **exclusively** inside `<worktree-path>`. Never edit files in `<project-root>` directly.
+
+6. Implement the plan: <agent-approach>
    - Focus on the files listed in the write scope if provided
    - Do not modify files outside the write scope unless the plan explicitly requires it
+   - Reference read-only context files for interfaces and utilities but do not modify them
 
-5. Stage and commit all changes inside the worktree:
-   ```bash
-   git -C <worktree-path> add -A
-   git -C <worktree-path> commit -m "<story_id>: <title>"
-   ```
+7. Stage and commit changes inside the worktree:
+   - Stage only the files you modified or created: `git -C <worktree-path> add <file1> <file2> ...`
+   - Do NOT use `git add -A` or `git add .`
+   - Commit: `git -C <worktree-path> commit -m "<story_id>: <title>"`
 
-6. Push the story branch:
+8. Push the story branch:
    ```bash
    git -C <worktree-path> push -u origin <story-branch>
    ```
-
-7. Write the resolved story branch back to the DB:
-   Call: pm_update_story("<story_id>", branch="<story-branch>")
-
-8. Mark the story in-progress before starting implementation:
-   Call: pm_update_story("<story_id>", state="in-progress", force=True)
-   (Use force=True so this succeeds regardless of whether the story is in ready or draft state)
 
 9. After all changes are committed and pushed, mark done:
    Call: pm_update_story("<story_id>", state="done")
 
 10. Return exactly one of:
-   - Success: "DONE: <story-branch> pushed. Commit: <short-hash>. State: done. Notes: <any relevant notes or 'none'>"
+   - Success: "DONE: <story-branch> pushed. Commit: <short-hash>. State: done. Files changed: <list of files staged>. Notes: <any relevant notes or 'none'>"
+   - Decision needed (max 1 per story): "NEED_DECISION: <blocker>\nOption A: <option>\nOption B: <option>\n[Option C: <option>]"
    - Failure: "BLOCKED: <clear reason why the story could not be completed>"
 ```
 
@@ -201,16 +225,69 @@ After the previous batch completes, before launching the next story:
 
 ---
 
-## Step 5: Collect results and report
+## Step 5: Collect results and validate
 
-Wait for all background agents to complete. Then print a final summary:
+Wait for all background agents to complete.
+
+For each completed agent, write usage metadata to `/tmp/coder-effort-<story-id>.json`:
+```json
+{
+  "story_id": "<story-id>",
+  "model": "<model used>",
+  "total_tokens": "<from agent result>",
+  "tool_uses": "<from agent result>",
+  "duration_ms": "<from agent result>"
+}
+```
+If the agent result doesn't include usage metadata, skip — merge-worktree handles the fallback.
+
+**NEED_DECISION handling:** If any agent returns NEED_DECISION:
+1. Parse blocker description and options from the response.
+2. Log a friction event: category `decision`, type automatic, skill `run-stories`.
+3. Claude picks the best option (with one-line reasoning).
+4. Resume the agent using its agent ID: "Decision: Option <X>. Continue from where you left off."
+5. Wait for the resumed agent to return DONE or BLOCKED.
+6. If DONE, add to the merge list. If BLOCKED, add to blocked list.
+
+### Step 5a: Diff gate (per story)
+
+For each DONE story, verify only expected files changed:
+
+```bash
+git -C <worktree-path> diff --name-only <dev-branch>
+```
+
+Compare against the story's write_files. If unexpected files changed, warn but continue — the coder may have legitimately needed adjacent files. Log any discrepancies.
+
+### Step 5b: Per-story testing
+
+For each DONE story that passes the diff gate:
+
+1. Check if test infrastructure exists in the project (look for test directories, test configs, `jest.config`, `pytest.ini`, `_test.go` files, etc.). If none exists, skip testing for this story.
+2. Launch unit-tester agent (background, **Haiku**) in the worktree. The unit-tester writes tests from the plan file's **acceptance criteria**, not from the implementation.
+3. Results:
+   - PASS → story proceeds to merge.
+   - FAIL trivial → log a friction event (category `retry`, type automatic, skill `run-stories`),
+     resume coder with failures, wait for fix. If fix succeeds, proceed to merge.
+   - FAIL non-trivial → log a friction event (category `blocked`, type automatic, skill `run-stories`),
+     story marked BLOCKED.
+
+### Step 5c: Merge
+
+For each story that passes validation (diff gate + testing), invoke `/merge-worktree` (pass all validated story IDs space-separated as args).
+
+---
+
+## Step 6: Report
+
+Print a final summary:
 
 ```
 Run complete.  Dev branch: dev/my-feature
 
-story-001  batch 0   my-feature/fix-auth-flow      DONE    abc1234
-story-003  batch 0   my-feature/update-dashboard   DONE    def5678
-story-002  batch 1   my-feature/refactor-handlers  DONE    ghi9012  (conflicted with story-001 on src/handlers/foo.js)
+story-001  batch 0   my-feature/fix-auth-flow      DONE    abc1234   tests: pass
+story-003  batch 0   my-feature/update-dashboard   DONE    def5678   tests: skipped (no infra)
+story-002  batch 1   my-feature/refactor-handlers  DONE    ghi9012   tests: pass  (conflicted with story-001 on src/handlers/foo.js)
 story-005  batch 0   my-feature/add-search         BLOCKED plan file references missing utility
 
 Skipped (validation):
@@ -228,7 +305,5 @@ The `batch` column shows the parallel batch each story ran in (batch 0 = first p
 If all stories complete successfully, print: "All stories executed successfully."
 
 If any story is BLOCKED, list it with its reason in a "Blocked" section. Never stop other stories due to one failure — they run independently.
-
-If at least one story completed with DONE status, immediately invoke `/merge-worktree` for each DONE story (pass all DONE story IDs space-separated as args).
 
 If all stories were BLOCKED or skipped (zero DONE), stop after printing the summary.

@@ -85,6 +85,19 @@ def startup_migrate(db_path: Path | None = None) -> None:
                     pass
             conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (2)")
 
+        if current < 3:
+            try:
+                conn.execute("ALTER TABLE stories ADD COLUMN worktree_path TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
+            try:
+                conn.execute("ALTER TABLE stories ADD COLUMN worktree_active INTEGER DEFAULT 0")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
+            conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (3)")
+
         conn.commit()
     finally:
         conn.close()
@@ -140,7 +153,7 @@ def _story_to_dict(row: sqlite3.Row) -> dict:
     # depends_on now comes from the junction table; default to empty list
     d["depends_on"] = d.get("depends_on", []) if isinstance(d.get("depends_on"), list) else []
     # Convert integer booleans to bool
-    for field in ("needs_testing", "needs_review", "auto_merge", "archived"):
+    for field in ("needs_testing", "needs_review", "auto_merge", "archived", "worktree_active"):
         if field in d:
             d[field] = bool(d[field])
     return d

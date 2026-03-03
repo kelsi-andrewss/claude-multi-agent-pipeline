@@ -14,9 +14,16 @@ triggers:
   - ask gemini to plan
 ---
 
-## CRITICAL: Do not explore the codebase before calling Gemini.
-Your first action is ALWAYS to call Gemini (`pm_plan_story`, `pm_plan_stories`, or `pm_plan_items`) with the user's intent.
-Do NOT read source files, run Glob/Grep, or enter plan mode before Gemini returns its output.
+## CRITICAL: Gemini-first planning (unless fast-path applies)
+
+Before calling Gemini, check each story for fast-path eligibility:
+- `agent` = `quick-fixer`
+- `write_files` count ≤ 2
+- No file in `write_files` appears in the project's protected-files list
+- `pm_get_story` returns at least one task
+
+Fast-path stories: skip Gemini entirely. Write their plan files directly in Step 5 using DB metadata only.
+All other stories: call Gemini as usual. Do NOT explore the codebase before Gemini returns its output.
 Gemini is the researcher. You are the critic. Exploration happens only during your post-Gemini critique (§6 of ORCHESTRATION.md).
 
 ---
@@ -47,6 +54,13 @@ Classify each token in `{{args}}`:
 ---
 
 ## Step 2: Run Gemini planning
+
+**Partition stories:**
+1. Call `pm_get_story(story_id)` for each story (parallel, single message).
+2. Check fast-path criteria for each: agent = `quick-fixer`, write_files count ≤ 2, no protected files, at least one task.
+3. Split into `fast_path` and `gemini_path` lists.
+4. Run Gemini planning ONLY for `gemini_path` stories (existing logic below).
+5. `fast_path` stories skip directly to Step 5.
 
 Load the Gemini MCP tools:
 
@@ -123,6 +137,23 @@ Do all of the following **in the main session** (no background agents):
 
 2. **Write all plan files in a single message** (parallel `Write` tool calls), one per story:
 
+   **For fast-path stories:**
+   Write plan file using story metadata directly:
+   ```
+   ## Context
+   story-NNN: <title>
+   Files: <write_files>
+
+   ## What changes
+   - <task 1 description>
+   - <task 2 description>
+
+   ## Verification
+   - Confirm each task is implemented correctly
+   - No changes outside write scope
+   ```
+
+   **For Gemini-planned stories:**
    Each file at `plans/<whimsical-name>.md` uses this format:
    ```
    ## Context
