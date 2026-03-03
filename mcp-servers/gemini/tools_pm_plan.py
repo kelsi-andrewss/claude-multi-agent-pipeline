@@ -8,7 +8,7 @@ from pathlib import Path
 
 from constants import MAX_CODE_BYTES
 from gemini_client import _discover_files, _gemini, _load_audit_context, _read_files_within_budget
-from tools_pm_helpers import _add_task_to_story, _apply_plan_to_story, _build_plan_prompt, _db_op, _story_to_dict
+from tools_pm_helpers import _add_task_to_story, _apply_plan_to_story, _build_plan_prompt, _db_op, _set_story_deps, _story_to_dict
 
 
 def register(mcp):
@@ -99,6 +99,9 @@ def register(mcp):
                         story_id,
                     )
                 )
+                depends_on = plan_data.get("depends_on", [])
+                if depends_on:
+                    _set_story_deps(conn, story_id, depends_on)
                 return json.dumps({
                     "mode": "story",
                     "story_id": story_id,

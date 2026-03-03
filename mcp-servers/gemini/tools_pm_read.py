@@ -9,6 +9,7 @@ from constants import AT_RISK_DAYS_THRESHOLD, AT_RISK_PCT_THRESHOLD, EPIC_STATES
 from tools_pm_helpers import (
     _db_op,
     _epic_to_dict,
+    _fetch_story_deps,
     _story_to_dict,
 )
 
@@ -57,6 +58,7 @@ def register(mcp):
             if not story:
                 return f"Story '{story_id}' not found."
             sd = _story_to_dict(story)
+            sd["depends_on"] = _fetch_story_deps(conn, story_id)
 
             tasks = conn.execute(
                 "SELECT * FROM tasks WHERE story_id = ? ORDER BY id", (story_id,)
@@ -64,8 +66,10 @@ def register(mcp):
             sd["tasks"] = [dict(t) for t in tasks]
 
             blocked_by_me = conn.execute(
-                "SELECT id, title, state FROM stories WHERE depends_on LIKE ? AND archived = 0",
-                (f'%"{story_id}"%',)
+                "SELECT s.id, s.title, s.state FROM stories s "
+                "JOIN story_dependencies sd ON s.id = sd.story_id "
+                "WHERE sd.depends_on = ? AND s.archived = 0",
+                (story_id,)
             ).fetchall()
             if blocked_by_me:
                 sd["blocks"] = [{"id": r["id"], "title": r["title"], "state": r["state"]} for r in blocked_by_me]

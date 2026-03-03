@@ -22,6 +22,7 @@ from tools_pm_helpers import (
     _group_items,
     _next_id,
     _score_stories_by_similarity,
+    _set_story_deps,
     _story_to_dict,
     _validate_dependencies,
     _validate_transition,
@@ -135,15 +136,16 @@ def register(mcp):
             conn.execute(
                 """INSERT INTO stories (id, epic_id, title, state, write_files, agent, model,
                    depends_on, needs_testing, needs_review)
-                   VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, 'draft', ?, ?, ?, '[]', ?, ?)""",
                 (
                     story_id, target_epic, title,
                     json.dumps(write_files or []),
                     agent, model,
-                    json.dumps(depends_on or []),
                     int(needs_testing), int(needs_review),
                 )
             )
+            if depends_on:
+                _set_story_deps(conn, story_id, depends_on)
 
             created_tasks = []
             for i, task_title in enumerate(tasks or [], start=1):
