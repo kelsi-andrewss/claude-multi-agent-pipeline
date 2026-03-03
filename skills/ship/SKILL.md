@@ -59,9 +59,23 @@ For an existing plan file:
 
 ---
 
+## Step 2c: Run Gemini planning
+
+`pm_ship` only creates the epic and stories in the DB — it does NOT run Gemini planning.
+
+After Step 2 (or Step 2b), run Gemini planning as a separate step:
+
+1. Extract `epic_id` from the `pm_ship` response.
+2. Call `pm_plan_stories(epic_id=<epic_id>)` to generate tasks, write_files, agent assignments, and parallel groups for all draft stories.
+3. The response contains the planned stories with tasks and execution order.
+
+**Skip this step in Execute mode** (Step 2b), since that path uses a pre-written plan file.
+
+---
+
 ## Step 3: Write plan files (Claude's job)
 
-From the `pm_ship` response, for each story in the `stories` array:
+For each story, call `pm_get_story(story_id=<id>)` to get the Gemini-planned tasks and write_files. Then for each story:
 
 1. Generate a plan file name: `plans/<random-adjective-noun>.md`
 2. Write the plan file with this structure:
