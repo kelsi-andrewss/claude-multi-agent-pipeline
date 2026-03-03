@@ -1,4 +1,4 @@
-"""PM organize tools: pm_reorder and pm_housekeep."""
+"""PM organize tools: pm_reorder, pm_triage, pm_cleanup, pm_regroup."""
 
 from __future__ import annotations
 
@@ -119,320 +119,324 @@ def register(mcp):
             return json.dumps({"mode": "reorder", "epic_id": target_epic, "stories": [dict(r) for r in rows]})
 
     @mcp.tool()
-    async def pm_housekeep(
-        mode: str,
+    async def pm_triage(epic_id: str | None = None) -> str:
+        """Find unorganized work: backlog stories, unassigned agents, draft stories without tasks, and suggest moves.
+
+        Args:
+            epic_id: Scope triage to a single epic.
+        """
+        with _db_op(readonly=True) as conn:
+            epic_filter = " AND s.epic_id = ?" if epic_id else ""
+            params_epic: list = [epic_id] if epic_id else []
+
+            backlog_rows = conn.execute(
+                f"SELECT id, title, state, agent FROM stories s WHERE s.epic_id = 'epic-backlog' AND s.archived = 0{' AND s.epic_id = ?' if epic_id else ''}",
+                [epic_id] if epic_id else []
+            ).fetchall()
+            backlog_stories = [dict(r) for r in backlog_rows]
+
+            unassigned_rows = conn.execute(
+                f"SELECT id, title, state, epic_id FROM stories s WHERE s.agent IS NULL AND s.archived = 0{epic_filter}",
+                params_epic
+            ).fetchall()
+            unassigned_stories = [dict(r) for r in unassigned_rows]
+
+            draft_rows = conn.execute(
+                f"SELECT s.id, s.title, s.epic_id FROM stories s WHERE s.state = 'draft' AND s.archived = 0{epic_filter}",
+                params_epic
+            ).fetchall()
+            draft_without_tasks = []
+            for row in draft_rows:
+                task_count = conn.execute(
+                    "SELECT COUNT(*) FROM tasks WHERE story_id = ?", (row["id"],)
+                ).fetchone()[0]
+                if task_count == 0:
+                    draft_without_tasks.append(dict(row))
+
+            backlog_titles = [s["title"] for s in backlog_stories]
+            clustering_proposal: dict = {}
+            if backlog_titles:
+                open_stories_rows = conn.execute(
+                    "SELECT id, title FROM stories WHERE state NOT IN ('done', 'shipped') AND archived = 0"
+                ).fetchall()
+                existing = [{"id": r["id"], "title": r["title"]} for r in open_stories_rows]
+                clustering_proposal = _group_items(backlog_titles, existing)
+
+            suggested_moves = []
+            non_backlog_epics = conn.execute(
+                "SELECT id, title FROM epics WHERE id != 'epic-backlog' AND state = 'active'"
+            ).fetchall()
+            for story in backlog_stories:
+                matches = _score_stories_by_similarity(story["title"], non_backlog_epics)
+                if matches:
+                    best_score, best_epic, _ = matches[0]
+                    suggested_moves.append({
+                        "story_id": story["id"],
+                        "story_title": story["title"],
+                        "suggested_epic_id": best_epic,
+                        "score": round(best_score, 2),
+                        "reason": "keyword match",
+                    })
+
+            return json.dumps({
+                "mode": "triage",
+                "backlog_stories": backlog_stories,
+                "unassigned_stories": unassigned_stories,
+                "draft_without_tasks": draft_without_tasks,
+                "clustering_proposal": clustering_proposal,
+                "suggested_moves": suggested_moves,
+                "instructions": "Use pm_update_story(move_to_epic=...) or pm_plan_items to act on these.",
+            })
+
+    @mcp.tool()
+    async def pm_cleanup(
         archive_days: int = 30,
         stale_days: int = 14,
         confirmed: bool = False,
-        proposal: dict | None = None,
-        epic_id: str | None = None,
     ) -> str:
-        """Housekeeping tool: triage unorganized work, cleanup done items, or regroup stories across epics.
+        """Archive old done stories, close empty epics, and surface stale in-progress stories.
 
         Args:
-            mode: One of 'triage', 'cleanup', 'regroup'.
-            archive_days: (cleanup) Archive done stories older than N days (default 30).
-            stale_days: (cleanup) Surface in-progress stories older than N days (default 14).
-            confirmed: (cleanup/regroup) If True, commit destructive changes.
-            proposal: (regroup Phase 2) The proposal dict returned by Phase 1.
-            epic_id: Scope triage/regroup to a single epic.
+            archive_days: Archive done stories older than N days (default 30).
+            stale_days: Surface in-progress stories older than N days (default 14).
+            confirmed: If True, commit destructive changes. Default is dry-run.
         """
-        valid_modes = {"triage", "cleanup", "regroup"}
-        if mode not in valid_modes:
-            return f"Invalid mode '{mode}'. Valid modes: {sorted(valid_modes)}"
+        if archive_days < 1:
+            return "archive_days must be >= 1."
+        if stale_days < 1:
+            return "stale_days must be >= 1."
 
         with _db_op() as conn:
-            # Mode: triage
-            if mode == "triage":
-                epic_filter = " AND s.epic_id = ?" if epic_id else ""
-                params_epic: list = [epic_id] if epic_id else []
+            now = datetime.utcnow()
+            archive_cutoff = (now - timedelta(days=archive_days)).isoformat()
+            stale_cutoff = (now - timedelta(days=stale_days)).isoformat()
 
-                backlog_rows = conn.execute(
-                    f"SELECT id, title, state, agent FROM stories s WHERE s.epic_id = 'epic-backlog' AND s.archived = 0{' AND s.epic_id = ?' if epic_id else ''}",
-                    [epic_id] if epic_id else []
-                ).fetchall()
-                backlog_stories = [dict(r) for r in backlog_rows]
+            would_archive_rows = conn.execute(
+                """SELECT id, title, state, epic_id, completed_at
+                   FROM stories
+                   WHERE state IN ('done', 'shipped') AND archived = 0
+                   AND completed_at IS NOT NULL AND completed_at < ?""",
+                (archive_cutoff,)
+            ).fetchall()
+            would_archive = [dict(r) for r in would_archive_rows]
 
-                unassigned_rows = conn.execute(
-                    f"SELECT id, title, state, epic_id FROM stories s WHERE s.agent IS NULL AND s.archived = 0{epic_filter}",
-                    params_epic
-                ).fetchall()
-                unassigned_stories = [dict(r) for r in unassigned_rows]
+            active_non_persistent = conn.execute(
+                "SELECT id, title FROM epics WHERE state = 'active' AND persistent = 0"
+            ).fetchall()
+            would_close = []
+            for ep in active_non_persistent:
+                active_count = conn.execute(
+                    "SELECT COUNT(*) FROM stories WHERE epic_id = ? AND archived = 0",
+                    (ep["id"],)
+                ).fetchone()[0]
+                if active_count == 0:
+                    would_close.append({"id": ep["id"], "title": ep["title"]})
 
-                draft_rows = conn.execute(
-                    f"SELECT s.id, s.title, s.epic_id FROM stories s WHERE s.state = 'draft' AND s.archived = 0{epic_filter}",
-                    params_epic
-                ).fetchall()
-                draft_without_tasks = []
-                for row in draft_rows:
-                    task_count = conn.execute(
-                        "SELECT COUNT(*) FROM tasks WHERE story_id = ?", (row["id"],)
-                    ).fetchone()[0]
-                    if task_count == 0:
-                        draft_without_tasks.append(dict(row))
+            stale_rows = conn.execute(
+                """SELECT id, title, epic_id, started_at
+                   FROM stories
+                   WHERE state = 'in-progress' AND archived = 0
+                   AND started_at IS NOT NULL AND started_at < ?""",
+                (stale_cutoff,)
+            ).fetchall()
+            stale_stories = [dict(r) for r in stale_rows]
 
-                backlog_titles = [s["title"] for s in backlog_stories]
-                clustering_proposal: dict = {}
-                if backlog_titles:
-                    open_stories_rows = conn.execute(
-                        "SELECT id, title FROM stories WHERE state NOT IN ('done', 'shipped') AND archived = 0"
-                    ).fetchall()
-                    existing = [{"id": r["id"], "title": r["title"]} for r in open_stories_rows]
-                    clustering_proposal = _group_items(backlog_titles, existing)
+            mismatch_rows = conn.execute(
+                """SELECT t.id as task_id, t.story_id, t.title as task_title,
+                          s.state as story_state, s.title as story_title
+                   FROM tasks t
+                   JOIN stories s ON t.story_id = s.id
+                   WHERE t.state = 'in-progress' AND s.state != 'in-progress' AND s.archived = 0"""
+            ).fetchall()
+            task_mismatches = [dict(r) for r in mismatch_rows]
 
-                suggested_moves = []
-                non_backlog_epics = conn.execute(
-                    "SELECT id, title FROM epics WHERE id != 'epic-backlog' AND state = 'active'"
-                ).fetchall()
-                for story in backlog_stories:
-                    matches = _score_stories_by_similarity(story["title"], non_backlog_epics)
-                    if matches:
-                        best_score, best_epic, _ = matches[0]
-                        suggested_moves.append({
-                            "story_id": story["id"],
-                            "story_title": story["title"],
-                            "suggested_epic_id": best_epic,
-                            "score": round(best_score, 2),
-                            "reason": "keyword match",
-                        })
-
-                return json.dumps({
-                    "mode": "triage",
-                    "backlog_stories": backlog_stories,
-                    "unassigned_stories": unassigned_stories,
-                    "draft_without_tasks": draft_without_tasks,
-                    "clustering_proposal": clustering_proposal,
-                    "suggested_moves": suggested_moves,
-                    "instructions": "Use pm_update_story(move_to_epic=...) or pm_plan_items to act on these.",
-                })
-
-            # Mode: cleanup
-            if mode == "cleanup":
-                if archive_days < 1:
-                    return "archive_days must be >= 1."
-                if stale_days < 1:
-                    return "stale_days must be >= 1."
-
-                now = datetime.utcnow()
-                archive_cutoff = (now - timedelta(days=archive_days)).isoformat()
-                stale_cutoff = (now - timedelta(days=stale_days)).isoformat()
-
-                would_archive_rows = conn.execute(
-                    """SELECT id, title, state, epic_id, completed_at
-                       FROM stories
-                       WHERE state IN ('done', 'shipped') AND archived = 0
-                       AND completed_at IS NOT NULL AND completed_at < ?""",
-                    (archive_cutoff,)
-                ).fetchall()
-                would_archive = [dict(r) for r in would_archive_rows]
-
-                active_non_persistent = conn.execute(
-                    "SELECT id, title FROM epics WHERE state = 'active' AND persistent = 0"
-                ).fetchall()
-                would_close = []
-                for ep in active_non_persistent:
-                    active_count = conn.execute(
-                        "SELECT COUNT(*) FROM stories WHERE epic_id = ? AND archived = 0",
-                        (ep["id"],)
-                    ).fetchone()[0]
-                    if active_count == 0:
-                        would_close.append({"id": ep["id"], "title": ep["title"]})
-
-                stale_rows = conn.execute(
-                    """SELECT id, title, epic_id, started_at
-                       FROM stories
-                       WHERE state = 'in-progress' AND archived = 0
-                       AND started_at IS NOT NULL AND started_at < ?""",
-                    (stale_cutoff,)
-                ).fetchall()
-                stale_stories = [dict(r) for r in stale_rows]
-
-                mismatch_rows = conn.execute(
-                    """SELECT t.id as task_id, t.story_id, t.title as task_title,
-                              s.state as story_state, s.title as story_title
-                       FROM tasks t
-                       JOIN stories s ON t.story_id = s.id
-                       WHERE t.state = 'in-progress' AND s.state != 'in-progress' AND s.archived = 0"""
-                ).fetchall()
-                task_mismatches = [dict(r) for r in mismatch_rows]
-
-                if not confirmed:
-                    return json.dumps({
-                        "mode": "cleanup",
-                        "dry_run": True,
-                        "would_archive_stories": would_archive,
-                        "would_close_epics": would_close,
-                        "stale_stories": stale_stories,
-                        "task_mismatches": task_mismatches,
-                    })
-
-                archived_ids = [r["id"] for r in would_archive]
-                for sid in archived_ids:
-                    conn.execute("UPDATE stories SET archived = 1 WHERE id = ?", (sid,))
-
-                closed_epic_ids = [ep["id"] for ep in would_close]
-                for eid in closed_epic_ids:
-                    remaining = conn.execute(
-                        "SELECT COUNT(*) FROM stories WHERE epic_id = ? AND archived = 0", (eid,)
-                    ).fetchone()[0]
-                    if remaining == 0:
-                        conn.execute("UPDATE epics SET state = 'done' WHERE id = ?", (eid,))
-
+            if not confirmed:
                 return json.dumps({
                     "mode": "cleanup",
-                    "dry_run": False,
-                    "archived_stories": archived_ids,
-                    "closed_epics": closed_epic_ids,
+                    "dry_run": True,
+                    "would_archive_stories": would_archive,
+                    "would_close_epics": would_close,
                     "stale_stories": stale_stories,
                     "task_mismatches": task_mismatches,
                 })
 
-            # Mode: regroup
-            if mode == "regroup":
-                if not confirmed:
-                    epic_filter_sql = " AND s.epic_id = ?" if epic_id else ""
-                    params_r: list = [epic_id] if epic_id else []
+            archived_ids = [r["id"] for r in would_archive]
+            for sid in archived_ids:
+                conn.execute("UPDATE stories SET archived = 1 WHERE id = ?", (sid,))
 
-                    active_stories = conn.execute(
-                        f"SELECT id, title, epic_id FROM stories s WHERE s.archived = 0{epic_filter_sql}",
-                        params_r
-                    ).fetchall()
+            closed_epic_ids = [ep["id"] for ep in would_close]
+            for eid in closed_epic_ids:
+                remaining = conn.execute(
+                    "SELECT COUNT(*) FROM stories WHERE epic_id = ? AND archived = 0", (eid,)
+                ).fetchone()[0]
+                if remaining == 0:
+                    conn.execute("UPDATE epics SET state = 'done' WHERE id = ?", (eid,))
 
-                    titles = [r["title"] for r in active_stories]
-                    story_map = {r["title"]: r for r in active_stories}
+            return json.dumps({
+                "mode": "cleanup",
+                "dry_run": False,
+                "archived_stories": archived_ids,
+                "closed_epics": closed_epic_ids,
+                "stale_stories": stale_stories,
+                "task_mismatches": task_mismatches,
+            })
 
-                    if not titles:
-                        return json.dumps({"mode": "regroup", "phase": "proposal", "moves": [], "new_epics": [], "no_change": []})
+    @mcp.tool()
+    async def pm_regroup(
+        epic_id: str | None = None,
+        confirmed: bool = False,
+        proposal: dict | None = None,
+    ) -> str:
+        """Re-cluster stories across epics. Phase 1 proposes moves, Phase 2 commits them.
 
-                    open_stories_list = [{"id": r["id"], "title": r["title"]} for r in active_stories]
-                    clustering = _group_items(titles, open_stories_list)
+        Args:
+            epic_id: Scope regroup to a single epic.
+            confirmed: If True, commit the proposal.
+            proposal: The proposal dict from Phase 1 (required when confirmed=True).
+        """
+        with _db_op() as conn:
+            if not confirmed:
+                epic_filter_sql = " AND s.epic_id = ?" if epic_id else ""
+                params_r: list = [epic_id] if epic_id else []
 
-                    existing_epics = conn.execute(
-                        "SELECT id, title FROM epics WHERE state = 'active'"
-                    ).fetchall()
+                active_stories = conn.execute(
+                    f"SELECT id, title, epic_id FROM stories s WHERE s.archived = 0{epic_filter_sql}",
+                    params_r
+                ).fetchall()
 
-                    moves = []
-                    new_epics_proposal = []
-                    no_change = []
+                titles = [r["title"] for r in active_stories]
+                story_map = {r["title"]: r for r in active_stories}
 
-                    for cluster in clustering.get("proposed_stories", []):
-                        cluster_title = cluster["title"]
+                if not titles:
+                    return json.dumps({"mode": "regroup", "phase": "proposal", "moves": [], "new_epics": [], "no_change": []})
 
-                        cluster_story_ids = []
-                        all_cluster_titles = [cluster_title] + cluster.get("tasks", [])
-                        for ctitle in all_cluster_titles:
-                            row = story_map.get(ctitle)
-                            if row:
-                                cluster_story_ids.append(row["id"])
+                open_stories_list = [{"id": r["id"], "title": r["title"]} for r in active_stories]
+                clustering = _group_items(titles, open_stories_list)
 
-                        if not cluster_story_ids:
-                            continue
+                existing_epics = conn.execute(
+                    "SELECT id, title FROM epics WHERE state = 'active'"
+                ).fetchall()
 
-                        epic_matches = _score_stories_by_similarity(cluster_title, existing_epics)
-                        best_score = epic_matches[0][0] if epic_matches else 0.0
-                        best_epic_id = epic_matches[0][1] if epic_matches else None
-                        best_epic_title = epic_matches[0][2] if epic_matches else None
+                moves = []
+                new_epics_proposal = []
+                no_change = []
 
-                        for sid in cluster_story_ids:
-                            story_row = conn.execute("SELECT id, epic_id FROM stories WHERE id = ?", (sid,)).fetchone()
-                            if not story_row:
-                                continue
-                            current_epic = story_row["epic_id"]
+                for cluster in clustering.get("proposed_stories", []):
+                    cluster_title = cluster["title"]
 
-                            if best_epic_id and best_epic_id != current_epic:
-                                moves.append({
-                                    "story_id": sid,
-                                    "from_epic": current_epic,
-                                    "to_epic": best_epic_id,
-                                    "to_epic_title": best_epic_title,
-                                    "score": round(best_score, 2),
-                                })
-                            elif not best_epic_id:
-                                existing_new = next(
-                                    (ne for ne in new_epics_proposal if ne.get("_cluster_title") == cluster_title),
-                                    None
-                                )
-                                if not existing_new:
-                                    new_epics_proposal.append({
-                                        "_cluster_title": cluster_title,
-                                        "title": cluster_title,
-                                        "story_ids": cluster_story_ids,
-                                    })
-                            else:
-                                no_change.append({"story_id": sid, "epic_id": current_epic})
+                    cluster_story_ids = []
+                    all_cluster_titles = [cluster_title] + cluster.get("tasks", [])
+                    for ctitle in all_cluster_titles:
+                        row = story_map.get(ctitle)
+                        if row:
+                            cluster_story_ids.append(row["id"])
 
-                    clean_new_epics = [
-                        {"title": ne["title"], "story_ids": ne["story_ids"]}
-                        for ne in new_epics_proposal
-                    ]
-
-                    return json.dumps({
-                        "mode": "regroup",
-                        "phase": "proposal",
-                        "moves": moves,
-                        "new_epics": clean_new_epics,
-                        "no_change": no_change,
-                        "instructions": (
-                            "Review the proposal, then call pm_housekeep(mode='regroup', confirmed=True, proposal=<this>) "
-                            "to commit. You may modify the proposal before passing it back."
-                        ),
-                    })
-
-                # Phase 2: commit
-                if not proposal:
-                    return "Pass the proposal dict from Phase 1 when confirmed=True."
-
-                moved = []
-                skipped = []
-                created_epics = []
-
-                new_epic_id_map: dict[str, str] = {}
-                for ne in proposal.get("new_epics", []):
-                    new_title = ne.get("title", "")
-                    if not new_title:
+                    if not cluster_story_ids:
                         continue
-                    new_eid = _next_id(conn, "epics", "epic-")
-                    conn.execute(
-                        "INSERT INTO epics (id, title, branch, persistent, state) VALUES (?, ?, NULL, 0, 'active')",
-                        (new_eid, new_title)
-                    )
-                    created_epics.append({"id": new_eid, "title": new_title})
-                    new_epic_id_map[new_title] = new_eid
 
-                    for sid in ne.get("story_ids", []):
-                        story_row = conn.execute("SELECT id FROM stories WHERE id = ?", (sid,)).fetchone()
+                    epic_matches = _score_stories_by_similarity(cluster_title, existing_epics)
+                    best_score = epic_matches[0][0] if epic_matches else 0.0
+                    best_epic_id = epic_matches[0][1] if epic_matches else None
+                    best_epic_title = epic_matches[0][2] if epic_matches else None
+
+                    for sid in cluster_story_ids:
+                        story_row = conn.execute("SELECT id, epic_id FROM stories WHERE id = ?", (sid,)).fetchone()
                         if not story_row:
-                            skipped.append({"story_id": sid, "reason": "story no longer exists"})
                             continue
-                        conn.execute("UPDATE stories SET epic_id = ? WHERE id = ?", (new_eid, sid))
-                        moved.append({"story_id": sid, "to_epic": new_eid})
+                        current_epic = story_row["epic_id"]
 
-                for move in proposal.get("moves", []):
-                    sid = move.get("story_id")
-                    from_epic = move.get("from_epic")
-                    to_epic = move.get("to_epic")
-                    if not sid or not to_epic:
-                        continue
-                    story_row = conn.execute("SELECT id, epic_id FROM stories WHERE id = ?", (sid,)).fetchone()
-                    if not story_row:
-                        skipped.append({"story_id": sid, "reason": "story no longer exists"})
-                        continue
-                    if story_row["epic_id"] != from_epic:
-                        skipped.append({"story_id": sid, "reason": f"epic changed (now {story_row['epic_id']})"})
-                        continue
-                    epic_exists = conn.execute("SELECT id FROM epics WHERE id = ?", (to_epic,)).fetchone()
-                    if not epic_exists:
-                        skipped.append({"story_id": sid, "reason": f"target epic '{to_epic}' not found"})
-                        continue
-                    conn.execute("UPDATE stories SET epic_id = ? WHERE id = ?", (to_epic, sid))
-                    moved.append({"story_id": sid, "to_epic": to_epic})
+                        if best_epic_id and best_epic_id != current_epic:
+                            moves.append({
+                                "story_id": sid,
+                                "from_epic": current_epic,
+                                "to_epic": best_epic_id,
+                                "to_epic_title": best_epic_title,
+                                "score": round(best_score, 2),
+                            })
+                        elif not best_epic_id:
+                            existing_new = next(
+                                (ne for ne in new_epics_proposal if ne.get("_cluster_title") == cluster_title),
+                                None
+                            )
+                            if not existing_new:
+                                new_epics_proposal.append({
+                                    "_cluster_title": cluster_title,
+                                    "title": cluster_title,
+                                    "story_ids": cluster_story_ids,
+                                })
+                        else:
+                            no_change.append({"story_id": sid, "epic_id": current_epic})
+
+                clean_new_epics = [
+                    {"title": ne["title"], "story_ids": ne["story_ids"]}
+                    for ne in new_epics_proposal
+                ]
 
                 return json.dumps({
                     "mode": "regroup",
-                    "phase": "committed",
-                    "moved": moved,
-                    "created_epics": created_epics,
-                    "skipped": skipped,
+                    "phase": "proposal",
+                    "moves": moves,
+                    "new_epics": clean_new_epics,
+                    "no_change": no_change,
+                    "instructions": (
+                        "Review the proposal, then call pm_regroup(confirmed=True, proposal=<this>) "
+                        "to commit. You may modify the proposal before passing it back."
+                    ),
                 })
 
-            return f"Unhandled mode '{mode}'."
+            # Phase 2: commit
+            if not proposal:
+                return "Pass the proposal dict from Phase 1 when confirmed=True."
+
+            moved = []
+            skipped = []
+            created_epics = []
+
+            new_epic_id_map: dict[str, str] = {}
+            for ne in proposal.get("new_epics", []):
+                new_title = ne.get("title", "")
+                if not new_title:
+                    continue
+                new_eid = _next_id(conn, "epics", "epic-")
+                conn.execute(
+                    "INSERT INTO epics (id, title, branch, persistent, state) VALUES (?, ?, NULL, 0, 'active')",
+                    (new_eid, new_title)
+                )
+                created_epics.append({"id": new_eid, "title": new_title})
+                new_epic_id_map[new_title] = new_eid
+
+                for sid in ne.get("story_ids", []):
+                    story_row = conn.execute("SELECT id FROM stories WHERE id = ?", (sid,)).fetchone()
+                    if not story_row:
+                        skipped.append({"story_id": sid, "reason": "story no longer exists"})
+                        continue
+                    conn.execute("UPDATE stories SET epic_id = ? WHERE id = ?", (new_eid, sid))
+                    moved.append({"story_id": sid, "to_epic": new_eid})
+
+            for move in proposal.get("moves", []):
+                sid = move.get("story_id")
+                from_epic = move.get("from_epic")
+                to_epic = move.get("to_epic")
+                if not sid or not to_epic:
+                    continue
+                story_row = conn.execute("SELECT id, epic_id FROM stories WHERE id = ?", (sid,)).fetchone()
+                if not story_row:
+                    skipped.append({"story_id": sid, "reason": "story no longer exists"})
+                    continue
+                if story_row["epic_id"] != from_epic:
+                    skipped.append({"story_id": sid, "reason": f"epic changed (now {story_row['epic_id']})"})
+                    continue
+                epic_exists = conn.execute("SELECT id FROM epics WHERE id = ?", (to_epic,)).fetchone()
+                if not epic_exists:
+                    skipped.append({"story_id": sid, "reason": f"target epic '{to_epic}' not found"})
+                    continue
+                conn.execute("UPDATE stories SET epic_id = ? WHERE id = ?", (to_epic, sid))
+                moved.append({"story_id": sid, "to_epic": to_epic})
+
+            return json.dumps({
+                "mode": "regroup",
+                "phase": "committed",
+                "moved": moved,
+                "created_epics": created_epics,
+                "skipped": skipped,
+            })

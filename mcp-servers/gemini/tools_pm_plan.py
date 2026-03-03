@@ -1,4 +1,4 @@
-"""PM plan tools: pm_plan (AI planning), pm_critique, and pm_check_conflicts."""
+"""PM plan tools: pm_plan_story, pm_plan_stories, pm_plan_bulk, pm_critique, pm_check_conflicts."""
 
 from __future__ import annotations
 
@@ -13,31 +13,93 @@ from tools_pm_helpers import _add_task_to_story, _apply_plan_to_story, _build_pl
 
 def register(mcp):
     @mcp.tool()
-    async def pm_plan(
-        epic_id: str | None = None,
-        story_id: str | None = None,
-        story_ids: list[str] | None = None,
+    async def pm_plan_story(
+        story_id: str,
         paths: list[str] | None = None,
-        stories: list[dict] | None = None,
         project_root: str | None = None,
         context: str | None = None,
     ) -> str:
-        """AI-powered planning tool that reads the codebase and generates task breakdowns, agent assignments, and execution order for epics and stories.
-
-        Four modes:
-        - Story mode (story_id set): generate tasks + agent + write_files for one story
-        - Multi-story mode (story_ids set): plan a specific set of stories in one call
-        - Epic mode (epic_id set, no story_id): plan all draft stories in an epic
-        - Bulk mode (neither set): return full roadmap JSON for all active epics/stories
+        """Plan a single story: generate tasks, agent assignment, write_files, and dependencies.
 
         Args:
-            epic_id: Scope planning to one epic (epic mode).
-            story_id: Scope planning to one story (story mode). Takes priority over epic_id.
-            story_ids: Plan a specific set of stories in one Gemini call (multi-story mode). Takes priority over epic_id.
-            paths: Source file paths to pass as codebase context (default: PROJECT_ROOT).
-            stories: Per-story path scoping. List of {story_id, paths} dicts. When provided, takes precedence over story_ids+paths and triggers one Gemini call per story with only its scoped files.
-            project_root: Absolute path to the project root to read files from. Defaults to the server's working directory. Pass a worktree path to scope file reads to that worktree.
-            context: Optional requirements/PRD text to inject into the Gemini planning prompt as user context.
+            story_id: The story to plan.
+            paths: Source file paths to pass as codebase context.
+            project_root: Absolute path to the project root.
+            context: Optional requirements/PRD text to inject into the planning prompt.
+        """
+        _root = Path(project_root).resolve() if project_root else None
+        with _db_op() as conn:
+            story = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
+            if not story:
+                return json.dumps({"error": f"Story '{story_id}' not found."})
+            sd = _story_to_dict(story)
+
+            audit_context = _load_audit_context(root=_root)
+            files = _discover_files(paths, root=_root)
+            code_content, _ = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
+
+            open_stories = conn.execute(
+                "SELECT id, title, state FROM stories WHERE state NOT IN ('done','shipped') AND archived = 0 AND id != ?",
+                (story_id,)
+            ).fetchall()
+            open_stories_text = "\n".join(
+                f"- {r['id']}: {r['title']} [{r['state']}]" for r in open_stories
+            ) or "(none)"
+
+            subject = (
+                f"Story ID: {sd['id']}\n"
+                f"Title: {sd['title']}\n"
+                f"Current agent: {sd.get('agent') or 'unassigned'}\n"
+                f"Current write_files: {sd.get('write_files') or []}\n\n"
+                f"Other open stories (for dependency awareness):\n{open_stories_text}\n\n"
+                "Return a single JSON object (not an array) with fields: "
+                "agent, write_files, tasks, parallel_group, depends_on."
+            )
+
+            prompt = _build_plan_prompt(subject, audit_context, code_content, user_context=context)
+            raw = await _gemini(prompt)
+
+            try:
+                plan_data = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                return json.dumps({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
+
+            for task_title in plan_data.get("tasks", []):
+                _add_task_to_story(conn, story_id, task_title)
+            conn.execute(
+                "UPDATE stories SET agent = ?, write_files = ? WHERE id = ?",
+                (plan_data.get("agent"), json.dumps(plan_data.get("write_files", [])), story_id)
+            )
+            depends_on = plan_data.get("depends_on", [])
+            if depends_on:
+                _set_story_deps(conn, story_id, depends_on)
+            return json.dumps({
+                "mode": "story",
+                "story_id": story_id,
+                "title": sd["title"],
+                "agent": plan_data.get("agent"),
+                "write_files": plan_data.get("write_files", []),
+                "tasks_created": len(plan_data.get("tasks", [])),
+            })
+
+    @mcp.tool()
+    async def pm_plan_stories(
+        story_ids: list[str] | None = None,
+        epic_id: str | None = None,
+        stories: list[dict] | None = None,
+        paths: list[str] | None = None,
+        project_root: str | None = None,
+        context: str | None = None,
+    ) -> str:
+        """Plan multiple stories: generate tasks, agents, and execution order. Provide story_ids explicitly or epic_id to plan all draft stories in an epic.
+
+        Args:
+            story_ids: List of story IDs to plan.
+            epic_id: Plan all draft/ready stories in this epic (used when story_ids not provided).
+            stories: Per-story path scoping. List of {story_id, paths} dicts for individual file context per story.
+            paths: Source file paths for shared codebase context.
+            project_root: Absolute path to the project root.
+            context: Optional requirements/PRD text to inject into the planning prompt.
         """
         _root = Path(project_root).resolve() if project_root else None
         with _db_op() as conn:
@@ -46,156 +108,8 @@ def register(mcp):
                 story_ids = [s["story_id"] for s in stories]
                 per_story_paths = {s["story_id"]: s.get("paths", []) for s in stories}
 
-            audit_context = _load_audit_context(root=_root)
-            if not per_story_paths:
-                files = _discover_files(paths, root=_root)
-                code_content, _ = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
-            else:
-                code_content = ""
-
-            # Story mode
-            if story_id:
-                story = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
-                if not story:
-                    return json.dumps({"error": f"Story '{story_id}' not found."})
-                sd = _story_to_dict(story)
-
-                open_stories = conn.execute(
-                    "SELECT id, title, state FROM stories WHERE state NOT IN ('done','shipped') AND archived = 0 AND id != ?",
-                    (story_id,)
-                ).fetchall()
-                open_stories_text = "\n".join(
-                    f"- {r['id']}: {r['title']} [{r['state']}]" for r in open_stories
-                ) or "(none)"
-
-                subject = (
-                    f"Story ID: {sd['id']}\n"
-                    f"Title: {sd['title']}\n"
-                    f"Current agent: {sd.get('agent') or 'unassigned'}\n"
-                    f"Current write_files: {sd.get('write_files') or []}\n\n"
-                    f"Other open stories (for dependency awareness):\n{open_stories_text}\n\n"
-                    "Return a single JSON object (not an array) with fields: "
-                    "agent, write_files, tasks, parallel_group, depends_on."
-                )
-
-                prompt = _build_plan_prompt(subject, audit_context, code_content, user_context=context)
-                raw = await _gemini(prompt)
-
-                try:
-                    plan_data = json.loads(raw)
-                except (json.JSONDecodeError, ValueError):
-                    return json.dumps({
-                        "error": "Gemini returned malformed JSON.",
-                        "raw": raw[:2000],
-                    })
-
-                for task_title in plan_data.get("tasks", []):
-                    _add_task_to_story(conn, story_id, task_title)
-                conn.execute(
-                    "UPDATE stories SET agent = ?, write_files = ? WHERE id = ?",
-                    (
-                        plan_data.get("agent"),
-                        json.dumps(plan_data.get("write_files", [])),
-                        story_id,
-                    )
-                )
-                depends_on = plan_data.get("depends_on", [])
-                if depends_on:
-                    _set_story_deps(conn, story_id, depends_on)
-                return json.dumps({
-                    "mode": "story",
-                    "story_id": story_id,
-                    "title": sd["title"],
-                    "agent": plan_data.get("agent"),
-                    "write_files": plan_data.get("write_files", []),
-                    "tasks_created": len(plan_data.get("tasks", [])),
-                })
-
-            # Multi-story mode
-            if story_ids:
-                errors = []
-                story_list = []
-                for sid in story_ids:
-                    row = conn.execute("SELECT * FROM stories WHERE id = ?", (sid,)).fetchone()
-                    if not row:
-                        errors.append(f"Story '{sid}' not found.")
-                        continue
-                    sd = _story_to_dict(row)
-                    if sd["state"] not in ("draft", "ready"):
-                        errors.append(f"Story '{sid}' has state '{sd['state']}' — skipping (only draft/ready planned).")
-                        continue
-                    story_list.append(sd)
-
-                if not story_list:
-                    return json.dumps({"error": "No plannable stories found.", "details": errors})
-
-                subject_lines = [f"- Story {s['id']}: {s['title']}" for s in story_list]
-                subject = (
-                    "Stories to plan (return a JSON array, one object per story in the same order):\n"
-                    + "\n".join(subject_lines)
-                    + "\n\nEach array element must have: story_id, agent, write_files, tasks, parallel_group, depends_on."
-                )
-
-                if per_story_paths:
-                    plans = []
-                    for s in story_list:
-                        sid = s["id"]
-                        sp = per_story_paths.get(sid, [])
-                        story_files = _discover_files(sp if sp else None, root=_root)
-                        story_code, _ = _read_files_within_budget(story_files, MAX_CODE_BYTES, root=_root)
-                        story_subject = (
-                            f"Story ID: {sid}\n"
-                            f"Title: {s['title']}\n"
-                            f"Current agent: {s.get('agent') or 'unassigned'}\n"
-                            f"Current write_files: {s.get('write_files') or []}\n\n"
-                            "Return a single JSON object (not an array) with fields: "
-                            "story_id, agent, write_files, tasks, parallel_group, depends_on."
-                        )
-                        story_prompt = _build_plan_prompt(story_subject, audit_context, story_code, user_context=context)
-                        raw = await _gemini(story_prompt)
-                        try:
-                            plan_data = json.loads(raw)
-                            if isinstance(plan_data, list):
-                                plan_data = plan_data[0]
-                        except (json.JSONDecodeError, ValueError):
-                            return json.dumps({"error": f"Gemini returned malformed JSON for {sid}.", "raw": raw[:2000]})
-                        plans.append(plan_data)
-                else:
-                    prompt = _build_plan_prompt(subject, audit_context, code_content, user_context=context)
-                    raw = await _gemini(prompt)
-
-                    try:
-                        plans = json.loads(raw)
-                        if not isinstance(plans, list):
-                            plans = [plans]
-                    except (json.JSONDecodeError, ValueError):
-                        return json.dumps({
-                            "error": "Gemini returned malformed JSON.",
-                            "raw": raw[:2000],
-                        })
-
-                plans_by_id = {}
-                for plan_data in plans:
-                    pid = plan_data.get("story_id")
-                    if pid:
-                        plans_by_id[pid] = plan_data
-
-                summary = []
-                for s in story_list:
-                    sid = s["id"]
-                    plan_data = plans_by_id.get(sid)
-                    if plan_data is None:
-                        summary.append({"story_id": sid, "title": s["title"], "error": "No matching plan returned by Gemini."})
-                        continue
-                    summary.append({"title": s["title"], **_apply_plan_to_story(conn, sid, plan_data)})
-
-                result = {"mode": "multi-story", "stories": summary}
-                if errors:
-                    result["warnings"] = errors
-                return json.dumps(result)
-
-            # Epic mode
-            if epic_id:
+            # If epic_id provided and no story_ids, fetch draft stories from epic
+            if not story_ids and epic_id:
                 epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
                 if not epic:
                     return json.dumps({"error": f"Epic '{epic_id}' not found."})
@@ -204,64 +118,127 @@ def register(mcp):
                     "SELECT * FROM stories WHERE epic_id = ? AND state IN ('draft','ready') AND archived = 0",
                     (epic_id,)
                 ).fetchall()
-
                 if not draft_stories:
-                    return json.dumps({
-                        "mode": "epic",
-                        "epic_id": epic_id,
-                        "message": "No draft/ready stories found in this epic.",
-                    })
+                    return json.dumps({"mode": "epic", "epic_id": epic_id, "message": "No draft/ready stories found in this epic."})
+                story_ids = [_story_to_dict(s)["id"] for s in draft_stories]
 
-                story_list = [_story_to_dict(s) for s in draft_stories]
-                subject_lines = [
-                    f"- Story {s['id']}: {s['title']}" for s in story_list
-                ]
-                subject = (
-                    f"Epic ID: {epic_id}\n"
-                    f"Epic title: {dict(epic)['title']}\n\n"
-                    "Stories to plan (return a JSON array, one object per story in the same order):\n"
-                    + "\n".join(subject_lines)
-                    + "\n\nEach array element must have: story_id, agent, write_files, tasks, parallel_group, depends_on."
-                )
+            if not story_ids:
+                return json.dumps({"error": "Provide story_ids or epic_id."})
 
+            audit_context = _load_audit_context(root=_root)
+            if not per_story_paths:
+                files = _discover_files(paths, root=_root)
+                code_content, _ = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
+            else:
+                code_content = ""
+
+            errors = []
+            story_list = []
+            for sid in story_ids:
+                row = conn.execute("SELECT * FROM stories WHERE id = ?", (sid,)).fetchone()
+                if not row:
+                    errors.append(f"Story '{sid}' not found.")
+                    continue
+                sd = _story_to_dict(row)
+                if sd["state"] not in ("draft", "ready"):
+                    errors.append(f"Story '{sid}' has state '{sd['state']}' — skipping (only draft/ready planned).")
+                    continue
+                story_list.append(sd)
+
+            if not story_list:
+                return json.dumps({"error": "No plannable stories found.", "details": errors})
+
+            # Build epic context if available
+            epic_prefix = ""
+            if epic_id:
+                epic = conn.execute("SELECT title FROM epics WHERE id = ?", (epic_id,)).fetchone()
+                if epic:
+                    epic_prefix = f"Epic ID: {epic_id}\nEpic title: {epic['title']}\n\n"
+
+            subject_lines = [f"- Story {s['id']}: {s['title']}" for s in story_list]
+            subject = (
+                epic_prefix
+                + "Stories to plan (return a JSON array, one object per story in the same order):\n"
+                + "\n".join(subject_lines)
+                + "\n\nEach array element must have: story_id, agent, write_files, tasks, parallel_group, depends_on."
+            )
+
+            if per_story_paths:
+                plans = []
+                for s in story_list:
+                    sid = s["id"]
+                    sp = per_story_paths.get(sid, [])
+                    story_files = _discover_files(sp if sp else None, root=_root)
+                    story_code, _ = _read_files_within_budget(story_files, MAX_CODE_BYTES, root=_root)
+                    story_subject = (
+                        f"Story ID: {sid}\n"
+                        f"Title: {s['title']}\n"
+                        f"Current agent: {s.get('agent') or 'unassigned'}\n"
+                        f"Current write_files: {s.get('write_files') or []}\n\n"
+                        "Return a single JSON object (not an array) with fields: "
+                        "story_id, agent, write_files, tasks, parallel_group, depends_on."
+                    )
+                    story_prompt = _build_plan_prompt(story_subject, audit_context, story_code, user_context=context)
+                    raw = await _gemini(story_prompt)
+                    try:
+                        plan_data = json.loads(raw)
+                        if isinstance(plan_data, list):
+                            plan_data = plan_data[0]
+                    except (json.JSONDecodeError, ValueError):
+                        return json.dumps({"error": f"Gemini returned malformed JSON for {sid}.", "raw": raw[:2000]})
+                    plans.append(plan_data)
+            else:
                 prompt = _build_plan_prompt(subject, audit_context, code_content, user_context=context)
                 raw = await _gemini(prompt)
-
                 try:
                     plans = json.loads(raw)
                     if not isinstance(plans, list):
                         plans = [plans]
                 except (json.JSONDecodeError, ValueError):
-                    return json.dumps({
-                        "error": "Gemini returned malformed JSON.",
-                        "raw": raw[:2000],
-                    })
+                    return json.dumps({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
 
-                plans_by_id = {}
-                for plan_data in plans:
-                    pid = plan_data.get("story_id")
-                    if pid:
-                        plans_by_id[pid] = plan_data
+            plans_by_id = {}
+            for plan_data in plans:
+                pid = plan_data.get("story_id")
+                if pid:
+                    plans_by_id[pid] = plan_data
 
-                summary = []
-                for s in story_list:
-                    sid = s["id"]
-                    plan_data = plans_by_id.get(sid)
-                    if plan_data is None:
-                        summary.append({"story_id": sid, "title": s["title"], "error": "No matching plan returned by Gemini."})
-                        continue
-                    summary.append({"title": s["title"], **_apply_plan_to_story(conn, sid, plan_data)})
+            summary = []
+            for s in story_list:
+                sid = s["id"]
+                plan_data = plans_by_id.get(sid)
+                if plan_data is None:
+                    summary.append({"story_id": sid, "title": s["title"], "error": "No matching plan returned by Gemini."})
+                    continue
+                summary.append({"title": s["title"], **_apply_plan_to_story(conn, sid, plan_data)})
 
-                return json.dumps({
-                    "mode": "epic",
-                    "epic_id": epic_id,
-                    "stories": summary,
-                })
+            result = {"mode": "multi-story", "stories": summary}
+            if epic_id:
+                result["epic_id"] = epic_id
+            if errors:
+                result["warnings"] = errors
+            return json.dumps(result)
 
-            # Bulk mode
-            active_epics = conn.execute(
-                "SELECT * FROM epics WHERE state = 'active'"
-            ).fetchall()
+    @mcp.tool()
+    async def pm_plan_bulk(
+        paths: list[str] | None = None,
+        project_root: str | None = None,
+        context: str | None = None,
+    ) -> str:
+        """Generate a full roadmap JSON for all active epics and their stories.
+
+        Args:
+            paths: Source file paths to pass as codebase context.
+            project_root: Absolute path to the project root.
+            context: Optional requirements/PRD text to inject into the planning prompt.
+        """
+        _root = Path(project_root).resolve() if project_root else None
+        with _db_op() as conn:
+            audit_context = _load_audit_context(root=_root)
+            files = _discover_files(paths, root=_root)
+            code_content, _ = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
+
+            active_epics = conn.execute("SELECT * FROM epics WHERE state = 'active'").fetchall()
 
             from tools_pm_helpers import _epic_to_dict
             all_stories = conn.execute(
@@ -301,10 +278,7 @@ def register(mcp):
             try:
                 roadmap = json.loads(raw)
             except (json.JSONDecodeError, ValueError):
-                return json.dumps({
-                    "error": "Gemini returned malformed JSON.",
-                    "raw": raw[:2000],
-                })
+                return json.dumps({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
 
             roadmap["generated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
             roadmap["mode"] = "bulk"
@@ -360,7 +334,6 @@ def register(mcp):
                     "plan_content": plan_content,
                 })
 
-            # Gather in-progress stories for conflict detection
             in_progress = conn.execute(
                 "SELECT id, title, write_files FROM stories WHERE state = 'in-progress' AND archived = 0"
             ).fetchall()
@@ -374,7 +347,6 @@ def register(mcp):
                         wf = []
                 in_progress_info.append({"id": r["id"], "title": r["title"], "write_files": wf or []})
 
-            # Gather active decisions
             decisions = conn.execute(
                 "SELECT d.*, GROUP_CONCAT(ds.scope_type || ':' || ds.scope_value, '; ') as scopes_str "
                 "FROM decisions d LEFT JOIN decision_scopes ds ON d.id = ds.decision_id "
@@ -386,18 +358,15 @@ def register(mcp):
                 for d in decisions
             ) or "(none)"
 
-            # Load ORCHESTRATION.md section 6
             orch_path = Path.home() / ".claude" / "ORCHESTRATION.md"
             orch_content = ""
             if orch_path.exists():
                 full_orch = orch_path.read_text(encoding="utf-8")
-                # Extract section 6
                 start = full_orch.find("## 6.")
                 if start >= 0:
                     end = full_orch.find("\n## 7.", start)
                     orch_content = full_orch[start:end] if end > start else full_orch[start:]
 
-            # Build critique prompt
             critique_system = (
                 "You are a senior architect critiquing implementation plans. "
                 "For each story, check against the critique checklist below and return a JSON array "

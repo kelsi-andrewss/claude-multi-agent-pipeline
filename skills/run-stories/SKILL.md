@@ -36,8 +36,8 @@ Parse each token in `{{args}}`:
 
 After collecting, validate each story and **skip with a warning** if any of the following:
 - `plan_file` is null or empty:
-  - Load `ToolSearch: select:mcp__gemini__pm_plan` and call `pm_plan(story_id=<id>)` for all unplanned stories **in parallel** (single message).
-  - Wait for all `pm_plan` calls to complete.
+  - Load `ToolSearch: select:mcp__gemini__pm_plan_story` and call `pm_plan_story(story_id=<id>)` for all unplanned stories **in parallel** (single message).
+  - Wait for all `pm_plan_story` calls to complete.
   - Launch one background `general-purpose` agent per unplanned story to write the plan file (same prompt as draft-plan Step 5).
   - Wait for all agents to complete, then re-fetch each story to confirm `plan_file` is now set.
   - If still missing after auto-planning, skip with warning: "story-NNN: auto-planning failed — skipping."

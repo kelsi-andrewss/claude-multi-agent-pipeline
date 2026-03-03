@@ -24,7 +24,7 @@ Inspect `{{args}}` (trim whitespace):
 
 - **Empty or whitespace** → **Status mode**: dry-run report only, no mutations. Skip to Step 5 (status report).
 - `git` → **Git cleanup** only. Skip to Step 4.
-- `all` → **Bulk archive** then **Git cleanup**. Run `pm_housekeep(mode="cleanup")` then Step 4.
+- `all` → **Bulk archive** then **Git cleanup**. Run `pm_cleanup()` then Step 4.
 - One or more tokens matching `story-\d+` → **Story archive** mode. Run Step 2 for each.
 - One or more tokens matching `epic-\d+` → **Epic close** mode. Run Step 3 for each.
 - Mixed `story-NNN` and `epic-NNN` → Run Step 2 for stories, Step 3 for epics.
@@ -118,7 +118,7 @@ For any remaining worktrees whose path is under `.claude/worktrees/story/`:
 
 ### Status mode (no args)
 
-Run `pm_housekeep(mode="cleanup", confirmed=False)` for a dry-run summary.
+Run `pm_cleanup(confirmed=False)` for a dry-run summary.
 
 Then run:
 ```bash
@@ -131,7 +131,7 @@ Print a read-only status report:
 ```
 Cleanup status (dry run — no changes made):
 
-Archivable stories:  <pm_housekeep dry-run output>
+Archivable stories:  <pm_cleanup dry-run output>
 Merged dev/* branches: <list or "none">
 Potentially orphaned worktrees: <list or "none">
 

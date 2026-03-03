@@ -15,13 +15,13 @@ triggers:
 ---
 
 ## CRITICAL: Do not explore the codebase before calling Gemini.
-Your first action is ALWAYS to call Gemini (`pm_plan` or `pm_plan_items`) with the user's intent.
+Your first action is ALWAYS to call Gemini (`pm_plan_story`, `pm_plan_stories`, or `pm_plan_items`) with the user's intent.
 Do NOT read source files, run Glob/Grep, or enter plan mode before Gemini returns its output.
 Gemini is the researcher. You are the critic. Exploration happens only during your post-Gemini critique (§6 of ORCHESTRATION.md).
 
 ---
 
-Run Gemini planning (`pm_plan`) on the target stories/epic, then immediately convert
+Run Gemini planning (`pm_plan_story`/`pm_plan_stories`) on the target stories/epic, then immediately convert
 the Gemini output into Claude-style plan files (`plans/<whimsical-name>.md`) and store
 the filename back in the DB via `pm_update_story`.
 
@@ -51,7 +51,8 @@ Classify each token in `{{args}}`:
 Load the Gemini MCP tools:
 
 ```
-ToolSearch: select:mcp__gemini__pm_plan
+ToolSearch: select:mcp__gemini__pm_plan_story
+ToolSearch: select:mcp__gemini__pm_plan_stories
 ToolSearch: select:mcp__gemini__pm_list_stories
 ToolSearch: select:mcp__gemini__pm_get_story
 ToolSearch: select:mcp__gemini__pm_check_conflicts
@@ -60,10 +61,10 @@ ToolSearch: select:mcp__gemini__pm_critique
 
 **For file paths** (`.md`):
 - Read the file and search for `story-\d+`.
-- If a story ID is found, add it to the story list and run `pm_plan(story_id=...)` for it (skip grouping below for these).
+- If a story ID is found, add it to the story list and run `pm_plan_story(story_id=...)` for it (skip grouping below for these).
 - If no story ID found, ask the user: "Could not find a story ID in `<path>`. Which story does this plan belong to?"
 
-**For explicit epic IDs** (from Step 1): call `pm_plan(epic_id=<id>)` directly — no grouping check needed.
+**For explicit epic IDs** (from Step 1): call `pm_plan_stories(epic_id=<id>)` directly — no grouping check needed.
 
 **For story IDs** — use epic-grouped planning where safe:
 
@@ -74,14 +75,14 @@ ToolSearch: select:mcp__gemini__pm_critique
 3. **Determine call mode per epic** (parallel): for each unique epic, call `pm_list_stories(epic_id=<id>)` to get all non-archived stories in that epic. Do all in a single message.
 
 4. **Decide per epic**:
-   - If **all** `draft`/`ready` stories in the epic are in the target list → use epic mode: `pm_plan(epic_id=<id>)`
-   - Otherwise → fall back to multi-story mode: `pm_plan(story_ids=[<id>, ...])`  with all targeted stories from that epic in one call
+   - If **all** `draft`/`ready` stories in the epic are in the target list → use epic mode: `pm_plan_stories(epic_id=<id>)`
+   - Otherwise → fall back to multi-story mode: `pm_plan_stories(story_ids=[<id>, ...])`  with all targeted stories from that epic in one call
 
-5. **Call `pm_plan` in a single message** (parallel tool calls) — one call per epic in epic mode, one `story_ids` call per partial-epic group in multi-story mode. Include any file-path stories and explicit epic IDs from above.
+5. **Call `pm_plan_story`/`pm_plan_stories` in a single message** (parallel tool calls) — one call per epic in epic mode, one `story_ids` call per partial-epic group in multi-story mode. Include any file-path stories and explicit epic IDs from above.
 
 Wait for **all** calls to complete before proceeding.
 
-After all `pm_plan` calls complete, resolve the full concrete story list:
+After all planning calls complete, resolve the full concrete story list:
 
 - Story IDs: already resolved.
 - Epic IDs (explicit from Step 1): call `pm_list_stories(epic_id=...)`, filter to non-archived, add to story list.
@@ -94,7 +95,7 @@ Deduplicate. If the story list is empty, stop and report: "No stories found. Not
 
 For each story in the final list:
 - Call `pm_get_story(story_id)`.
-- If the output contains no agent assignment and no tasks, warn: "story-NNN: pm_plan returned no data — skipping." and remove from list.
+- If the output contains no agent assignment and no tasks, warn: "story-NNN: planning returned no data — skipping." and remove from list.
 
 If the list is empty after filtering, stop and report: "No stories with plan data. Nothing to convert."
 

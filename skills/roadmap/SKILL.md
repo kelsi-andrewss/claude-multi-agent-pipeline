@@ -29,7 +29,7 @@ ToolSearch: select:mcp__gemini__pm_roadmap
 ToolSearch: select:mcp__gemini__pm_update_story
 ToolSearch: select:mcp__gemini__pm_update_epic
 ToolSearch: select:mcp__gemini__pm_create_epic
-ToolSearch: select:mcp__gemini__pm_metrics
+ToolSearch: select:mcp__gemini__pm_wip
 ```
 
 ---
@@ -113,7 +113,7 @@ Use 10-char progress bars.
 
 ## health
 
-1. Call `pm_metrics(metric="health")` and `pm_roadmap()` in parallel.
+1. Call `pm_wip()` and `pm_roadmap()` in parallel.
 2. Display a combined view:
 
 ```
