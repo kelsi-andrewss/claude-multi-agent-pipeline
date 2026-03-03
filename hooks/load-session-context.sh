@@ -12,6 +12,16 @@ echo ""
 echo "--- ~/.claude/ORCHESTRATION.md ---"
 cat "$HOME/.claude/ORCHESTRATION.md"
 echo ""
+if [[ -f "$HOME/.claude/behavioral-prefs.md" ]]; then
+  echo "--- ~/.claude/behavioral-prefs.md ---"
+  cat "$HOME/.claude/behavioral-prefs.md"
+  echo ""
+fi
+if [[ -f "$HOME/.claude/session-handoff.md" ]]; then
+  echo "=== SESSION HANDOFF (from previous session) ==="
+  cat "$HOME/.claude/session-handoff.md"
+  echo ""
+fi
 echo "=== MANDATORY TOOL CALL REQUIREMENT ==="
 echo "Before answering ANY question about workflow, pipeline, or how you would handle a task,"
 echo "you MUST use the Read tool to read these files — do NOT answer from memory or loaded context alone:"
