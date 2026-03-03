@@ -49,6 +49,43 @@ mcp__gemini__audit(
 
 Wait for the tool to complete. It will write `AUDIT-GEMINI.md` to the project root and return the report content.
 
-### 4. Report results to user
+### 4. Cross-reference findings against open stories
 
-After the tool completes, print the tool's return string verbatim.
+Call `pm_list_stories()` (no filters — defaults to non-archived). From the returned JSON array, filter to stories where `state` is not `done`, `shipped`, or `archived`.
+
+Build a map:
+```
+open_story_map = { story_id: { title, writeFiles[] } }
+```
+Parse each story's `write_files` as a JSON array.
+
+Read the written report at `AUDIT-GEMINI.md` in the project root.
+
+For each finding in the report that references a specific file path:
+- Check open_story_map for any story whose `writeFiles` array contains a path that matches or overlaps the finding's referenced file.
+- If a match is found, append to that finding's section in the report:
+  ```
+  Related open story: story-NNN — <title>
+  ```
+
+If any annotations were added, write the updated report back to `AUDIT-GEMINI.md`.
+
+### 5. Offer story creation for uncovered High priority findings
+
+Scan the report for findings marked as priority `High` that do NOT have a "Related open story" annotation (i.e., not already covered by an open story).
+
+If any such findings exist, list them to the user and ask:
+> "The following High priority findings are not covered by any open story. Create a /todo story for each? (yes / no / list the ones you want)"
+
+If the user says yes (or selects specific items), invoke `/todo` for each selected finding using the finding's title and description as the task description.
+
+### 6. Print completion summary
+
+Output the following to the user:
+
+```
+Audit complete.
+Report: AUDIT-GEMINI.md
+Findings: <N> High, <N> Medium, <N> Low
+<if stories created>: Stories created: story-NNN, ...
+```
