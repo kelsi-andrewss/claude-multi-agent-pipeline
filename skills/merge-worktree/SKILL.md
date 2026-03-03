@@ -30,11 +30,10 @@ User has requested: `/merge-worktree {{args}}`
 
 1. Call `pm_get_story("{{args}}")` → extract `db_branch`, `epic_id`, `title`, `id`
 2. Compute canonical `story-branch`:
-   a. If `epic_id` is non-null: call `pm_get_epic(epic_id)` → `epic_title`
-      - `epic-slug` = slugify(`epic_title`): lowercase, replace spaces/non-alphanumeric with `-`, collapse consecutive `-`, truncate to 40 chars
-      - `story-slug` = slugify(`title`): same rules
-      - `story-branch` = `<epic-slug>/<story-slug>`
-   b. If `epic_id` is null or slugification fails: `story-branch` = `db_branch` (verbatim)
+   a. If `epic_id` is non-null: call `pm_dev_branch(epic_id)` → extract `epic_slug`
+      - `story-slug` = slugify(`title`): lowercase, replace spaces/non-alphanumeric with `-`, collapse consecutive `-`, truncate to 40 chars
+      - `story-branch` = `<epic_slug>/<story-slug>`
+   b. If `epic_id` is null or the tool returns an error: `story-branch` = `db_branch` (verbatim)
 3. Run:
    ```bash
    git worktree list --porcelain
@@ -78,17 +77,11 @@ User has requested: `/merge-worktree {{args}}`
 
 **If `epic_id` is non-null:**
 
-> Note: `pm_get_epic` was already called in Step 1 if `epic_id` was non-null. Reuse those results here.
+> Note: `pm_dev_branch` was already called in Step 1 if `epic_id` was non-null. Reuse those results here.
 
-1. If `epic_id == "epic-backlog"`: `dev-branch = "dev"` — skip steps 2–5.
-2. Use `epic_title` from Step 1 (already fetched)
-3. Slugify `epic-title`:
-   - lowercase
-   - replace spaces and non-alphanumeric characters with `-`
-   - collapse consecutive `-` into one
-   - truncate to 40 characters
-4. `dev-branch` = `dev/<slug>`  (e.g., `dev/my-feature-epic`)
-5. Fallback if `epic-title` is missing or empty: `dev-branch` = `dev/<epic_id>` (e.g., `dev/epic-007`)
+1. Use the `dev_branch` value returned by `pm_dev_branch(epic_id)` from Step 1.
+   - For `epic-backlog`, this is `"dev"`.
+   - For other epics, this is `"dev/<epic_slug>"`.
 
 **If `epic_id` is null (git-only mode):**
 

@@ -1,8 +1,9 @@
-"""PM read/query tools: pm_get_epic, pm_get_story, pm_list_stories, pm_search, pm_view, pm_roadmap."""
+"""PM read/query tools: pm_get_epic, pm_get_story, pm_list_stories, pm_search, pm_view, pm_roadmap, pm_dev_branch."""
 
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 
 from constants import AT_RISK_DAYS_THRESHOLD, AT_RISK_PCT_THRESHOLD, EPIC_STATES, STORY_STATES
@@ -433,3 +434,23 @@ def register(mcp):
                     "completed": completed,
                 },
             })
+
+    @mcp.tool()
+    async def pm_dev_branch(epic_id: str) -> str:
+        """Compute the dev branch name and slug for an epic.
+
+        Args:
+            epic_id: The epic ID (e.g., 'epic-022').
+        """
+        if epic_id == "epic-backlog":
+            return json.dumps({"dev_branch": "dev", "epic_slug": "backlog"})
+
+        with _db_op(readonly=True) as conn:
+            epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
+            if not epic:
+                return json.dumps({"error": f"Epic '{epic_id}' not found."})
+            title = epic["title"]
+            slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:40]
+            if not slug:
+                slug = epic_id
+            return json.dumps({"dev_branch": f"dev/{slug}", "epic_title": title, "epic_slug": slug})
