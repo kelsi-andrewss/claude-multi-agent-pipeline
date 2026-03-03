@@ -260,6 +260,33 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+def _score_stories_by_similarity(
+    query: str,
+    stories: list,
+    threshold: float = 0.3,
+    title_col: str = "title",
+) -> list[tuple[float, str, str]]:
+    """Score stories against a query string using Jaccard similarity.
+
+    Returns sorted list of (score, story_id, story_title) tuples where score > threshold,
+    sorted descending by score.
+    """
+    query_kw = _tokenize(query)
+    matches: list[tuple[float, str, str]] = []
+    for row in stories:
+        if isinstance(row, dict):
+            title = row.get(title_col, "")
+            sid = row.get("id", "")
+        else:
+            title = row[title_col]
+            sid = row["id"]
+        score = _jaccard(query_kw, _tokenize(title))
+        if score > threshold:
+            matches.append((score, sid, title))
+    matches.sort(key=lambda x: x[0], reverse=True)
+    return matches
+
+
 def _group_items(items: list[str], existing_stories: list[dict]) -> dict:
     """Group raw todo items into story clusters using Jaccard similarity + union-find."""
     tokens = [_tokenize(item) for item in items]

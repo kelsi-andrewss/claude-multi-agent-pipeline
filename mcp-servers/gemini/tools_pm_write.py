@@ -21,10 +21,9 @@ from tools_pm_helpers import (
     _epic_to_dict,
     _get_db,
     _group_items,
-    _jaccard,
     _next_id,
+    _score_stories_by_similarity,
     _story_to_dict,
-    _tokenize,
     _validate_dependencies,
     _validate_transition,
 )
@@ -32,19 +31,11 @@ from tools_pm_helpers import (
 
 def _find_best_story_match(conn, title: str) -> tuple[str | None, list[dict]]:
     """Find the best matching open story for a task title."""
-    title_kw = _tokenize(title)
     open_stories = conn.execute(
         "SELECT id, title, write_files FROM stories WHERE state NOT IN ('done', 'shipped', 'archived')"
     ).fetchall()
 
-    matches: list[tuple[float, str, str]] = []
-    for row in open_stories:
-        story_kw = _tokenize(row["title"])
-        score = _jaccard(title_kw, story_kw)
-        if score > 0.3:
-            matches.append((score, row["id"], row["title"]))
-
-    matches.sort(key=lambda x: x[0], reverse=True)
+    matches = _score_stories_by_similarity(title, open_stories)
 
     if not matches:
         return None, []

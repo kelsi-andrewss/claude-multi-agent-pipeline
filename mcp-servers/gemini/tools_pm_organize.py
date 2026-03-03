@@ -9,10 +9,9 @@ from tools_pm_helpers import (
     _ensure_order_idx_column,
     _get_db,
     _group_items,
-    _jaccard,
     _next_id,
+    _score_stories_by_similarity,
     _story_to_dict,
-    _tokenize,
 )
 
 
@@ -199,16 +198,9 @@ def register(mcp):
                     "SELECT id, title FROM epics WHERE id != 'epic-backlog' AND state = 'active'"
                 ).fetchall()
                 for story in backlog_stories:
-                    story_kw = _tokenize(story["title"])
-                    best_score = 0.0
-                    best_epic = None
-                    for epic_row in non_backlog_epics:
-                        epic_kw = _tokenize(epic_row["title"])
-                        score = _jaccard(story_kw, epic_kw)
-                        if score > 0.3 and score > best_score:
-                            best_score = score
-                            best_epic = epic_row["id"]
-                    if best_epic:
+                    matches = _score_stories_by_similarity(story["title"], non_backlog_epics)
+                    if matches:
+                        best_score, best_epic, _ = matches[0]
                         suggested_moves.append({
                             "story_id": story["id"],
                             "story_title": story["title"],
@@ -339,7 +331,6 @@ def register(mcp):
 
                     for cluster in clustering.get("proposed_stories", []):
                         cluster_title = cluster["title"]
-                        cluster_kw = _tokenize(cluster_title)
 
                         cluster_story_ids = []
                         all_cluster_titles = [cluster_title] + cluster.get("tasks", [])
@@ -351,16 +342,10 @@ def register(mcp):
                         if not cluster_story_ids:
                             continue
 
-                        best_score = 0.0
-                        best_epic_id = None
-                        best_epic_title = None
-                        for ep in existing_epics:
-                            ep_kw = _tokenize(ep["title"])
-                            score = _jaccard(cluster_kw, ep_kw)
-                            if score > 0.3 and score > best_score:
-                                best_score = score
-                                best_epic_id = ep["id"]
-                                best_epic_title = ep["title"]
+                        epic_matches = _score_stories_by_similarity(cluster_title, existing_epics)
+                        best_score = epic_matches[0][0] if epic_matches else 0.0
+                        best_epic_id = epic_matches[0][1] if epic_matches else None
+                        best_epic_title = epic_matches[0][2] if epic_matches else None
 
                         for sid in cluster_story_ids:
                             story_row = conn.execute("SELECT id, epic_id FROM stories WHERE id = ?", (sid,)).fetchone()
