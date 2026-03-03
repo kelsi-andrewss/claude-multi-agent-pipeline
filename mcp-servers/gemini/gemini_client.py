@@ -20,8 +20,10 @@ from constants import (
 )
 
 
-async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL) -> str:
+async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_instruction: str | None = None) -> str:
     """Call gemini CLI in headless mode and return the response text."""
+    if system_instruction:
+        prompt = f"[System: {system_instruction}]\n\n{prompt}"
     cmd: list[str] = ["gemini"]
     if model:
         cmd.extend(["-m", model])

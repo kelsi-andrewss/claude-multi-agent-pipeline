@@ -18,24 +18,74 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=3000")
+    conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
-    _ensure_knowledge_tables(conn)
-    _ensure_epic_columns(conn)
-    # TTL cleanup for pending proposals (table is tiny, cheap on every open)
-    conn.execute("DELETE FROM pending_proposals WHERE created_at < datetime('now', '-24 hours')")
-    conn.commit()
     return conn
 
 
 @contextmanager
-def _db_op(db_path: Path | None = None):
-    """Context manager that opens DB, yields conn, commits on success, and closes."""
+def _db_op(db_path: Path | None = None, readonly: bool = False):
+    """Context manager that opens DB, yields conn, commits on success (unless readonly), and closes."""
     conn = _get_db(db_path)
     try:
         yield conn
-        conn.commit()
+        if not readonly:
+            conn.commit()
     except sqlite3.Error as e:
         raise sqlite3.Error(f"[db error]: {e}") from e
+    finally:
+        conn.close()
+
+
+def startup_migrate(db_path: Path | None = None) -> None:
+    """Run all schema migrations once at server startup."""
+    conn = _get_db(db_path)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        _ensure_knowledge_tables(conn)
+        _ensure_epic_columns(conn)
+        _ensure_order_idx_column(conn)
+        conn.execute("DELETE FROM pending_proposals WHERE created_at < datetime('now', '-24 hours')")
+        row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+        current = row[0] or 0
+        if current < 1:
+            conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
+
+        if current < 2:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS story_dependencies (
+                    story_id TEXT NOT NULL,
+                    depends_on TEXT NOT NULL,
+                    PRIMARY KEY (story_id, depends_on),
+                    FOREIGN KEY (story_id) REFERENCES stories(id),
+                    FOREIGN KEY (depends_on) REFERENCES stories(id)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_story_deps_depends ON story_dependencies(depends_on)"
+            )
+            # Migrate existing JSON depends_on data
+            rows = conn.execute(
+                "SELECT id, depends_on FROM stories WHERE depends_on IS NOT NULL AND depends_on != '[]'"
+            ).fetchall()
+            for r in rows:
+                try:
+                    deps = json.loads(r["depends_on"])
+                    for dep_id in deps:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO story_dependencies (story_id, depends_on) VALUES (?, ?)",
+                            (r["id"], dep_id),
+                        )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (2)")
+
+        conn.commit()
     finally:
         conn.close()
 
@@ -80,13 +130,15 @@ def _validate_transition(
 def _story_to_dict(row: sqlite3.Row) -> dict:
     """Convert a story Row to a dict, parsing JSON fields."""
     d = dict(row)
-    for field in ("write_files", "depends_on"):
+    for field in ("write_files",):
         val = d.get(field)
         if val and isinstance(val, str):
             try:
                 d[field] = json.loads(val)
             except json.JSONDecodeError:
                 d[field] = []
+    # depends_on now comes from the junction table; default to empty list
+    d["depends_on"] = d.get("depends_on", []) if isinstance(d.get("depends_on"), list) else []
     # Convert integer booleans to bool
     for field in ("needs_testing", "needs_review", "auto_merge", "archived"):
         if field in d:
@@ -103,6 +155,24 @@ def _epic_to_dict(row: sqlite3.Row) -> dict:
         if field not in d:
             d[field] = None
     return d
+
+
+def _fetch_story_deps(conn: sqlite3.Connection, story_id: str) -> list[str]:
+    """Fetch forward dependencies for a story from the junction table."""
+    rows = conn.execute(
+        "SELECT depends_on FROM story_dependencies WHERE story_id = ?", (story_id,)
+    ).fetchall()
+    return [r["depends_on"] for r in rows]
+
+
+def _set_story_deps(conn: sqlite3.Connection, story_id: str, depends_on: list[str]) -> None:
+    """Replace all dependencies for a story in the junction table."""
+    conn.execute("DELETE FROM story_dependencies WHERE story_id = ?", (story_id,))
+    for dep_id in depends_on:
+        conn.execute(
+            "INSERT OR IGNORE INTO story_dependencies (story_id, depends_on) VALUES (?, ?)",
+            (story_id, dep_id),
+        )
 
 
 def _ensure_order_idx_column(conn: sqlite3.Connection) -> None:
@@ -224,7 +294,7 @@ def _build_plan_prompt(subject: str, context_block: str, code_block: str, user_c
 
 
 def _apply_plan_to_story(conn, sid: str, plan_data: dict) -> dict:
-    """Write tasks and update story agent/write_files from plan data. Returns summary."""
+    """Write tasks, dependencies, and update story agent/write_files from plan data. Returns summary."""
     for task_title in plan_data.get("tasks", []):
         _add_task_to_story(conn, sid, task_title)
     conn.execute(
@@ -235,12 +305,15 @@ def _apply_plan_to_story(conn, sid: str, plan_data: dict) -> dict:
             sid,
         )
     )
+    depends_on = plan_data.get("depends_on", [])
+    if depends_on:
+        _set_story_deps(conn, sid, depends_on)
     return {
         "story_id": sid,
         "agent": plan_data.get("agent"),
         "tasks_created": len(plan_data.get("tasks", [])),
         "parallel_group": plan_data.get("parallel_group", 1),
-        "depends_on": plan_data.get("depends_on", []),
+        "depends_on": depends_on,
     }
 
 
@@ -258,6 +331,33 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     if not a and not b:
         return 0.0
     return len(a & b) / len(a | b)
+
+
+def _score_stories_by_similarity(
+    query: str,
+    stories: list,
+    threshold: float = 0.3,
+    title_col: str = "title",
+) -> list[tuple[float, str, str]]:
+    """Score stories against a query string using Jaccard similarity.
+
+    Returns sorted list of (score, story_id, story_title) tuples where score > threshold,
+    sorted descending by score.
+    """
+    query_kw = _tokenize(query)
+    matches: list[tuple[float, str, str]] = []
+    for row in stories:
+        if isinstance(row, dict):
+            title = row.get(title_col, "")
+            sid = row.get("id", "")
+        else:
+            title = row[title_col]
+            sid = row["id"]
+        score = _jaccard(query_kw, _tokenize(title))
+        if score > threshold:
+            matches.append((score, sid, title))
+    matches.sort(key=lambda x: x[0], reverse=True)
+    return matches
 
 
 def _group_items(items: list[str], existing_stories: list[dict]) -> dict:

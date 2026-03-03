@@ -36,8 +36,8 @@ Parse each token in `{{args}}`:
 
 After collecting, validate each story and **skip with a warning** if any of the following:
 - `plan_file` is null or empty:
-  - Load `ToolSearch: select:mcp__gemini__pm_plan` and call `pm_plan(story_id=<id>)` for all unplanned stories **in parallel** (single message).
-  - Wait for all `pm_plan` calls to complete.
+  - Load `ToolSearch: select:mcp__gemini__pm_plan_story` and call `pm_plan_story(story_id=<id>)` for all unplanned stories **in parallel** (single message).
+  - Wait for all `pm_plan_story` calls to complete.
   - Launch one background `general-purpose` agent per unplanned story to write the plan file (same prompt as draft-plan Step 5).
   - Wait for all agents to complete, then re-fetch each story to confirm `plan_file` is now set.
   - If still missing after auto-planning, skip with warning: "story-NNN: auto-planning failed — skipping."
@@ -92,21 +92,15 @@ git push -u origin dev 2>/dev/null || true
 
 For each unique epic referenced by the stories being run:
 
-1. Compute `dev-branch`:
-   - If `epic_id == "epic-backlog"`: `dev-branch = "dev"` (backlog stories always target the integration branch directly — skip remaining sub-steps)
-   - Otherwise: call `pm_get_epic(epic_id)` to get the epic title
-     - Slugify: lowercase, replace spaces and non-alphanumeric chars with `-`, collapse consecutive `-`, truncate to 40 chars
-     - Result: `dev/<slugified-title>` (e.g., `dev/my-feature-epic`)
-     - If slugification fails or title is empty, fall back to `dev/<epic_id>` (e.g., `dev/epic-007`)
-
-2. If `dev-branch != "dev"`, run these git commands (in the project root):
+1. Call `pm_dev_branch(epic_id)` → extract `dev_branch` and `epic_slug`.
+2. If `epic_id` is `"epic-backlog"`, `dev-branch = "dev"` — skip branch creation.
+3. Otherwise, `dev-branch = dev_branch` from the tool response. Run these git commands (in the project root):
    ```bash
    git show-ref --verify --quiet refs/heads/<dev-branch> || git branch <dev-branch> dev
    git push -u origin <dev-branch> 2>/dev/null || true
    ```
-   (Skip when `dev-branch == "dev"` — the integration branch already exists.)
 
-Store the mapping: `epic_id → dev-branch` for use in step 4.
+Store the mapping: `epic_id → {dev_branch, epic_slug}` for use in step 4.
 
 ---
 
@@ -120,7 +114,7 @@ Launch all stories in the batch in **a single message** as `general-purpose` age
 
 Compute for each story:
 - `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars
-- `epic-slug`: the slugified epic title used in step 3 (same slugification rule)
+- `epic-slug`: the `epic_slug` returned by `pm_dev_branch` from Step 3
 - `story-branch`: `<epic-slug>/<story-slug>`
 - `worktree-path`: `<project-root>/.claude/worktrees/story/<story-slug>`
 - `dev-branch`: from the epic mapping computed in step 3

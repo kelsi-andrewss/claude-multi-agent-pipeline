@@ -19,12 +19,11 @@ from tools_pm_helpers import (
     _db_op,
     _ensure_backlog_epic,
     _epic_to_dict,
-    _get_db,
     _group_items,
-    _jaccard,
     _next_id,
+    _score_stories_by_similarity,
+    _set_story_deps,
     _story_to_dict,
-    _tokenize,
     _validate_dependencies,
     _validate_transition,
 )
@@ -32,19 +31,11 @@ from tools_pm_helpers import (
 
 def _find_best_story_match(conn, title: str) -> tuple[str | None, list[dict]]:
     """Find the best matching open story for a task title."""
-    title_kw = _tokenize(title)
     open_stories = conn.execute(
         "SELECT id, title, write_files FROM stories WHERE state NOT IN ('done', 'shipped', 'archived')"
     ).fetchall()
 
-    matches: list[tuple[float, str, str]] = []
-    for row in open_stories:
-        story_kw = _tokenize(row["title"])
-        score = _jaccard(title_kw, story_kw)
-        if score > 0.3:
-            matches.append((score, row["id"], row["title"]))
-
-    matches.sort(key=lambda x: x[0], reverse=True)
+    matches = _score_stories_by_similarity(title, open_stories)
 
     if not matches:
         return None, []
@@ -126,8 +117,7 @@ def register(mcp):
             needs_review: Whether the story needs review before merge.
             tasks: Optional list of task titles to create immediately under this story.
         """
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             target_epic = epic_id or "epic-backlog"
 
             existing = conn.execute("SELECT id FROM epics WHERE id = ?", (target_epic,)).fetchone()
@@ -146,15 +136,16 @@ def register(mcp):
             conn.execute(
                 """INSERT INTO stories (id, epic_id, title, state, write_files, agent, model,
                    depends_on, needs_testing, needs_review)
-                   VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, 'draft', ?, ?, ?, '[]', ?, ?)""",
                 (
                     story_id, target_epic, title,
                     json.dumps(write_files or []),
                     agent, model,
-                    json.dumps(depends_on or []),
                     int(needs_testing), int(needs_review),
                 )
             )
+            if depends_on:
+                _set_story_deps(conn, story_id, depends_on)
 
             created_tasks = []
             for i, task_title in enumerate(tasks or [], start=1):
@@ -165,7 +156,6 @@ def register(mcp):
                 )
                 created_tasks.append({"id": task_id, "title": task_title, "state": "todo"})
 
-            conn.commit()
             result = {
                 "id": story_id, "epic_id": target_epic, "title": title,
                 "state": "draft", "write_files": write_files or [],
@@ -174,8 +164,6 @@ def register(mcp):
             if created_tasks:
                 result["tasks"] = created_tasks
             return json.dumps(result)
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_add_task(
@@ -204,8 +192,7 @@ def register(mcp):
 
         all_titles = items if items else [title]
 
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             results = []
             for task_title in all_titles:
                 target_story = story_id
@@ -232,12 +219,9 @@ def register(mcp):
                 task = _add_task_to_story(conn, target_story, task_title, blocked_by)
                 results.append(task)
 
-            conn.commit()
             if len(results) == 1:
                 return json.dumps(results[0])
             return json.dumps({"created": results, "count": len(results)})
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_plan_items(
@@ -263,8 +247,7 @@ def register(mcp):
         if confirmed and not proposal and not proposal_id:
             return "Pass 'proposal_id' (from Phase 1) when confirmed=True."
 
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             if not confirmed:
                 open_stories = conn.execute(
                     "SELECT id, title FROM stories WHERE state NOT IN ('done', 'shipped', 'archived')"
@@ -281,7 +264,6 @@ def register(mcp):
                     "INSERT INTO pending_proposals (id, data) VALUES (?, ?)",
                     (pid, json.dumps(prop))
                 )
-                conn.commit()
 
                 return json.dumps({
                     "phase": "proposal",
@@ -349,7 +331,6 @@ def register(mcp):
                     )
                     created_tasks.append({"id": task_id, "story_id": sid, "title": task_title})
 
-            conn.commit()
             return json.dumps({
                 "phase": "committed",
                 "created_epics": created_epics,
@@ -361,8 +342,6 @@ def register(mcp):
                     f"{len(created_tasks)} task(s)."
                 ),
             })
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_update_story(
@@ -393,8 +372,7 @@ def register(mcp):
             force: Skip state transition validation.
             archived: Manually archive (True) or unarchive (False) the story.
         """
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             story = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
             if not story:
                 return f"Story '{story_id}' not found."
@@ -463,12 +441,9 @@ def register(mcp):
             conn.execute(
                 f"UPDATE stories SET {', '.join(updates)} WHERE id = ?", params
             )
-            conn.commit()
 
             updated = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
             return json.dumps(_story_to_dict(updated))
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_update_epic(
@@ -497,8 +472,7 @@ def register(mcp):
             description: Epic description.
             auto_close: If True, check if all non-archived stories are terminal and close if so. Respects persistent flag. Returns {closed, reason, remaining_count}.
         """
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
             if not epic:
                 if auto_close:
@@ -519,7 +493,6 @@ def register(mcp):
                 if remaining > 0:
                     return json.dumps({"closed": False, "reason": f"{remaining} story(ies) still active.", "remaining_count": remaining})
                 conn.execute("UPDATE epics SET state = 'done' WHERE id = ?", (epic_id,))
-                conn.commit()
                 return json.dumps({"closed": True, "reason": "All stories complete or archived.", "remaining_count": 0})
 
             updates = []
@@ -569,12 +542,9 @@ def register(mcp):
             conn.execute(
                 f"UPDATE epics SET {', '.join(updates)} WHERE id = ?", params
             )
-            conn.commit()
 
             updated = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
             return json.dumps(_epic_to_dict(updated))
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_update_task(
@@ -591,8 +561,7 @@ def register(mcp):
             state: New task state ('todo', 'in-progress', 'done', 'blocked', 'skipped').
             title: New task title.
         """
-        conn = _get_db()
-        try:
+        with _db_op() as conn:
             task = conn.execute(
                 "SELECT * FROM tasks WHERE story_id = ? AND id = ?", (story_id, task_id)
             ).fetchone()
@@ -619,11 +588,8 @@ def register(mcp):
             conn.execute(
                 f"UPDATE tasks SET {', '.join(updates)} WHERE story_id = ? AND id = ?", params
             )
-            conn.commit()
 
             updated = conn.execute(
                 "SELECT * FROM tasks WHERE story_id = ? AND id = ?", (story_id, task_id)
             ).fetchone()
             return json.dumps(dict(updated))
-        finally:
-            conn.close()

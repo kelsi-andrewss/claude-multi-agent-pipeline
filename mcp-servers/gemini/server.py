@@ -8,20 +8,16 @@ mcp = FastMCP("gemini")
 
 # Register all tool modules against this mcp instance
 from tools_gemini import register as _r_gemini
-tool_refs = _r_gemini(mcp)
+_r_gemini(mcp)
 
 from tools_test import register as _r_test
 _r_test(mcp)
 
 from tools_analysis import register as _r_analysis
-analysis_refs = _r_analysis(mcp)
+_r_analysis(mcp)
 
 from tools_argue import register as _r_argue
-_r_argue(mcp, seed_tools={
-    "find_bug": analysis_refs["find_bug"],
-    "plan": tool_refs["plan"],
-    "audit": analysis_refs["audit"],
-})
+_r_argue(mcp)
 
 from tools_pm_read import register as _r_pm_read
 _r_pm_read(mcp)
@@ -47,6 +43,8 @@ _r_knowledge(mcp)
 
 if __name__ == "__main__":
     import sys
+    from tools_pm_helpers import startup_migrate
+    startup_migrate()
 
     if "--migrate-pitfalls" in sys.argv:
         from tools_pm_helpers import _get_db

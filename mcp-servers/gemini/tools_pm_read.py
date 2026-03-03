@@ -1,15 +1,16 @@
-"""PM read/query tools: pm_get_epic, pm_get_story, pm_list_stories, pm_search, pm_view, pm_roadmap."""
+"""PM read/query tools: pm_get_epic, pm_get_story, pm_list_stories, pm_search, pm_view, pm_roadmap, pm_dev_branch."""
 
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 
 from constants import AT_RISK_DAYS_THRESHOLD, AT_RISK_PCT_THRESHOLD, EPIC_STATES, STORY_STATES
 from tools_pm_helpers import (
-    _ensure_order_idx_column,
+    _db_op,
     _epic_to_dict,
-    _get_db,
+    _fetch_story_deps,
     _story_to_dict,
 )
 
@@ -22,14 +23,12 @@ def register(mcp):
         Args:
             epic_id: The epic ID (e.g., 'epic-022').
         """
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
             if not epic:
                 return f"Epic '{epic_id}' not found."
             ed = _epic_to_dict(epic)
 
-            _ensure_order_idx_column(conn)
             stories = conn.execute(
                 "SELECT * FROM stories WHERE epic_id = ? AND archived = 0 ORDER BY COALESCE(order_idx, 2147483647), id",
                 (epic_id,)
@@ -47,8 +46,6 @@ def register(mcp):
 
             ed["stories"] = story_list
             return json.dumps(ed)
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_get_story(story_id: str) -> str:
@@ -57,12 +54,12 @@ def register(mcp):
         Args:
             story_id: The story ID (e.g., 'story-185').
         """
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             story = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
             if not story:
                 return f"Story '{story_id}' not found."
             sd = _story_to_dict(story)
+            sd["depends_on"] = _fetch_story_deps(conn, story_id)
 
             tasks = conn.execute(
                 "SELECT * FROM tasks WHERE story_id = ? ORDER BY id", (story_id,)
@@ -70,15 +67,15 @@ def register(mcp):
             sd["tasks"] = [dict(t) for t in tasks]
 
             blocked_by_me = conn.execute(
-                "SELECT id, title, state FROM stories WHERE depends_on LIKE ? AND archived = 0",
-                (f'%"{story_id}"%',)
+                "SELECT s.id, s.title, s.state FROM stories s "
+                "JOIN story_dependencies sd ON s.id = sd.story_id "
+                "WHERE sd.depends_on = ? AND s.archived = 0",
+                (story_id,)
             ).fetchall()
             if blocked_by_me:
                 sd["blocks"] = [{"id": r["id"], "title": r["title"], "state": r["state"]} for r in blocked_by_me]
 
             return json.dumps(sd)
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_list_stories(
@@ -95,8 +92,7 @@ def register(mcp):
             agent: Filter by agent type ('quick-fixer', 'architect', etc.).
             include_archived: If true, include archived stories (default false).
         """
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             conditions = []
             params: list = []
 
@@ -118,14 +114,11 @@ def register(mcp):
                 params.append(agent)
 
             where = " AND ".join(conditions) if conditions else "1=1"
-            _ensure_order_idx_column(conn)
             stories = conn.execute(
                 f"SELECT * FROM stories WHERE {where} ORDER BY COALESCE(order_idx, 2147483647), id", params
             ).fetchall()
 
             return json.dumps([_story_to_dict(s) for s in stories])
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_search(query: str, scope: str | None = None) -> str:
@@ -135,8 +128,7 @@ def register(mcp):
             query: Search term (matched as substring against titles and IDs).
             scope: Limit search to 'epics', 'stories', or 'tasks'. Omit to search all.
         """
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             results = []
             pattern = f"%{query}%"
 
@@ -167,8 +159,6 @@ def register(mcp):
                     results.append({"type": "task", **dict(t)})
 
             return json.dumps(results)
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_view(
@@ -187,10 +177,7 @@ def register(mcp):
         if detail not in valid_details:
             return f"Invalid detail '{detail}'. Valid: {sorted(valid_details)}"
 
-        conn = _get_db()
-        try:
-            _ensure_order_idx_column(conn)
-
+        with _db_op(readonly=True) as conn:
             if epic_id:
                 epic_rows = conn.execute(
                     "SELECT * FROM epics WHERE id = ?", (epic_id,)
@@ -343,8 +330,6 @@ def register(mcp):
                 result["avg_cycle_hours"] = round(total_hours / count, 1) if count else 0
 
             return json.dumps(result)
-        finally:
-            conn.close()
 
     @mcp.tool()
     async def pm_roadmap(
@@ -357,8 +342,7 @@ def register(mcp):
             state: Filter epics by state ('active', 'done', 'shipped'). Default: active only.
             include_done: If true, include done/shipped epics in the output.
         """
-        conn = _get_db()
-        try:
+        with _db_op(readonly=True) as conn:
             if state:
                 if state not in EPIC_STATES:
                     return f"Invalid state '{state}'. Valid: {sorted(EPIC_STATES)}"
@@ -450,5 +434,23 @@ def register(mcp):
                     "completed": completed,
                 },
             })
-        finally:
-            conn.close()
+
+    @mcp.tool()
+    async def pm_dev_branch(epic_id: str) -> str:
+        """Compute the dev branch name and slug for an epic.
+
+        Args:
+            epic_id: The epic ID (e.g., 'epic-022').
+        """
+        if epic_id == "epic-backlog":
+            return json.dumps({"dev_branch": "dev", "epic_slug": "backlog"})
+
+        with _db_op(readonly=True) as conn:
+            epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
+            if not epic:
+                return json.dumps({"error": f"Epic '{epic_id}' not found."})
+            title = epic["title"]
+            slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:40]
+            if not slug:
+                slug = epic_id
+            return json.dumps({"dev_branch": f"dev/{slug}", "epic_title": title, "epic_slug": slug})
