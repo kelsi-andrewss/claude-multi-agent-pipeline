@@ -1976,6 +1976,38 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+def _score_stories_by_similarity(
+    query: str,
+    stories: list[sqlite3.Row],
+    threshold: float = 0.3,
+    title_col: str = "title",
+) -> list[tuple[float, str, str]]:
+    """Score stories by Jaccard similarity to a query string.
+
+    Args:
+        query: The query text to tokenize and match against.
+        stories: List of story rows with at least 'id' and title_col fields.
+        threshold: Minimum similarity score to include (default 0.3).
+        title_col: Name of the title column in story rows (default 'title').
+
+    Returns:
+        List of (score, story_id, story_title) tuples sorted descending by score,
+        where score > threshold.
+    """
+    query_kw = _tokenize(query)
+    matches: list[tuple[float, str, str]] = []
+
+    for story in stories:
+        story_kw = _tokenize(story[title_col])
+        score = _jaccard(query_kw, story_kw)
+        if score > threshold:
+            matches.append((score, story["id"], story[title_col]))
+
+    # Sort by score descending
+    matches.sort(key=lambda x: x[0], reverse=True)
+    return matches
+
+
 def _find_best_story_match(conn: sqlite3.Connection, title: str, write_files: list[str] | None) -> tuple[str | None, list[dict]]:
     """Find the best matching open story for a task title.
 
@@ -1984,20 +2016,11 @@ def _find_best_story_match(conn: sqlite3.Connection, title: str, write_files: li
     - candidates is a list of dicts if 2+ plausible matches
     - Both None/empty if no match found
     """
-    title_kw = _tokenize(title)
     open_stories = conn.execute(
         "SELECT id, title, write_files FROM stories WHERE state NOT IN ('done', 'shipped', 'archived')"
     ).fetchall()
 
-    matches: list[tuple[float, str, str]] = []  # (score, story_id, story_title)
-    for row in open_stories:
-        story_kw = _tokenize(row["title"])
-        score = _jaccard(title_kw, story_kw)
-        if score > 0.3:
-            matches.append((score, row["id"], row["title"]))
-
-    # Sort by score descending
-    matches.sort(key=lambda x: x[0], reverse=True)
+    matches = _score_stories_by_similarity(title, open_stories, threshold=0.3)
 
     if not matches:
         return None, []
@@ -2737,26 +2760,19 @@ async def pm_organize(
                 existing = [{"id": r["id"], "title": r["title"]} for r in open_stories_rows]
                 clustering_proposal = _group_items(backlog_titles, existing)
 
-            # Suggested moves: compare backlog story keywords against non-backlog epic titles
+            # Suggested moves: compare backlog stories against non-backlog epics
             suggested_moves = []
             non_backlog_epics = conn.execute(
                 "SELECT id, title FROM epics WHERE id != 'epic-backlog' AND state = 'active'"
             ).fetchall()
             for story in backlog_stories:
-                story_kw = _tokenize(story["title"])
-                best_score = 0.0
-                best_epic = None
-                for epic_row in non_backlog_epics:
-                    epic_kw = _tokenize(epic_row["title"])
-                    score = _jaccard(story_kw, epic_kw)
-                    if score > 0.3 and score > best_score:
-                        best_score = score
-                        best_epic = epic_row["id"]
-                if best_epic:
+                matches = _score_stories_by_similarity(story["title"], non_backlog_epics, threshold=0.3, title_col="title")
+                if matches:
+                    best_score, best_epic_id, _ = matches[0]
                     suggested_moves.append({
                         "story_id": story["id"],
                         "story_title": story["title"],
-                        "suggested_epic_id": best_epic,
+                        "suggested_epic_id": best_epic_id,
                         "score": round(best_score, 2),
                         "reason": "keyword match",
                     })
@@ -2897,7 +2913,6 @@ async def pm_organize(
 
                 for cluster in clustering.get("proposed_stories", []):
                     cluster_title = cluster["title"]
-                    cluster_kw = _tokenize(cluster_title)
 
                     # Find all story IDs in this cluster (title + tasks collapsed back)
                     cluster_story_ids = []
@@ -2910,17 +2925,13 @@ async def pm_organize(
                     if not cluster_story_ids:
                         continue
 
-                    # Compare against existing epic titles
+                    # Compare cluster against existing epic titles
+                    epic_matches = _score_stories_by_similarity(cluster_title, existing_epics, threshold=0.3, title_col="title")
                     best_score = 0.0
                     best_epic_id = None
                     best_epic_title = None
-                    for ep in existing_epics:
-                        ep_kw = _tokenize(ep["title"])
-                        score = _jaccard(cluster_kw, ep_kw)
-                        if score > 0.3 and score > best_score:
-                            best_score = score
-                            best_epic_id = ep["id"]
-                            best_epic_title = ep["title"]
+                    if epic_matches:
+                        best_score, best_epic_id, best_epic_title = epic_matches[0]
 
                     for sid in cluster_story_ids:
                         story_row = conn.execute("SELECT id, epic_id FROM stories WHERE id = ?", (sid,)).fetchone()
