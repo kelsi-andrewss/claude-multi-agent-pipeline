@@ -216,6 +216,13 @@ Restart is distinct from escalation. Escalation says "the coder wasn't capable e
 
 **Recovery**: query `epics.db` + `git worktree list` + `git branch --list 'dev/*'` (epic branches) + `git branch --list '*/*'` (story branches).
 
+**Handoff**: Before suggesting `/clear`, write `~/.claude/session-handoff.md`:
+- Stories in progress: current status, pending decisions, coder state
+- What was being worked on and what the next action would be
+- Any context the next session needs that isn't captured in epics.db
+
+Keep it under 10 lines. Overwrite any existing handoff file.
+
 **Clearing prompt**: "Context checkpoint reached [reason]. Run `/clear` to reset. All state is in `epics.db`."
 
 Prompt `/clear` after: story merges, 3+ stories done in session, or user asks if safe.

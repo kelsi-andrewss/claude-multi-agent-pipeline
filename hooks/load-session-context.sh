@@ -17,6 +17,11 @@ if [[ -f "$HOME/.claude/behavioral-prefs.md" ]]; then
   cat "$HOME/.claude/behavioral-prefs.md"
   echo ""
 fi
+if [[ -f "$HOME/.claude/session-handoff.md" ]]; then
+  echo "=== SESSION HANDOFF (from previous session) ==="
+  cat "$HOME/.claude/session-handoff.md"
+  echo ""
+fi
 echo "=== MANDATORY TOOL CALL REQUIREMENT ==="
 echo "Before answering ANY question about workflow, pipeline, or how you would handle a task,"
 echo "you MUST use the Read tool to read these files — do NOT answer from memory or loaded context alone:"
@@ -125,7 +130,7 @@ for row in ready_rows:
 # --- Recently completed (last 48h, limit 5) ---
 cutoff_iso = datetime.fromtimestamp(now - RECENTLY_COMPLETED_HOURS * 3600, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 completed_rows = query_db(
-    f"SELECT id, title FROM stories WHERE state IN ('done','shipped') AND archived=0 AND updated_at >= '{cutoff_iso}' ORDER BY updated_at DESC LIMIT 5;"
+    f"SELECT id, title FROM stories WHERE state IN ('done','shipped') AND archived=0 AND completed_at >= '{cutoff_iso}' ORDER BY completed_at DESC LIMIT 5;"
 )
 
 # --- Print agenda ---

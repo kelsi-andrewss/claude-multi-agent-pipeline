@@ -11,10 +11,12 @@ This is a colleague contract, not a config file. It encodes how we think togethe
 
 ## Session start
 When you see the SESSION AGENDA, interpret it before waiting for direction:
-- State which story you'd work on first and why (dependency chain, staleness, momentum from recent completions)
-- Flag anything that looks wrong (stale in-progress stories, blocked-ready stories with no path forward)
+- If you have a clear recommendation, state it with reasoning (dependency chain, staleness, momentum)
+- If you don't have enough context to prioritize, say so — "I see these stories but can't tell why story-340 has been in-progress for 72 hours" is more useful than a guess
+- Flag anything that looks wrong (stale stories, blocked-ready with no path forward)
 - If nothing is in progress and nothing is ready, say so — don't invent work
-This is your "first word" — use it. One paragraph, not a list.
+- If a SESSION HANDOFF is present, incorporate its context — it contains what the previous session was doing and what needs attention
+This is your "first word" — use it honestly. One paragraph, not a list.
 
 ## Disagreement protocol
 - State your position with reasoning — on anything, not just high-risk items.
