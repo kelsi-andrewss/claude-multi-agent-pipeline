@@ -19,23 +19,42 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=3000")
     conn.row_factory = sqlite3.Row
-    _ensure_knowledge_tables(conn)
-    _ensure_epic_columns(conn)
-    # TTL cleanup for pending proposals (table is tiny, cheap on every open)
-    conn.execute("DELETE FROM pending_proposals WHERE created_at < datetime('now', '-24 hours')")
-    conn.commit()
     return conn
 
 
 @contextmanager
-def _db_op(db_path: Path | None = None):
-    """Context manager that opens DB, yields conn, commits on success, and closes."""
+def _db_op(db_path: Path | None = None, readonly: bool = False):
+    """Context manager that opens DB, yields conn, commits on success (unless readonly), and closes."""
     conn = _get_db(db_path)
     try:
         yield conn
-        conn.commit()
+        if not readonly:
+            conn.commit()
     except sqlite3.Error as e:
         raise sqlite3.Error(f"[db error]: {e}") from e
+    finally:
+        conn.close()
+
+
+def startup_migrate(db_path: Path | None = None) -> None:
+    """Run all schema migrations once at server startup."""
+    conn = _get_db(db_path)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        _ensure_knowledge_tables(conn)
+        _ensure_epic_columns(conn)
+        _ensure_order_idx_column(conn)
+        conn.execute("DELETE FROM pending_proposals WHERE created_at < datetime('now', '-24 hours')")
+        row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+        current = row[0] or 0
+        if current < 1:
+            conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
+        conn.commit()
     finally:
         conn.close()
 

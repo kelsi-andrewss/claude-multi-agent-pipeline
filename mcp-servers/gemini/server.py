@@ -43,6 +43,8 @@ _r_knowledge(mcp)
 
 if __name__ == "__main__":
     import sys
+    from tools_pm_helpers import startup_migrate
+    startup_migrate()
 
     if "--migrate-pitfalls" in sys.argv:
         from tools_pm_helpers import _get_db
