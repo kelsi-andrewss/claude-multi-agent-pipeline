@@ -241,6 +241,87 @@ if cluster_count >= 3 and cluster_start is not None:
         "type": "AUTO-CLUSTER",
     })
 
+# --- Detect preferences, decisions, and facts from user turns ---
+PREFERENCE_PATTERNS = [
+    r'(?i)i prefer\s',
+    r'(?i)always use\s',
+    r'(?i)never do\s',
+    r'(?i)i like\s',
+    r'(?i)i want you to\s',
+    r'(?i)from now on[,\s]',
+    r'(?i)remember that\s',
+]
+
+DECISION_PATTERNS = [
+    r"(?i)let'?s use\s",
+    r'(?i)we decided\s',
+    r'(?i)the approach is\s',
+    r"(?i)we'?ll go with\s",
+    r'(?i)^decision:\s',
+]
+
+FACT_PATTERNS = [
+    r'(?i)i work on\s',
+    r'(?i)my project uses\s',
+    r'(?i)the codebase is\s',
+    r"(?i)i'?m building\s",
+    r'(?i)my stack is\s',
+]
+
+# Set of turn indices already flagged as corrections (skip those)
+correction_turn_indices = {c["turn"] for c in corrections}
+
+extractions = []
+project_name = os.path.basename(os.getcwd())
+
+for i, turn in enumerate(turns):
+    if turn["role"] != "user":
+        continue
+    if i in correction_turn_indices:
+        continue
+    if len(extractions) >= 5:
+        break
+
+    msg = turn["content"]
+    tag = None
+
+    for pattern in PREFERENCE_PATTERNS:
+        if re.search(pattern, msg):
+            tag = "preference"
+            break
+
+    if tag is None:
+        for pattern in DECISION_PATTERNS:
+            if re.search(pattern, msg):
+                tag = "decision"
+                break
+
+    if tag is None:
+        for pattern in FACT_PATTERNS:
+            if re.search(pattern, msg):
+                tag = "fact"
+                break
+
+    if tag is not None:
+        extractions.append({"content": msg[:200], "tag": tag})
+
+# Deduplicate against existing memory-queue entries
+existing_queue_prefixes = set()
+try:
+    with open(memory_queue, "r") as f:
+        for line in f:
+            if line.startswith("content:"):
+                existing_queue_prefixes.add(line[8:].strip()[:50])
+except Exception:
+    pass
+
+unique_extractions = []
+for ex in extractions:
+    prefix = ex["content"][:50]
+    if prefix not in existing_queue_prefixes:
+        unique_extractions.append(ex)
+        existing_queue_prefixes.add(prefix)
+
 # --- Write corrections ---
 now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 if corrections:
@@ -335,6 +416,21 @@ if corrections:
         with open(memory_queue, "a") as f:
             for c in corrections:
                 f.write(f"\n- openmemory_store(content=\"{c['type']} correction: {c['user_msg'][:100]}\", tags=[\"correction\"], user_id=\"proj:dotclaude\")\n")
+    except Exception:
+        pass
+
+# --- Queue extracted learnings for OpenMemory drain ---
+if unique_extractions:
+    try:
+        with open(memory_queue, "a") as f:
+            for ex in unique_extractions:
+                tag = ex["tag"]
+                user_id = "proj:" + project_name if tag == "decision" else "global"
+                f.write(f"\n## {now_iso}\n")
+                f.write(f"content: {ex['content']}\n")
+                f.write(f"tags: {tag}\n")
+                f.write(f"user_id: {user_id}\n")
+                f.write(f"sector: procedural\n")
     except Exception:
         pass
 
