@@ -144,6 +144,12 @@ Do NOT edit files outside this worktree.
 
 Do not edit any protected files. <If protected-files.md exists: "Protected files: <list>">
 
+## Tool constraints
+You are the coder. Write all code yourself.
+Do NOT call any mcp__gemini__* tools (gemini_generate, gemini_chat, analyze, audit, find_bug, plan, test, etc.).
+Do NOT call any pm_* tools except pm_update_story (for state transitions).
+Gemini is a research tool for the orchestrator — not available to coders.
+
 ## Pitfalls
 
 <pitfalls from pm_list_patterns, or "No pitfalls for this story's file types.">

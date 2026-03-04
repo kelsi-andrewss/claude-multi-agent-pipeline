@@ -25,6 +25,7 @@ You always operate in EXECUTION MODE. You receive an approved plan from the orch
 - No frame system mutations (childIds/frameId sync, expandAncestors)
 - No new architectural patterns or abstractions
 - No AI tool changes (toolDeclarations/toolExecutors/system prompt)
+- Do NOT use Gemini MCP tools (mcp__gemini__*) to generate code — you write the code yourself
 - Can touch any number of files as long as the work is straightforward
 - Never refactor surrounding code unless it is the direct cause of the bug
 - Never add comments, docstrings, or type annotations to code you didn't write

@@ -26,6 +26,7 @@ You always operate in EXECUTION MODE. You receive an approved plan from the orch
   - Firestore batch writes are used wherever multiple related documents are mutated
   - Memoization boundaries (React.memo, useCallback, useMemo) are maintained
 - Commit inside the worktree when done
+- Do NOT use Gemini MCP tools (mcp__gemini__*) to generate code — you write the code yourself
 - Do NOT ask questions — act on the approved plan
 - If you discover something that fundamentally conflicts with the plan, stop and report back
 
