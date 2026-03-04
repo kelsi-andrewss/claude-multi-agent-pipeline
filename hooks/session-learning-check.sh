@@ -456,17 +456,19 @@ if duration_min > 5 and (total_turns > 3 or edit_count > 5):
             break
     topics_str = "; ".join(key_topics) if key_topics else "general work"
 
+    # Get top 5 edited files as comma-joined string
+    files_top5 = ", ".join(sorted(edited_files)[:5]) if edited_files else "(none)"
+
     summary_content = (
-        f"Session {now_iso}: {shape}. {duration_min}min, {total_turns} turns, "
-        f"{edit_count} edits. Key topics: {topics_str}. Corrections: {len(corrections)}."
+        f"{topics_str}. Shape: {shape}. Files: {files_top5}. {duration_min}min, {total_turns} turns, {edit_count} edits."
     )
 
     try:
         with open(memory_queue, "a") as f:
             f.write(f"\n## {now_iso}\n")
             f.write(f"content: {summary_content}\n")
-            f.write(f"tags: session-summary\n")
-            f.write(f"user_id: proj:dotclaude\n")
+            f.write(f"tags: session-summary, {now_iso[:10]}, {shape}\n")
+            f.write(f"user_id: proj:{os.path.basename(project_root)}\n")
             f.write(f"sector: episodic\n")
     except Exception:
         pass
