@@ -1,5 +1,10 @@
 # Corrections Log
 
+## 2026-03-04 — why didn't u use ship skill omfg
+**Context**: User said "ship the audit" — manually launched 3 quick-fixer agents instead of using /ship skill. Work completed but wrong workflow.
+**User said**: why didn't u use ship skill omfg
+**Turn**: ~8
+
 ## 2026-03-04 — wait wtf why is ship using GEMINI TO CODE????
 **Context**: run-stories launched a general-purpose agent for story-401 (Framer Motion migration). Agent called gemini_generate to write code instead of writing it itself.
 **User said**: "wait wtf why is ship using GEMINI TO CODE????" — coder agents must not delegate code writing to Gemini MCP tools. Gemini is for analysis/planning only. Coder prompts must explicitly prohibit Gemini tool usage.
