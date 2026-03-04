@@ -16,3 +16,7 @@
 {"user_msg": "Audit feedback: missed 5 areas of concern in LegacyLens", "date": "2026-03-04", "session_id": "185b1460-0ba0-4f48-ab1f-84cb1c91378f", "source": "manual", "promoted": false}
 {"user_msg": "\"i NEED you to act like a colleague or this will not work\"", "date": "2026-03-04", "session_id": "185b1460-0ba0-4f48-ab1f-84cb1c91378f", "source": "manual", "promoted": true}
 {"user_msg": "STILL not using /ship skill. User said \"ship\" and I used quick-fixer directly. AGAIN.", "date": "2026-03-04", "session_id": "185b1460-0ba0-4f48-ab1f-84cb1c91378f", "source": "manual", "promoted": true}
+{"user_msg": "ship this audit: \u2726 I've completed my UI audit and found several issues across the game components, including manual animations, potential state sync problems, and inconsistent styling. I'll now summarize my findings.\n\n  UI Deep-Dive Audit Report\n\n\n  1. Animation & Interaction (Brittle Implementation", "date": "2026-03-04", "session_id": "fd3f630b-4eff-4aae-bd61-f469309004ce", "source": "structural", "promoted": false}
+{"user_msg": "wait wtf why is ship using GEMINI TO CODE????", "date": "2026-03-04", "session_id": "fd3f630b-4eff-4aae-bd61-f469309004ce", "source": "structural", "promoted": false}
+{"user_msg": "wait wtf why is ship using GEMINI TO CODE????", "date": "2026-03-04", "session_id": "fd3f630b-4eff-4aae-bd61-f469309004ce", "source": "manual", "promoted": false}
+{"user_msg": "merge into dev NOT MAIN", "date": "2026-03-04", "session_id": "fd3f630b-4eff-4aae-bd61-f469309004ce", "source": "structural", "promoted": false}

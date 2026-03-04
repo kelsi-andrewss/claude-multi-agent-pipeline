@@ -16,9 +16,6 @@ _r_test(mcp)
 from tools_analysis import register as _r_analysis
 _r_analysis(mcp)
 
-from tools_argue import register as _r_argue
-_r_argue(mcp)
-
 from tools_pm_read import register as _r_pm_read
 _r_pm_read(mcp)
 

@@ -88,21 +88,6 @@ def _discover_documents() -> dict[str, dict[str, str]]:
 DOCUMENTS: dict[str, dict[str, str]] = _discover_documents()
 
 # ---------------------------------------------------------------------------
-# Argue constants
-# ---------------------------------------------------------------------------
-ARGUE_SYSTEM_INSTRUCTION = (
-    "You are arguing for the best technical solution. Be direct and specific. "
-    "Challenge weak reasoning. Do not repeat prior arguments — only introduce new reasoning or concede specific points. "
-    "Do not agree unless the counterpoint is genuinely correct."
-)
-
-CONVERGENCE_PROMPT = (
-    "Review the following technical debate. Have the core positions converged? "
-    "Answer only YES or NO on the first line, then in one sentence describe the remaining tension "
-    '(or "none" if converged).\n\n'
-)
-
-# ---------------------------------------------------------------------------
 # Test analysis prompt
 # ---------------------------------------------------------------------------
 TEST_ANALYSIS_PROMPT = (
