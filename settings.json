@@ -10,7 +10,8 @@
       "Bash(~/.claude/hooks/session-learning-check.sh*)",
       "Bash(~/.claude/hooks/log-skill-invocation.sh*)",
       "mcp__openmemory__openmemory_store",
-      "mcp__openmemory__openmemory_query"
+      "mcp__openmemory__openmemory_query",
+      "Bash(~/.claude/hooks/openmemory-recall.sh*)"
     ],
     "defaultMode": "default"
   },
@@ -136,6 +137,17 @@
             "command": "~/.claude/hooks/session-learning-check.sh",
             "timeout": 10,
             "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/openmemory-recall.sh",
+            "timeout": 5
           }
         ]
       }
