@@ -64,7 +64,7 @@ If `pubspec.yaml` does not exist, set `state_mgmt = unknown`.
 Exactly one of the following applies (in priority order):
 
 **A. story_id is set:**
-- Call `pm_get_story("<story_id>")` → extract `branch` from the response JSON.
+- Call `pm_get_story("<story_id>")` → read the detail file to extract `branch`.
 - If the story is not found or `branch` is null, stop and report: "story_id not found or has no branch."
 - Run: `git -C <project-root> diff main...story/<branch> --name-only`
 - Collect the output lines as the target file list.
@@ -95,13 +95,13 @@ If flag_no_completeness is set, override to null regardless.
 
 ### 5. Load open stories for cross-reference
 
-Call `pm_list_stories()` (no filters — defaults to non-archived). From the returned JSON array, filter to stories where `state` is not `done`, `shipped`, or `archived`.
+Call `pm_list_stories()` (no filters — defaults to non-archived). Read the detail file and filter to stories where `state` is not `done`, `shipped`, or `archived`.
 
 Build a map:
 ```
 open_story_map = { story_id: { title, writeFiles[] } }
 ```
-Parse each story's `write_files` as a JSON array. This is used in step 9.
+Each story's `write_files` are listed in the detail file. This is used in step 9.
 
 ### 6. Build the audit prompt
 

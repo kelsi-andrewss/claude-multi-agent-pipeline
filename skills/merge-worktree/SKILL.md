@@ -28,9 +28,9 @@ User has requested: `/merge-worktree {{args}}`
 
 **If `{{args}}` contains a story ID matching `story-\d+`:**
 
-1. Call `pm_get_story("{{args}}")` → extract `db_branch`, `epic_id`, `title`, `id`
+1. Call `pm_get_story("{{args}}")` → read the detail file to extract `db_branch`, `epic_id`, `title`, `id`
 2. Compute canonical `story-branch`:
-   a. If `epic_id` is non-null: call `pm_dev_branch(epic_id)` → extract `epic_slug`
+   a. If `epic_id` is non-null: call `pm_dev_branch(epic_id)` → read the detail file for `epic_slug`
       - `story-slug` = slugify(`title`): lowercase, replace spaces/non-alphanumeric with `-`, collapse consecutive `-`, truncate to 40 chars
       - `story-branch` = `<epic_slug>/<story-slug>`
    b. If `epic_id` is null or the tool returns an error: `story-branch` = `db_branch` (verbatim)
@@ -79,7 +79,7 @@ User has requested: `/merge-worktree {{args}}`
 
 > Note: `pm_dev_branch` was already called in Step 1 if `epic_id` was non-null. Reuse those results here.
 
-1. Use the `dev_branch` value returned by `pm_dev_branch(epic_id)` from Step 1.
+1. Use the `dev_branch` value from the `pm_dev_branch(epic_id)` response in Step 1 (the one-liner is the branch name).
    - For `epic-backlog`, this is `"dev"`.
    - For other epics, this is `"dev/<epic_slug>"`.
 
@@ -208,7 +208,7 @@ Call `pm_update_epic(epic_id, auto_close=True)`.
 Determine outcome metadata:
 - `agent`: from `pm_get_story(story_id)` agent field
 - `model`: infer from coder launch context this session (haiku/sonnet/opus). If unknown, "unknown".
-- `file_count`: from `pm_get_story(story_id)`, parse the `write_files` JSON array and count elements.
+- `file_count`: from `pm_get_story(story_id)` detail file, count elements in `write_files`.
   If `write_files` is null or empty, set to "unknown".
 - `complexity_bucket`: derived from `file_count`:
   - 1-2 → "small"

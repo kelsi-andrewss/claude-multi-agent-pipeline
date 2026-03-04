@@ -69,9 +69,9 @@ For an existing plan file:
 
 After Step 2 (or Step 2b), run Gemini planning as a separate step:
 
-1. Extract `epic_id` from the `pm_ship` response.
+1. Note `epic_id` from the `pm_ship` response (read the detail file at the path in the response if needed).
 2. Call `pm_plan_stories(epic_id=<epic_id>)` to generate tasks, write_files, agent assignments, and parallel groups for all draft stories.
-3. The response contains the planned stories with tasks and execution order.
+3. Read the detail file for planned stories with tasks and execution order.
 
 **Skip this step in Execute mode** (Step 2b), since that path uses a pre-written plan file.
 
@@ -108,7 +108,7 @@ Validate the plan and produce acceptance criteria before writing plan files:
 
 ## Step 3: Write plan files (Claude's job)
 
-For each story, call `pm_get_story(story_id=<id>)` to get the Gemini-planned tasks and write_files. Then for each story:
+For each story, call `pm_get_story(story_id=<id>)` — read the detail file for tasks and write_files. Then for each story:
 
 1. Generate a plan file name: `plans/<random-adjective-noun>.md`
 2. Write the plan file with this structure:

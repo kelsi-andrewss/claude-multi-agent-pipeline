@@ -51,13 +51,13 @@ Wait for the tool to complete. It will write `AUDIT-GEMINI.md` to the project ro
 
 ### 4. Cross-reference findings against open stories
 
-Call `pm_list_stories()` (no filters — defaults to non-archived). From the returned JSON array, filter to stories where `state` is not `done`, `shipped`, or `archived`.
+Call `pm_list_stories()` (no filters — defaults to non-archived). Read the detail file and filter to stories where `state` is not `done`, `shipped`, or `archived`.
 
 Build a map:
 ```
 open_story_map = { story_id: { title, writeFiles[] } }
 ```
-Parse each story's `write_files` as a JSON array.
+Each story's `write_files` are listed in the detail file.
 
 Read the written report at `AUDIT-GEMINI.md` in the project root.
 

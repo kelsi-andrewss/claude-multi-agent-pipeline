@@ -15,7 +15,7 @@ args:
 ## Steps
 
 1. **Resolve worktree path**:
-   - If `{{story_id}}` is provided: call `pm_get_story("{{story_id}}")` → extract `branch` from the response, then find the matching path from `git worktree list`.
+   - If `{{story_id}}` is provided: call `pm_get_story("{{story_id}}")` → read the detail file to extract `branch`, then find the matching path from `git worktree list`.
    - If no story ID: use the current working directory as the project root.
    - If the story is not found or has no worktree, stop and report.
 

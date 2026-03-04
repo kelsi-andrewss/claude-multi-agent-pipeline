@@ -56,7 +56,7 @@ Classify each token in `{{args}}`:
 ## Step 2: Run Gemini planning
 
 **Partition stories:**
-1. Call `pm_get_story(story_id)` for each story (parallel, single message).
+1. Call `pm_get_story(story_id)` for each story (parallel, single message). Read each detail file for full story data.
 2. Check fast-path criteria for each: agent = `quick-fixer`, write_files count ≤ 2, no protected files, at least one task.
 3. Split into `fast_path` and `gemini_path` lists.
 4. Run Gemini planning ONLY for `gemini_path` stories (existing logic below).
@@ -82,7 +82,7 @@ ToolSearch: select:mcp__gemini__pm_critique
 
 **For story IDs** — use epic-grouped planning where safe:
 
-1. **Fetch epic membership** (parallel): call `pm_get_story(story_id=<id>)` for each story ID to get its `epic_id`. Do all in a single message.
+1. **Fetch epic membership** (parallel): call `pm_get_story(story_id=<id>)` for each story ID to get its `epic_id` (available in the one-liner response). Do all in a single message.
 
 2. **Group stories by epic_id.**
 
@@ -108,8 +108,8 @@ Deduplicate. If the story list is empty, stop and report: "No stories found. Not
 ## Step 3: Verify plan data exists
 
 For each story in the final list:
-- Call `pm_get_story(story_id)`.
-- If the output contains no agent assignment and no tasks, warn: "story-NNN: planning returned no data — skipping." and remove from list.
+- Call `pm_get_story(story_id)` and read the detail file.
+- If the detail file contains no agent assignment and no tasks, warn: "story-NNN: planning returned no data — skipping." and remove from list.
 
 If the list is empty after filtering, stop and report: "No stories with plan data. Nothing to convert."
 
@@ -165,7 +165,7 @@ Do all of the following **in the main session** (no background agents):
    ## Verification
    <how to verify the implementation is correct>
    ```
-   Content comes from the `pm_get_story` output collected in Step 3.
+   Content comes from the `pm_get_story` detail files collected in Step 3.
 
 3. **Call `pm_update_story` for all stories in a single message** (parallel tool calls):
    - `pm_update_story("<story_id>", plan_file="plans/<whimsical-name>.md")` for each

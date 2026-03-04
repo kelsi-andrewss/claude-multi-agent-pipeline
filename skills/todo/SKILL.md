@@ -59,7 +59,7 @@ Treat all of `{{args}}` as raw todo text (one item, or a newline/comma-separated
    ```
 
 4. Call `pm_plan_items(items=[...], confirmed=False)` with the full list.
-   - This returns a proposal JSON grouping items into epics/stories/tasks.
+   - This returns a proposal summary; read the detail file for the full grouping into epics/stories/tasks.
 
 5. Display the proposal to the user in a readable summary:
    ```
@@ -76,5 +76,5 @@ Treat all of `{{args}}` as raw todo text (one item, or a newline/comma-separated
 6. Call `pm_plan_items(items=[...], confirmed=True, proposal_id=<proposal_id from step 4>)` — auto-commit.
 
 7. Delete `.claude/todos.md`.
-   - Collect the story IDs returned from the committed plan.
+   - Collect story IDs from the detail file of the committed plan.
    - Immediately invoke `/draft-plan <story-ids>` (space-separated). Do not ask.

@@ -30,7 +30,7 @@ User has requested: `/run-stories {{args}}`
 
 Parse each token in `{{args}}`:
 
-- **`story-\d+`** → call `pm_get_story(id)`, collect the story object
+- **`story-\d+`** → call `pm_get_story(id)`, read the detail file for full story data
 - **`epic-\d+`** → call `pm_list_stories(epic_id=...)`, collect all non-archived stories
 - **No args** → call `pm_view(detail="summary")`, collect all stories where `state` is `draft` or `ready`
 
@@ -69,7 +69,7 @@ Build an execution plan from two analyses:
 Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each dependency group:
 
 1. Collect all story IDs in the group and call `pm_check_conflicts(story_ids=[...])`.
-2. The response contains:
+2. Read the detail file. It contains:
    - `conflicts`: list of `{file, stories}` overlap entries
    - `safe_parallel`: story IDs with no write-file overlaps (launch together)
    - `sequential`: story IDs that must run after conflicting stories merge
@@ -92,15 +92,15 @@ git push -u origin dev 2>/dev/null || true
 
 For each unique epic referenced by the stories being run:
 
-1. Call `pm_dev_branch(epic_id)` → extract `dev_branch` and `epic_slug`.
+1. Call `pm_dev_branch(epic_id)` → the response is the branch name (e.g., `dev/my-feature`). Read the detail file for `epic_slug` if needed.
 2. If `epic_id` is `"epic-backlog"`, `dev-branch = "dev"` — skip branch creation.
-3. Otherwise, `dev-branch = dev_branch` from the tool response. Run these git commands (in the project root):
+3. Otherwise, `dev-branch` is the branch name from the response. Run these git commands (in the project root):
    ```bash
    git show-ref --verify --quiet refs/heads/<dev-branch> || git branch <dev-branch> dev
    git push -u origin <dev-branch> 2>/dev/null || true
    ```
 
-Store the mapping: `epic_id → {dev_branch, epic_slug}` for use in step 4.
+Store the mapping: `epic_id → {dev_branch, epic_slug}` for use in step 4. (Read the detail file from each `pm_dev_branch` call for the `epic_slug`.)
 
 ---
 
@@ -114,7 +114,7 @@ Launch all stories in the batch in **a single message** as `general-purpose` age
 
 Compute for each story:
 - `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars, then append `-<NNN>` where NNN is the numeric part of the story ID (e.g., story-352 → `-352`)
-- `epic-slug`: the `epic_slug` returned by `pm_dev_branch` from Step 3
+- `epic-slug`: the `epic_slug` from the `pm_dev_branch` detail file in Step 3
 - `story-branch`: `<epic-slug>/<story-slug>`
 - `worktree-path`: `<project-root>/.claude/worktrees/story/<story-slug>`
 - `dev-branch`: from the epic mapping computed in step 3
@@ -125,7 +125,7 @@ Compute for each story:
 
 **Before constructing each coder's prompt**, perform per-story enrichment:
 
-**Pitfalls:** Extract file extensions from write_files, map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
+**Pitfalls:** Extract file extensions from write_files (from the detail file), map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
 
 **Read-only context:** Read the story's plan file, extract paths from the `## Read-only context` section (if present). Prefix paths with the worktree path.
 

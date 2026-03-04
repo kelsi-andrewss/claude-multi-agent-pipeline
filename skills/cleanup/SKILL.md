@@ -42,7 +42,7 @@ Collect results from each step into tracking vars:
 
 For each `story-NNN` in the parsed story IDs:
 
-1. Call `pm_get_story(story_id)` → extract `state`, `branch`, `title`, `epic_id`, `worktree_active`.
+1. Call `pm_get_story(story_id)` → read the detail file for `state`, `branch`, `title`, `epic_id`, `worktree_active`.
 2. If `state` is already `archived` (or `archived=1`): note "already archived — skipping". Skip remaining sub-steps for this story.
 3. If `state` is `in-progress`: ask via `AskUserQuestion`:
    > "story-NNN ('<title>') is currently in-progress. A coder may be working on it. Archive anyway?"
@@ -71,8 +71,8 @@ For each `story-NNN` in the parsed story IDs:
 
 For each `epic-NNN` in the parsed epic IDs:
 
-1. Call `pm_dev_branch(epic_id)` → extract `dev_branch`, `epic_slug`.
-2. Call `pm_get_epic(epic_id)` → extract `title`, `state`.
+1. Call `pm_dev_branch(epic_id)` → the response is the branch name; read the detail file for `epic_slug`.
+2. Call `pm_get_epic(epic_id)` → read the detail file for `title`, `state`.
 3. Call `pm_list_stories(epic_id=epic_id)` → get all stories.
 4. For each story not yet in a terminal state (`done`, `shipped`, `archived`):
    - If `state` is `in-progress`: ask via `AskUserQuestion`:
