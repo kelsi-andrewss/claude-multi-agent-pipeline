@@ -137,12 +137,8 @@ Session N+2: reinforced memory → confident prediction → prevention → reinf
 ## Graceful degradation
 
 - Reads fail: skip silently, proceed with eager-layer context only.
-- Writes fail: queue to `~/.claude/memory-queue.md`, never drop.
+- Writes fail: log entry in `tool-learnings.md` still captures it.
 - Health check at session start warns when Ollama is unreachable.
-
-## Queue drain (session start)
-
-After OpenMemory health check passes, check `memory-queue.md` for entries. Store each, remove on success.
 
 ## Reinforcement
 

@@ -1,13 +1,14 @@
 # Orchestration Project
 
 ## Session start
-When UNPROCESSED SESSIONS shows AUTO: corrections, verify them before starting new work: read the `corrections.md` entries, confirm or correct them, and mark as verified by removing the `AUTO:` prefix. Delete false positives.
+When CORRECTION PATTERNS appears at session start:
+1. Group entries by theme (same underlying problem)
+2. For groups with ≥ 3 entries:
+   - **Behavioral** (communication style, judgment calls): auto-promote to `behavioral-prefs.md`, then mark entries as `promoted: true` in `correction-tallies.jsonl`
+   - **Process** (workflow steps, tool usage): surface to user — "This keeps happening: [pattern]. Should this become a hook or skill?"
+3. Groups with < 3 entries: leave to accumulate — don't act on them yet
 
-When the session context shows MEMORY QUEUE: DRAIN REQUIRED, drain it as your first action:
-1. Read memory-queue.md
-2. Deduplicate entries (same content → store once)
-3. Call openmemory_store for each unique entry
-4. Overwrite memory-queue.md with just the header (clearing it)
+When UNPROCESSED SESSIONS shows friction clusters, review the session record context to understand what caused rapid-fire user turns.
 
 When you see the SESSION AGENDA, interpret it before waiting for direction:
 - If you have a clear recommendation, state it with reasoning (dependency chain, staleness, momentum)

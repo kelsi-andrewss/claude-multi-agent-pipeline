@@ -377,22 +377,57 @@ print("=== END MEMORY BRIEFING ===")
 MEMBRIEFEOF
   fi
 
-  # Memory queue drain directive
-  QUEUE_FILE="$HOME/.claude/memory-queue.md"
-  if [[ -f "$QUEUE_FILE" ]]; then
-    # Count non-empty, non-header, non-format lines (actual queue items)
-    QUEUE_ITEMS=$(grep -c '^\- openmemory_store\|^## [0-9]' "$QUEUE_FILE" 2>/dev/null || echo "0")
-    if [[ "$QUEUE_ITEMS" -gt 0 ]]; then
-      echo ""
-      echo "=== MEMORY QUEUE: DRAIN REQUIRED ==="
-      echo "  $QUEUE_ITEMS items pending. Drain before starting work."
-      echo "=== END MEMORY QUEUE ==="
-    fi
-  fi
 
   fi
 
   # Unprocessed sessions prompt — check session-records.md for recent entries with no artifacts
+  # Correction patterns — surface unpromoted tallies from last 14 days
+  TALLIES_FILE="$HOME/.claude/correction-tallies.jsonl"
+  if [[ -f "$TALLIES_FILE" ]] && [[ -s "$TALLIES_FILE" ]]; then
+  python3 - "$TALLIES_FILE" <<'CORRPATTERNSEOF'
+import json, sys
+from datetime import datetime, timezone, timedelta
+
+tallies_file = sys.argv[1]
+cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+entries = []
+try:
+    with open(tallies_file) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if entry.get("promoted", False):
+                    continue
+                if entry.get("date", "") < cutoff_str:
+                    continue
+                entries.append(entry)
+            except json.JSONDecodeError:
+                continue
+except Exception:
+    sys.exit(0)
+
+if not entries:
+    sys.exit(0)
+
+entries.sort(key=lambda e: e.get("date", ""))
+
+print("")
+print(f"=== CORRECTION PATTERNS ({len(entries)} unprocessed) ===")
+for e in entries:
+    msg = e.get("user_msg", "")[:80]
+    source = e.get("source", "unknown")
+    date = e.get("date", "")
+    print(f'  [{date}] "{msg}" ({source})')
+print("  Process these before starting work.")
+print("=== END CORRECTION PATTERNS ===")
+CORRPATTERNSEOF
+  fi
+
   RECORDS_FILE="$HOME/.claude/session-records.md"
   CORRECTIONS_FILE="$HOME/.claude/corrections.md"
   if [[ -f "$RECORDS_FILE" ]]; then
@@ -443,22 +478,13 @@ for e in entries:
 if not unprocessed:
     sys.exit(0)
 
-# Check for AUTO corrections
-auto_count = 0
-if corrections_file and os.path.isfile(corrections_file):
-    try:
-        with open(corrections_file) as f:
-            auto_count = sum(1 for line in f if re.match(r'^## .+ — AUTO', line))
-    except Exception:
-        pass
-
 print("")
 print("=== UNPROCESSED SESSIONS ===")
 for e in unprocessed:
-    corrections_line = ""
+    friction_line = ""
     for line in e["lines"]:
-        if line.startswith("Corrections detected:"):
-            corrections_line = line.split(":", 1)[1].strip()
+        if line.startswith("Friction clusters:"):
+            friction_line = line.split(":", 1)[1].strip()
     key_lines = []
     in_keys = False
     for line in e["lines"]:
@@ -471,13 +497,11 @@ for e in unprocessed:
             else:
                 in_keys = False
     print(f"  [{e['date']}] {e['summary']}")
-    if corrections_line and corrections_line != "0":
-        print(f"    Corrections detected: {corrections_line} (see corrections.md AUTO: entries)")
+    if friction_line and friction_line != "0":
+        print(f"    Friction clusters: {friction_line}")
     if key_lines:
         keys = " / ".join(key_lines[:2])
         print(f"    Key: {keys}")
-if auto_count > 0:
-    print(f"  Review {auto_count} AUTO: correction(s) and verify/refine before starting new work.")
 print("=== END UNPROCESSED SESSIONS ===")
 UNPROCESSEDEOF
   fi
