@@ -508,6 +508,99 @@ if new_tallies:
 
 TALLYEOF
 
+# --- Dual-write to OpenMemory: corrections and outcomes ---
+OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
+if [[ -f "$OM_DB" && -f "$SNAPSHOT" ]] || [[ -f "$OM_DB" ]]; then
+python3 - "$HOME/.claude" "$OM_DB" "${CORRECTIONS_MTIME:-0}" "${OUTCOMES_MTIME:-0}" <<'OMWRITEEOF'
+import hashlib, json, os, re, subprocess, sys, time, uuid
+from datetime import datetime, timezone
+
+project_root = sys.argv[1]
+om_db = sys.argv[2]
+corrections_mtime_start = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+outcomes_mtime_start = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+
+now_ts = int(time.time())
+today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+def get_mtime(path):
+    try:
+        return int(os.path.getmtime(path))
+    except Exception:
+        return 0
+
+def om_insert(content, tags, user_id="proj:dotclaude", sector="procedural"):
+    """Direct SQL INSERT into OpenMemory — no embedding (mean_vec=NULL)."""
+    mem_id = str(uuid.uuid4())
+    tags_json = json.dumps(tags)
+    # Use simhash for dedup: hash of content
+    simhash = hashlib.md5(content.encode()).hexdigest()[:16]
+    try:
+        subprocess.run(
+            ["sqlite3", om_db,
+             f"INSERT OR IGNORE INTO memories "
+             f"(id, user_id, content, simhash, primary_sector, tags, created_at, updated_at, last_seen_at, salience, decay_lambda, feedback_score) "
+             f"VALUES ('{mem_id}', '{user_id}', '{content.replace(chr(39), chr(39)+chr(39))}', '{simhash}', "
+             f"'{sector}', '{tags_json.replace(chr(39), chr(39)+chr(39))}', {now_ts}, {now_ts}, {now_ts}, 0.5, 0.05, 0);"],
+            capture_output=True, text=True, timeout=5
+        )
+    except Exception:
+        pass
+
+def check_existing(simhash):
+    """Check if a memory with this simhash already exists."""
+    try:
+        r = subprocess.run(
+            ["sqlite3", om_db, f"SELECT COUNT(*) FROM memories WHERE simhash='{simhash}';"],
+            capture_output=True, text=True, timeout=5
+        )
+        return int(r.stdout.strip()) > 0
+    except Exception:
+        return False
+
+# Process new corrections
+corrections_file = os.path.join(project_root, "corrections.md")
+if os.path.isfile(corrections_file) and get_mtime(corrections_file) > corrections_mtime_start:
+    try:
+        with open(corrections_file) as f:
+            content = f.read()
+        # Find entries with today's date
+        for match in re.finditer(r'^## (\d{4}-\d{2}-\d{2}) — (.+?)(?=\n## |\Z)', content, re.MULTILINE | re.DOTALL):
+            entry_date = match.group(1)
+            entry_body = match.group(0).strip()
+            if entry_date == today:
+                simhash = hashlib.md5(entry_body.encode()).hexdigest()[:16]
+                if not check_existing(simhash):
+                    # Extract the user_said line for a concise memory
+                    user_said = ""
+                    for line in entry_body.splitlines():
+                        if line.startswith("**User said**:"):
+                            user_said = line.split(":", 1)[1].strip()[:200]
+                            break
+                    mem_content = user_said if user_said else entry_body[:200]
+                    om_insert(mem_content, ["correction", "behavioral"], sector="procedural")
+    except Exception:
+        pass
+
+# Process new outcomes
+outcomes_file = os.path.join(project_root, "outcomes.md")
+if os.path.isfile(outcomes_file) and get_mtime(outcomes_file) > outcomes_mtime_start:
+    try:
+        with open(outcomes_file) as f:
+            content = f.read()
+        for match in re.finditer(r'^## (\d{4}-\d{2}-\d{2}) — (.+?)(?=\n## |\Z)', content, re.MULTILINE | re.DOTALL):
+            entry_date = match.group(1)
+            entry_body = match.group(0).strip()
+            if entry_date == today:
+                simhash = hashlib.md5(entry_body.encode()).hexdigest()[:16]
+                if not check_existing(simhash):
+                    om_insert(entry_body[:300], ["outcome", "behavioral"], sector="procedural")
+    except Exception:
+        pass
+
+OMWRITEEOF
+fi
+
 # Cleanup session start timestamp
 SESSION_START_FILE="/tmp/session-start-${SESSION_ID}"
 rm -f "$SESSION_START_FILE"

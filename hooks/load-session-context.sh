@@ -254,11 +254,22 @@ PYEOF
   # Memory Briefing — query openmemory.sqlite directly for session-start context
   OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
   if [[ -f "$OM_DB" ]]; then
-  python3 - "$OM_DB" "$DB_FILE" <<'MEMBRIEFEOF'
-import json, os, subprocess, sys, time
+  # Gather signal context for memory queries
+  SIGNAL_BRANCH=$(git -C "$HOME/.claude" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  SIGNAL_DIR=$(basename "$PWD")
+  SIGNAL_RECENT_FILES=$(git -C "$HOME/.claude" diff --name-only HEAD~1 2>/dev/null | head -20 || echo "")
+
+  python3 - "$OM_DB" "$DB_FILE" "$SIGNAL_BRANCH" "$SIGNAL_DIR" "$SIGNAL_RECENT_FILES" <<'MEMBRIEFEOF'
+import math, os, subprocess, sys, time
 
 om_db = sys.argv[1]
 epics_db = sys.argv[2] if len(sys.argv) > 2 else None
+signal_branch = sys.argv[3] if len(sys.argv) > 3 else ""
+signal_dir = sys.argv[4] if len(sys.argv) > 4 else ""
+signal_files = sys.argv[5] if len(sys.argv) > 5 else ""
+
+now = time.time()
+DEFAULT_DECAY = 0.05  # ~14-day half-life
 
 def om_query(sql):
     try:
@@ -273,42 +284,63 @@ def om_query(sql):
 def trunc(s, n=200):
     return s[:n] + "..." if len(s) > n else s
 
-def fmt_score(score_str):
-    try:
-        s = float(score_str)
-        return f" (score: {s})" if s != 0 else ""
-    except (ValueError, TypeError):
-        return ""
+# Decay-weighted scoring SQL fragment
+DECAY_SCORE = (
+    f"feedback_score * EXP(-COALESCE(decay_lambda, {DEFAULT_DECAY}) "
+    f"* (({int(now)} - COALESCE(last_seen_at, created_at)) / 86400.0))"
+)
 
-# 1. Last 3 session summaries
+# 1. Last 3 session summaries (recency-ordered, no decay — these are logs)
 sessions = om_query(
-    "SELECT content, feedback_score FROM memories "
+    "SELECT content FROM memories "
     "WHERE tags LIKE '%session-summary%' AND tags NOT LIKE '%bootstrap%' "
     "ORDER BY created_at DESC LIMIT 3;"
 )
 
-# 2. Last 5 tool learnings (non-bootstrap)
+# 2. Top 5 tool learnings by decay-weighted score
 learnings = om_query(
-    "SELECT content, feedback_score FROM memories "
-    "WHERE tags LIKE '%tool-learning%' AND tags NOT LIKE '%bootstrap%' "
-    "ORDER BY feedback_score DESC, created_at DESC LIMIT 5;"
+    f"SELECT content FROM memories "
+    f"WHERE tags LIKE '%tool-learning%' AND tags NOT LIKE '%bootstrap%' "
+    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
 )
 
-# 3. Last 5 conventions (non-bootstrap)
+# 3. Top 5 conventions by decay-weighted score
 conventions = om_query(
-    "SELECT content, feedback_score FROM memories "
-    "WHERE tags LIKE '%convention%' AND tags NOT LIKE '%bootstrap%' "
-    "ORDER BY feedback_score DESC, created_at DESC LIMIT 5;"
+    f"SELECT content FROM memories "
+    f"WHERE tags LIKE '%convention%' AND tags NOT LIKE '%bootstrap%' "
+    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
 )
 
-# 4. Tech-relevant memories based on in-progress story file extensions
+# 4. Signal-aware tech-relevant memories
+# Gather signals from: git branch, recent files, epics.db write_files
 EXT_MAP = {
     ".jsx": "react", ".tsx": "react", ".js": "javascript", ".ts": "typescript",
     ".css": "css", ".scss": "css", ".dart": "flutter", ".py": "python",
     ".go": "go", ".rs": "rust", ".java": "java", ".kt": "kotlin",
     ".swift": "swift", ".rb": "ruby", ".vue": "vue", ".svelte": "svelte",
+    ".sh": "bash", ".md": "markdown",
 }
-tech_tags = set()
+signal_terms = set()
+
+# From git branch name (e.g., "feature/auth" → "auth")
+if signal_branch and signal_branch not in ("main", "master", "HEAD"):
+    for part in signal_branch.replace("/", "-").split("-"):
+        if len(part) > 2:
+            signal_terms.add(part.lower())
+
+# From recently modified files
+if signal_files:
+    for f in signal_files.strip().splitlines():
+        f = f.strip()
+        ext = os.path.splitext(f)[1].lower()
+        if ext in EXT_MAP:
+            signal_terms.add(EXT_MAP[ext])
+        # Also extract directory-level signals (e.g., "hooks/foo.sh" → "hooks")
+        dirname = os.path.dirname(f)
+        if dirname:
+            signal_terms.add(dirname.split("/")[0].lower())
+
+# From epics.db in-progress story write_files
 if epics_db and os.path.isfile(epics_db):
     try:
         r = subprocess.run(
@@ -324,52 +356,49 @@ if epics_db and os.path.isfile(epics_db):
                 f = f.strip()
                 ext = os.path.splitext(f)[1].lower()
                 if ext in EXT_MAP:
-                    tech_tags.add(EXT_MAP[ext])
+                    signal_terms.add(EXT_MAP[ext])
     except Exception:
         pass
 
 tech_memories = []
-if tech_tags:
-    # Query memories whose content mentions any of the tech keywords
-    clauses = " OR ".join(f"LOWER(content) LIKE '%{t}%'" for t in tech_tags)
+if signal_terms:
+    clauses = " OR ".join(f"LOWER(content) LIKE '%{t}%'" for t in signal_terms)
     tech_memories = om_query(
-        f"SELECT content, feedback_score FROM memories "
+        f"SELECT content FROM memories "
         f"WHERE ({clauses}) AND tags NOT LIKE '%bootstrap%' AND tags NOT LIKE '%session-summary%' "
-        f"ORDER BY feedback_score DESC, created_at DESC LIMIT 5;"
+        f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
     )
 
 # Output
-has_any = sessions or learnings or conventions or tech_memories
-
 print("")
 print("=== MEMORY BRIEFING ===")
 
 print("  Recent sessions:")
 if sessions:
     for row in sessions:
-        print(f"    - {trunc(row[0])}{fmt_score(row[1])}")
+        print(f"    - {trunc(row[0])}")
 else:
     print("    (none yet)")
 
 print("  Tool learnings:")
 if learnings:
     for row in learnings:
-        print(f"    - {trunc(row[0])}{fmt_score(row[1])}")
+        print(f"    - {trunc(row[0])}")
 else:
     print("    (none yet)")
 
 print("  Conventions:")
 if conventions:
     for row in conventions:
-        print(f"    - {trunc(row[0])}{fmt_score(row[1])}")
+        print(f"    - {trunc(row[0])}")
 else:
     print("    (none yet)")
 
-tech_label = ", ".join(sorted(tech_tags)) if tech_tags else "no active stories"
+tech_label = ", ".join(sorted(signal_terms)[:5]) if signal_terms else "no active stories"
 print(f"  Tech-relevant ({tech_label}):")
 if tech_memories:
     for row in tech_memories:
-        print(f"    - {trunc(row[0])}{fmt_score(row[1])}")
+        print(f"    - {trunc(row[0])}")
 else:
     print("    (none yet)")
 
@@ -380,12 +409,12 @@ MEMBRIEFEOF
 
   fi
 
-  # Unprocessed sessions prompt — check session-records.md for recent entries with no artifacts
-  # Correction patterns — surface unpromoted tallies from last 14 days
+  # Correction patterns — grouped by theme, counts only
   TALLIES_FILE="$HOME/.claude/correction-tallies.jsonl"
   if [[ -f "$TALLIES_FILE" ]] && [[ -s "$TALLIES_FILE" ]]; then
   python3 - "$TALLIES_FILE" <<'CORRPATTERNSEOF'
 import json, sys
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
 tallies_file = sys.argv[1]
@@ -414,29 +443,37 @@ except Exception:
 if not entries:
     sys.exit(0)
 
-entries.sort(key=lambda e: e.get("date", ""))
+# Group by theme: first 40 chars of message (deduplicates near-identical corrections)
+themes = defaultdict(list)
+for e in entries:
+    key = e.get("user_msg", "")[:40].strip().lower()
+    themes[key].append(e)
 
 print("")
 print(f"=== CORRECTION PATTERNS ({len(entries)} unprocessed) ===")
-for e in entries:
-    msg = e.get("user_msg", "")[:80]
-    source = e.get("source", "unknown")
-    date = e.get("date", "")
-    print(f'  [{date}] "{msg}" ({source})')
+# Show themes sorted by count (highest first), with representative message
+for key in sorted(themes, key=lambda k: -len(themes[k])):
+    group = themes[key]
+    representative = group[0].get("user_msg", "")[:80]
+    source = group[0].get("source", "unknown")
+    if len(group) > 1:
+        print(f'  [{len(group)}x] "{representative}" ({source})')
+    else:
+        date = group[0].get("date", "")
+        print(f'  [{date}] "{representative}" ({source})')
 print("  Process these before starting work.")
 print("=== END CORRECTION PATTERNS ===")
 CORRPATTERNSEOF
   fi
 
+  # Unprocessed sessions — last 3 only, with summary line for the rest
   RECORDS_FILE="$HOME/.claude/session-records.md"
-  CORRECTIONS_FILE="$HOME/.claude/corrections.md"
   if [[ -f "$RECORDS_FILE" ]]; then
-  python3 - "$RECORDS_FILE" "$CORRECTIONS_FILE" <<'UNPROCESSEDEOF'
-import os, re, sys
+  python3 - "$RECORDS_FILE" <<'UNPROCESSEDEOF'
+import re, sys
 from datetime import datetime, timezone, timedelta
 
 records_file = sys.argv[1]
-corrections_file = sys.argv[2] if len(sys.argv) > 2 else ""
 
 now = datetime.now(timezone.utc)
 cutoff = now - timedelta(hours=72)
@@ -465,6 +502,7 @@ if current:
 
 # Filter: last 72h, artifacts = "none"
 unprocessed = []
+total_friction = 0
 for e in entries:
     try:
         dt = datetime.strptime(e["date"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
@@ -473,6 +511,12 @@ for e in entries:
     except ValueError:
         continue
     if e["artifacts"] == "none":
+        for line in e["lines"]:
+            if line.startswith("Friction clusters:"):
+                try:
+                    total_friction += int(line.split(":", 1)[1].strip())
+                except ValueError:
+                    pass
         unprocessed.append(e)
 
 if not unprocessed:
@@ -480,7 +524,15 @@ if not unprocessed:
 
 print("")
 print("=== UNPROCESSED SESSIONS ===")
-for e in unprocessed:
+
+# Show last 3 in detail
+shown = unprocessed[-3:]
+rest = unprocessed[:-3] if len(unprocessed) > 3 else []
+
+if rest:
+    print(f"  ({len(rest)} older sessions not shown, {total_friction} total friction clusters)")
+
+for e in shown:
     friction_line = ""
     for line in e["lines"]:
         if line.startswith("Friction clusters:"):
