@@ -43,7 +43,7 @@ Read all four data sources. Missing files are not errors — report what's avail
 
 3. **Outcomes**: Read `~/.claude/outcomes.md`. Parse each `## ` entry:
    - date, story_id, title, intent, result, agent, model, cycle_time, coder_effort,
-     skills_used, friction_events, memory_attributed, what_worked, what_failed
+     skills_used, friction_events, file_count, complexity, memory_attributed, what_worked, what_failed
    - Apply `since_date` filter if set
 
 4. **Skill changelog**: Read `~/.claude/skill-changelog.md`. Parse each `- ` entry:
@@ -80,7 +80,9 @@ Skip if fewer than 2 outcomes have cycle_time data.
   grouped by result (merged/blocked/rejected)
 - Friction-per-skill rate: friction events where skill matches / total invocations of that skill
 - Before/after comparison: for skills with changelog entries, compare friction rates before and
-  after the changelog date
+  after the changelog date. **Confidence gate:** only show the comparison when both before and
+  after groups have ≥5 outcomes each. If either group has <5, show raw counts only and label
+  "insufficient data (N before, M after — need ≥5 per group)"
 
 ---
 
@@ -122,8 +124,9 @@ EFFICIENCY
 
 BEFORE/AFTER (from skill-changelog.md)
   /skill-name modified YYYY-MM-DD:
-    Before: category N/session, category N/session
-    After:  category N/session, category N/session  ← interpretation
+    Before: category N/session, category N/session  (N outcomes)
+    After:  category N/session, category N/session  (M outcomes) ← interpretation
+    ← or: "insufficient data (N before, M after — need ≥5 per group)"
 
 INVOCATIONS
   Total: N across M sessions
@@ -155,8 +158,12 @@ If `focus_skill` is set, filter all sections to that skill only.
 ## Step 8: Pattern detection (only if 10+ outcomes)
 
 - Flag friction categories that increased after a skill was introduced (using changelog dates)
+  — **only when both before and after groups have ≥5 outcomes each**
 - Flag skills with high friction rate (>40% of invocations have friction)
 - Flag recurring patterns approaching promotion threshold (2 occurrences, 1 more → promotion)
 - Note friction categories that dropped to zero after a skill change (skill working as intended)
+  — **only when the before group had ≥5 outcomes** (otherwise the "zero" isn't meaningful)
 
 If fewer than 10 outcomes, skip this section and note: "Pattern detection requires 10+ outcomes."
+Within this section, before/after claims require ≥5 outcomes per group. If a changelog-based
+comparison has <5 in either group, show: "insufficient data for [skill] (N before, M after)".

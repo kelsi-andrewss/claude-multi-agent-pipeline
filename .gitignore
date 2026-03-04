@@ -43,3 +43,14 @@ plans/
 *.local
 .credentials.json
 plugins/marketplaces/
+
+# OS files
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Root-level DB (copy/artifact)
+epics.db

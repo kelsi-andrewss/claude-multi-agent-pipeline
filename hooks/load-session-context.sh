@@ -46,6 +46,9 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
     echo ""
   fi
 
+  # Session-start timestamp for debrief freshness check
+  echo "$(date +%s)" > "/tmp/session-start-${SESSION_ID}"
+
   # Snapshot behavioral file mtimes for session-learning-check Stop hook
   if stat -f %m / >/dev/null 2>&1; then
     _mtime() { stat -f %m "$1" 2>/dev/null || echo "0"; }
@@ -241,6 +244,133 @@ if unprocessed >= 5:
     print("  Review and distill before starting work.")
     print("")
 PYEOF
+
+  # Memory Briefing — query openmemory.sqlite directly for session-start context
+  OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
+  if [[ -f "$OM_DB" ]]; then
+  python3 - "$OM_DB" "$DB_FILE" <<'MEMBRIEFEOF'
+import json, os, subprocess, sys, time
+
+om_db = sys.argv[1]
+epics_db = sys.argv[2] if len(sys.argv) > 2 else None
+
+def om_query(sql):
+    try:
+        r = subprocess.run(
+            ["sqlite3", "-separator", "\t", om_db, sql],
+            capture_output=True, text=True, timeout=5
+        )
+        return [line.split("\t") for line in r.stdout.strip().splitlines() if line.strip()]
+    except Exception:
+        return []
+
+def trunc(s, n=200):
+    return s[:n] + "..." if len(s) > n else s
+
+def fmt_score(score_str):
+    try:
+        s = float(score_str)
+        return f" (score: {s})" if s != 0 else ""
+    except (ValueError, TypeError):
+        return ""
+
+# 1. Last 3 session summaries
+sessions = om_query(
+    "SELECT content, feedback_score FROM memories "
+    "WHERE tags LIKE '%session-summary%' AND tags NOT LIKE '%bootstrap%' "
+    "ORDER BY created_at DESC LIMIT 3;"
+)
+
+# 2. Last 5 tool learnings (non-bootstrap)
+learnings = om_query(
+    "SELECT content, feedback_score FROM memories "
+    "WHERE tags LIKE '%tool-learning%' AND tags NOT LIKE '%bootstrap%' "
+    "ORDER BY feedback_score DESC, created_at DESC LIMIT 5;"
+)
+
+# 3. Last 5 conventions (non-bootstrap)
+conventions = om_query(
+    "SELECT content, feedback_score FROM memories "
+    "WHERE tags LIKE '%convention%' AND tags NOT LIKE '%bootstrap%' "
+    "ORDER BY feedback_score DESC, created_at DESC LIMIT 5;"
+)
+
+# 4. Tech-relevant memories based on in-progress story file extensions
+EXT_MAP = {
+    ".jsx": "react", ".tsx": "react", ".js": "javascript", ".ts": "typescript",
+    ".css": "css", ".scss": "css", ".dart": "flutter", ".py": "python",
+    ".go": "go", ".rs": "rust", ".java": "java", ".kt": "kotlin",
+    ".swift": "swift", ".rb": "ruby", ".vue": "vue", ".svelte": "svelte",
+}
+tech_tags = set()
+if epics_db and os.path.isfile(epics_db):
+    try:
+        r = subprocess.run(
+            ["sqlite3", "-separator", "\t", epics_db,
+             "SELECT write_files FROM stories WHERE state IN "
+             "('in-progress','ready','in-review','approved') AND archived=0;"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in r.stdout.strip().splitlines():
+            if not line.strip():
+                continue
+            for f in line.split(","):
+                f = f.strip()
+                ext = os.path.splitext(f)[1].lower()
+                if ext in EXT_MAP:
+                    tech_tags.add(EXT_MAP[ext])
+    except Exception:
+        pass
+
+tech_memories = []
+if tech_tags:
+    # Query memories whose content mentions any of the tech keywords
+    clauses = " OR ".join(f"LOWER(content) LIKE '%{t}%'" for t in tech_tags)
+    tech_memories = om_query(
+        f"SELECT content, feedback_score FROM memories "
+        f"WHERE ({clauses}) AND tags NOT LIKE '%bootstrap%' AND tags NOT LIKE '%session-summary%' "
+        f"ORDER BY feedback_score DESC, created_at DESC LIMIT 5;"
+    )
+
+# Output
+has_any = sessions or learnings or conventions or tech_memories
+
+print("")
+print("=== MEMORY BRIEFING ===")
+
+print("  Recent sessions:")
+if sessions:
+    for row in sessions:
+        print(f"    - {trunc(row[0])}{fmt_score(row[1])}")
+else:
+    print("    (none yet)")
+
+print("  Tool learnings:")
+if learnings:
+    for row in learnings:
+        print(f"    - {trunc(row[0])}{fmt_score(row[1])}")
+else:
+    print("    (none yet)")
+
+print("  Conventions:")
+if conventions:
+    for row in conventions:
+        print(f"    - {trunc(row[0])}{fmt_score(row[1])}")
+else:
+    print("    (none yet)")
+
+tech_label = ", ".join(sorted(tech_tags)) if tech_tags else "no active stories"
+print(f"  Tech-relevant ({tech_label}):")
+if tech_memories:
+    for row in tech_memories:
+        print(f"    - {trunc(row[0])}{fmt_score(row[1])}")
+else:
+    print("    (none yet)")
+
+print("=== END MEMORY BRIEFING ===")
+MEMBRIEFEOF
+  fi
+
   fi
 fi
 

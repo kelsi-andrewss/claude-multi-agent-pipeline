@@ -60,6 +60,8 @@ High-signal prompts encode what worked and what didn't. After significant work, 
   **Prior Attempts That Failed**: (for bugs: what didn't work; otherwise: N/A)
 The bar is "would this help a future session solve a similar problem?" Skip routine exchanges.
 
+After appending a key prompt entry, also store to OpenMemory: `openmemory_store(content="<title>: <why-it-worked, 1-2 sentences>", tags=["prompt-pattern", "<category>"], user_id="global")`. This enables semantic recall of effective prompt patterns across projects.
+
 ## Behavioral learning
 These files track patterns across sessions:
 - `~/.claude/disagreements.md` — overrides log (appended when I override a strong position)

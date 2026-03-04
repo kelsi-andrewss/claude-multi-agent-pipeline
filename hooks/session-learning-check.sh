@@ -28,6 +28,22 @@ OUTCOMES_CHANGED=false
 [[ "$CURRENT_DISAGREE" != "$DISAGREE_MTIME" ]] && DISAGREE_CHANGED=true
 [[ "$CURRENT_OUTCOMES" != "$OUTCOMES_MTIME" ]] && OUTCOMES_CHANGED=true
 
+# Check if session-handoff.md was updated this session
+SESSION_START_FILE="/tmp/session-start-${SESSION_ID}"
+if [[ -f "$SESSION_START_FILE" ]]; then
+  SESSION_START=$(cat "$SESSION_START_FILE")
+  HANDOFF_FILE="$HOME/.claude/session-handoff.md"
+  if [[ -f "$HANDOFF_FILE" ]]; then
+    HANDOFF_MTIME=$(mtime "$HANDOFF_FILE")
+    if [[ "$HANDOFF_MTIME" -lt "$SESSION_START" ]]; then
+      echo "session-handoff.md not updated this session — session debrief may have been skipped."
+    fi
+  else
+    echo "session-handoff.md not updated this session — session debrief may have been skipped."
+  fi
+  rm -f "$SESSION_START_FILE"
+fi
+
 if [[ "$DISAGREE_CHANGED" == true && "$OUTCOMES_CHANGED" == false ]]; then
   echo "disagreements.md modified — outcomes.md unchanged"
   echo "→ Log an outcome for this session's disagreement(s) next session."

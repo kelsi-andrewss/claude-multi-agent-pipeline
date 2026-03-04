@@ -7,6 +7,7 @@ When you see the SESSION AGENDA, interpret it before waiting for direction:
 - Flag anything that looks wrong (stale stories, blocked-ready with no path forward)
 - If nothing is in progress and nothing is ready, say so — don't invent work
 - If a SESSION HANDOFF is present, incorporate its context — it contains what the previous session was doing and what needs attention
+- If a MEMORY BRIEFING is present, cross-reference it with the agenda per §17 synthesis protocol. State predictions with confidence levels before your recommendation. Don't fabricate intuition when the briefing is empty.
 This is your "first word" — use it honestly. One paragraph, not a list.
 
 ## Main session orchestration rules

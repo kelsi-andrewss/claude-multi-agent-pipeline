@@ -208,6 +208,13 @@ Call `pm_update_epic(epic_id, auto_close=True)`.
 Determine outcome metadata:
 - `agent`: from `pm_get_story(story_id)` agent field
 - `model`: infer from coder launch context this session (haiku/sonnet/opus). If unknown, "unknown".
+- `file_count`: from `pm_get_story(story_id)`, parse the `write_files` JSON array and count elements.
+  If `write_files` is null or empty, set to "unknown".
+- `complexity_bucket`: derived from `file_count`:
+  - 1-2 → "small"
+  - 3-5 → "medium"
+  - 6+ → "large"
+  - If file_count is "unknown" → "unknown"
 - `cycle_time`: compute from epics.db — time between story state entering `in-progress` and
   current timestamp. Format as hours (e.g., "2.1h"). If timestamps unavailable, "unknown".
 - `coder_effort`: read `/tmp/coder-effort-<story_id>.json` (written by run-stories Step 5 on
@@ -233,6 +240,8 @@ Append to `~/.claude/outcomes.md`:
 **Coder effort**: [coder_effort]
 **Skills used**: [skills_list]
 **Friction events**: [friction_summary]
+**File count**: [file_count]
+**Complexity**: [complexity_bucket]
 **Memory attributed**: [memory_list]
 **What worked**: [brief — infer from merge process: clean execution, or note if escalation/restart occurred]
 **What failed**: [brief — "nothing" or summarize any coder failures/restarts that preceded the merge]

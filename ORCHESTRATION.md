@@ -161,6 +161,14 @@ Every coder prompt must include:
   Do NOT edit files outside this worktree.
   ```
 
+**Memory context (optional)**: When memories from OpenMemory influenced decisions during plan critique (§6) or model selection (§2), include a `## Memory context` section in the plan file:
+```markdown
+## Memory context
+- "[memory content, truncated]" (score: X) → [how it influenced this plan]
+- "[memory content]" (score: X) → [adjustment made because of this memory]
+```
+This creates a traceable link between memory and outcome for debrief reinforcement (§17).
+
 **Conflict check**: Before launching, verify no in-progress story shares write targets. Overlap → keep in `ready`, notify user.
 
 **Size ceiling**: >5 write-target files or >200 lines estimated → split story before running.
@@ -241,6 +249,13 @@ Restart is distinct from escalation. Escalation says "the coder wasn't capable e
 Keep it under 10 lines. Overwrite any existing handoff file.
 
 Additionally, store a session summary to OpenMemory (episodic sector) before `/clear`. This provides historical context beyond the ephemeral `session-handoff.md`.
+
+**Debrief template** (execute before `/clear`):
+1. Write `session-handoff.md` per above.
+2. `openmemory_store(content="Session [date]: Completed [stories]. Skills: [skills]. Friction: [count] events ([categories]). Key: [1-sentence takeaway].", tags=["session-summary"], user_id="proj:dotclaude")`
+3. For each completed story with a plan file containing `## Memory context`: evaluate attributed memories against outcomes (see §17 Debrief reinforcement).
+4. For friction events that occurred WITHOUT a memory predicting them: `openmemory_store(content="[observation from friction]", tags=["tool-learning"], user_id="global")`
+5. Then `/clear`.
 
 **Clearing prompt**: "Context checkpoint reached [reason]. Run `/clear` to reset. All state is in `epics.db`."
 
@@ -434,20 +449,115 @@ CLAUDE.md, ORCHESTRATION.md, behavioral-prefs.md, session-handoff.md — loaded 
 ### Lazy layer (OpenMemory)
 Tool/model learnings, project conventions, session summaries, decision shadows. Queried via MCP tools at specific integration points.
 
-### When to query
-- **Plan critique (§6):** Before writing plan file — query for learnings about the story's tech stack and file types. Scope: project + global.
-- **Model selection (§2):** When assigning coder model — query for tool learnings. Scope: global.
-- **Coder prompts (§8):** After pitfalls from pm_list_patterns — query for unformalized observations. Scope: project.
-- **Session start:** After interpreting SESSION AGENDA, one query if stories reference specific tech. Not per-story.
+### When to query (concrete templates)
 
-### When to store
-- **After merge (§9 step 5.5):** Episodic session outcome. Scope: project.
-- **After coder failure/escalation:** Procedural tool learning. Scope: global.
-- **After pm_add_decision:** Shadow the decision for semantic search. Scope: project.
-- **Before /clear:** Episodic session summary. Include: stories completed, skills invoked (from skill-telemetry.jsonl), friction events and patterns, memories that influenced decisions. Scope: project.
-- **After key prompt logging:** Procedural prompt pattern. Scope: global.
-- **When discovering a convention** during plan critique: Semantic. Scope: project.
-- **After friction event (automatic):** Store to OpenMemory if pattern promotion threshold met (3+ recurrences of the same category for the same root cause). Scope: project for story-specific, global for model/tool learnings.
+**Plan critique (§6)** — before writing plan file:
+```
+openmemory_query(query="[story tech stack] [write-target file types] learnings failures", user_id="proj:<project>")
+openmemory_query(query="[story tech stack] model capability", user_id="global")
+```
+Use results to check for known pitfalls. Skip if story has no write targets yet.
+
+**Model selection (§2)** — when assigning coder model:
+```
+openmemory_query(query="[model name] [file type] failure success", user_id="global")
+```
+If results show consistent failures → escalate preemptively. Skip if no in-progress stories.
+
+**Coder prompts (§8)** — after pitfalls from pm_list_patterns:
+```
+openmemory_query(query="[write-target file names] [tech stack] convention gotcha", user_id="proj:<project>")
+```
+Inject relevant results as text into coder prompt. Skip if query returns nothing.
+
+**Session start** — after interpreting SESSION AGENDA (only when Memory Briefing is present):
+The Memory Briefing (from SessionStart hook) pre-fetches key memories. No additional query needed unless a specific story references tech not covered by the briefing's EXT_MAP. In that case:
+```
+openmemory_query(query="[specific tech] learnings conventions", user_id="global")
+```
+
+### When to store (concrete templates)
+
+**After merge (§9 step 5.5):**
+```
+openmemory_store(content="Merged [story-id]: [title]. Agent: [agent], Model: [model]. Friction: [count]. Key: [1-sentence observation].", tags=["session-summary"], user_id="proj:<project>")
+```
+
+**After coder failure/escalation:**
+```
+openmemory_store(content="[Model] failed on [task type]: [what went wrong, 1 sentence].", tags=["tool-learning"], user_id="global")
+```
+
+**After pm_add_decision:**
+```
+openmemory_store(content="Decision [id]: [summary]", tags=["decision", "<decision-id>"], user_id="proj:<project>")
+```
+
+**Before /clear** (see §10 debrief template):
+```
+openmemory_store(content="Session [date]: Completed [stories]. Skills: [skills]. Friction: [count] ([categories]). Key: [takeaway].", tags=["session-summary"], user_id="proj:<project>")
+```
+
+**After key prompt logging:**
+```
+openmemory_store(content="[title]: [why-it-worked, 1-2 sentences]", tags=["prompt-pattern", "<category>"], user_id="global")
+```
+
+**When discovering a convention** during plan critique:
+```
+openmemory_store(content="Convention: [what the pattern is and where it applies]", tags=["convention"], user_id="proj:<project>")
+```
+
+**After friction event (automatic)** — only when pattern promotion threshold met (3+ recurrences):
+```
+openmemory_store(content="[Pattern]: [root cause] → [consequence]. Seen [N] times.", tags=["tool-learning"], user_id="global")
+```
+
+### Session-start synthesis
+
+When `=== MEMORY BRIEFING ===` is present in the session context, before stating the session recommendation:
+
+1. **Cross-reference** each in-progress/ready story against the briefing:
+   - Tool learnings mentioning the story's tech stack → model selection adjustments
+   - Conventions relevant to the story's write targets → plan constraints
+   - Session summaries showing recent friction in related work → predictive warnings
+   - Prompt patterns that worked for similar work → note for plan critique
+
+2. **Produce predictions** with confidence levels:
+   ```
+   Prediction: [what might happen] because [memory evidence].
+   Confidence: high|medium|low ([N] supporting memories, score [X]).
+   Adjustment: [what to do differently].
+   ```
+   - **High:** 3+ confirming memories OR 1 memory with `feedback_score >= 2.0`
+   - **Medium:** 1-2 memories with `feedback_score > 0`
+   - **Low:** inference from memory content without reinforcement history
+   - Predictions are starting positions. Hold until new information changes the assessment.
+
+3. **State adjustments concretely:** Not "be careful with React" but "escalate to Sonnet preemptively because Haiku has failed on this file type 3 times."
+
+When the briefing shows `(none yet)` across all categories, say so: "No accumulated context — this session starts from scratch." Don't fabricate intuition.
+
+### Debrief reinforcement
+
+At debrief (before `/clear`), for each completed story:
+
+1. Read the plan file's `## Memory context` section (if present).
+2. For each attributed memory, evaluate against the outcome:
+   - **Validated** — memory predicted a risk that materialized or was avoided because of the adjustment → `openmemory_reinforce(id="<memory-id>")`
+   - **Contradicted** — memory predicted a risk, opposite happened for structural reasons → `openmemory_store(content="Correction: [original claim] was wrong because [reason]", tags=["tool-learning"], user_id="global")`
+   - **Irrelevant** — memory was noted but didn't influence anything → no action (natural decay handles it)
+3. For friction events that occurred WITHOUT a memory predicting them:
+   - These are the most important — they're the new learnings
+   - `openmemory_store(content="[observation from friction]", tags=["tool-learning"], user_id="global")`
+
+**The compounding loop:**
+```
+Session N:   no memories → cold start → friction → friction stored as memory
+Session N+1: memory prefetched → prediction made → adjustment → less friction → memory reinforced
+Session N+2: reinforced memory surfaces higher → confident prediction → prevention → reinforced again
+```
+Natural decay handles the other direction: memories never relevant lose salience and stop appearing in briefings.
 
 ### Store failures
 If openmemory_store fails, append the entry to `~/.claude/memory-queue.md` instead.
@@ -543,8 +653,34 @@ When the same friction category recurs 3+ times for the same root cause:
 1. Store as a tool-learning in OpenMemory (procedural sector, scoped appropriately)
 2. Append to `tool-learnings.md`
 3. This feeds model selection (§2), plan critique (§6), and coder prompts (§8)
-4. If the pattern suggests a skill is needed, note it. If the pattern occurs inside
-   an existing skill, the skill may need redesign — not just a retry.
+4. If the pattern suggests a skill is needed, run the pre-creation gate (below).
+   If the pattern occurs inside an existing skill, the skill may need redesign —
+   not just a retry.
+
+### Pre-creation gate (before writing any SKILL.md)
+
+Five questions, answered before creation begins. The gate is a judgment exercise, not a
+form — answers can be terse. The point is forcing "should this exist?" before "how should
+this work?"
+
+1. **What friction pattern does this eliminate?** — Cite 3+ friction-log entries with the
+   same root cause. No citations → hard stop, threshold not met.
+2. **What's the current workaround, and what breaks about it?** — If "nothing, it's fine
+   but verbose" → the skill is overhead. Consider a CLAUDE.md constraint, hook, or
+   `pm_add_pattern` instead.
+3. **Could a simpler mechanism solve it?** — Evaluate in order: CLAUDE.md instruction →
+   hook → `pm_add_pattern` → skill. Pick the lightest that works.
+4. **What ongoing cost does this add?** — Cognitive (must remember to invoke), maintenance
+   (cross-references to keep current), complexity (new data flows or failure modes). One
+   sentence each.
+5. **What condition would make this worth retiring?** — State upfront; record in
+   skill-changelog.md alongside the `created` entry.
+
+**Gate outcomes:**
+- All five answered + lighter alternatives ruled out → create skill, log to
+  skill-changelog.md with retirement criterion in description.
+- Question 3 yields a simpler mechanism → use that instead, no skill created.
+- Question 1 can't cite 3+ friction entries → don't create, threshold not met.
 
 ### Memory integration
 
