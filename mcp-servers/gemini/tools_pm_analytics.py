@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+from format_response import fmt_cycle_time, fmt_throughput, fmt_wip
 from tools_pm_helpers import _db_op
 
 
@@ -58,7 +59,7 @@ def register(mcp):
                     })
 
             avg_hours = round(total_hours / len(items), 1) if items else 0
-            return json.dumps({
+            return fmt_cycle_time({
                 "metric": "cycle_time",
                 "stories": items,
                 "count": len(items),
@@ -108,7 +109,7 @@ def register(mcp):
             total = sum(r["completed"] for r in rows)
             avg = round(total / len(items), 1) if items else 0
 
-            return json.dumps({
+            return fmt_throughput({
                 "metric": "throughput",
                 "period_type": period,
                 "data": items,
@@ -197,7 +198,7 @@ def register(mcp):
                 elif recent < older * 0.7:
                     trend = "declining"
 
-            return json.dumps({
+            return fmt_wip({
                 "metric": "health",
                 "wip": {
                     "total_active": sum(r["cnt"] for r in by_state),

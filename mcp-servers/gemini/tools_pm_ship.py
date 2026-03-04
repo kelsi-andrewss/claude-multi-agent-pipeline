@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 
+from format_response import fmt_ship
 from tools_pm_helpers import (
     _add_task_to_story,
     _db_op,
@@ -45,7 +46,7 @@ def register(mcp):
                     "SELECT data FROM pending_proposals WHERE id = ?", (proposal_id,)
                 ).fetchone()
                 if not row:
-                    return json.dumps({"error": f"proposal_id '{proposal_id}' not found or already used."})
+                    return fmt_ship({"error": f"proposal_id '{proposal_id}' not found or already used."})
                 proposal = json.loads(row["data"])
                 conn.execute("DELETE FROM pending_proposals WHERE id = ?", (proposal_id,))
                 return _commit_stories(conn, proposal)
@@ -54,17 +55,17 @@ def register(mcp):
             if epic_id and not items:
                 epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
                 if not epic:
-                    return json.dumps({"error": f"Epic '{epic_id}' not found."})
+                    return fmt_ship({"error": f"Epic '{epic_id}' not found."})
 
                 draft_stories = conn.execute(
                     "SELECT * FROM stories WHERE epic_id = ? AND state IN ('draft','ready') AND archived = 0",
                     (epic_id,)
                 ).fetchall()
                 if not draft_stories:
-                    return json.dumps({"error": f"No draft/ready stories found in epic '{epic_id}'."})
+                    return fmt_ship({"error": f"No draft/ready stories found in epic '{epic_id}'."})
 
                 story_list = [_story_to_dict(s) for s in draft_stories]
-                return json.dumps({
+                return fmt_ship({
                     "epic_id": epic_id,
                     "epic_title": dict(epic)["title"],
                     "stories": [
@@ -74,13 +75,13 @@ def register(mcp):
                 })
 
             if not items:
-                return json.dumps({"error": "Provide items to plan, or epic_id to resume an existing epic."})
+                return fmt_ship({"error": "Provide items to plan, or epic_id to resume an existing epic."})
 
             # --- Step 1: Create epic ---
             if epic_id:
                 epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
                 if not epic:
-                    return json.dumps({"error": f"Epic '{epic_id}' not found."})
+                    return fmt_ship({"error": f"Epic '{epic_id}' not found."})
                 epic_title = dict(epic)["title"]
             else:
                 epic_title = title or items[0]
@@ -118,7 +119,7 @@ def register(mcp):
                     "INSERT INTO pending_proposals (id, data) VALUES (?, ?)",
                     (pid, json.dumps(proposal))
                 )
-                return json.dumps({
+                return fmt_ship({
                     "phase": "proposal",
                     "proposal_id": pid,
                     "epic_id": epic_id,
@@ -151,7 +152,7 @@ def register(mcp):
             if epic_id == "epic-backlog":
                 _ensure_backlog_epic(conn)
             else:
-                return json.dumps({"error": f"Epic '{epic_id}' not found."})
+                return fmt_ship({"error": f"Epic '{epic_id}' not found."})
 
         created_stories = []
         for s in proposed_stories:
@@ -176,7 +177,7 @@ def register(mcp):
                 "tasks": s.get("tasks", []),
             })
 
-        return json.dumps({
+        return fmt_ship({
             "epic_id": epic_id,
             "epic_title": epic_title,
             "stories": created_stories,

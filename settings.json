@@ -162,6 +162,10 @@
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
+  },
   "enabledPlugins": {
     "ralph-loop@claude-plugins-official": true
   },

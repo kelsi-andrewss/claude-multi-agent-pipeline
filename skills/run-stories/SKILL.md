@@ -82,17 +82,9 @@ Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each depende
 
 ## Step 3: Ensure dev branches exist
 
-First, ensure the `dev` integration branch exists:
-
-```bash
-git fetch origin
-git show-ref --verify --quiet refs/heads/dev || git branch dev origin/main
-git push -u origin dev 2>/dev/null || true
-```
-
 For each unique epic referenced by the stories being run:
 
-1. Call `pm_dev_branch(epic_id)` → the response is the branch name (e.g., `dev/my-feature`). Read the detail file for `epic_slug` if needed.
+1. Call `pm_dev_branch(epic_id)` → the response is the branch name (e.g., `dev-my-feature`). Read the detail file for `epic_slug` if needed.
 2. If `epic_id` is `"epic-backlog"`, `dev-branch = "dev"` — skip branch creation.
 3. Otherwise, `dev-branch` is the branch name from the response. Run these git commands (in the project root):
    ```bash
@@ -115,7 +107,7 @@ Launch all stories in the batch in **a single message** as `general-purpose` age
 Compute for each story:
 - `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars, then append `-<NNN>` where NNN is the numeric part of the story ID (e.g., story-352 → `-352`)
 - `epic-slug`: the `epic_slug` from the `pm_dev_branch` detail file in Step 3
-- `story-branch`: `<epic-slug>/<story-slug>`
+- `story-branch`: `<epic-slug>--<story-slug>`
 - `worktree-path`: `<project-root>/.claude/worktrees/story/<story-slug>`
 - `dev-branch`: from the epic mapping computed in step 3
 - `agent-approach`: based on the `agent` field:
@@ -163,8 +155,8 @@ Do not edit any protected files. <If protected-files.md exists: "Protected files
    ```bash
    cd <project-root>
    git fetch origin <dev-branch>
-   git show-ref --verify --quiet refs/heads/<story-branch> || git branch <story-branch> <dev-branch>
-   git worktree list | grep -q '<worktree-path>' || git worktree add <worktree-path> <story-branch>
+   git show-ref --verify --quiet "refs/heads/<story-branch>" || git branch "<story-branch>" <dev-branch>
+   git worktree list | grep -q '<worktree-path>' || git worktree add <worktree-path> "<story-branch>"
    ```
 
 2. Verify worktree branch:
@@ -283,12 +275,12 @@ For each story that passes validation (diff gate + testing), invoke `/merge-work
 Print a final summary:
 
 ```
-Run complete.  Dev branch: dev/my-feature
+Run complete.  Dev branch: dev-my-feature
 
-story-001  batch 0   my-feature/fix-auth-flow      DONE    abc1234   tests: pass
-story-003  batch 0   my-feature/update-dashboard   DONE    def5678   tests: skipped (no infra)
-story-002  batch 1   my-feature/refactor-handlers  DONE    ghi9012   tests: pass  (conflicted with story-001 on src/handlers/foo.js)
-story-005  batch 0   my-feature/add-search         BLOCKED plan file references missing utility
+story-001  batch 0   my-feature--fix-auth-flow      DONE    abc1234   tests: pass
+story-003  batch 0   my-feature--update-dashboard   DONE    def5678   tests: skipped (no infra)
+story-002  batch 1   my-feature--refactor-handlers  DONE    ghi9012   tests: pass  (conflicted with story-001 on src/handlers/foo.js)
+story-005  batch 0   my-feature--add-search         BLOCKED plan file references missing utility
 
 Skipped (validation):
   story-006: state is 'done' — already complete

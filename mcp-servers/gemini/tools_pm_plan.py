@@ -7,6 +7,13 @@ from datetime import datetime
 from pathlib import Path
 
 from constants import MAX_CODE_BYTES
+from format_response import (
+    fmt_check_conflicts,
+    fmt_critique,
+    fmt_plan_bulk,
+    fmt_plan_stories,
+    fmt_plan_story,
+)
 from gemini_client import _discover_files, _gemini, _load_audit_context, _read_files_within_budget
 from tools_pm_helpers import _add_task_to_story, _apply_plan_to_story, _build_plan_prompt, _db_op, _set_story_deps, _story_to_dict
 
@@ -31,7 +38,7 @@ def register(mcp):
         with _db_op() as conn:
             story = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
             if not story:
-                return json.dumps({"error": f"Story '{story_id}' not found."})
+                return fmt_plan_story({"error": f"Story '{story_id}' not found."})
             sd = _story_to_dict(story)
 
             audit_context = _load_audit_context(root=_root)
@@ -62,7 +69,7 @@ def register(mcp):
             try:
                 plan_data = json.loads(raw)
             except (json.JSONDecodeError, ValueError):
-                return json.dumps({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
+                return fmt_plan_story({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
 
             for task_title in plan_data.get("tasks", []):
                 _add_task_to_story(conn, story_id, task_title)
@@ -73,7 +80,7 @@ def register(mcp):
             depends_on = plan_data.get("depends_on", [])
             if depends_on:
                 _set_story_deps(conn, story_id, depends_on)
-            return json.dumps({
+            return fmt_plan_story({
                 "mode": "story",
                 "story_id": story_id,
                 "title": sd["title"],
@@ -112,18 +119,18 @@ def register(mcp):
             if not story_ids and epic_id:
                 epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
                 if not epic:
-                    return json.dumps({"error": f"Epic '{epic_id}' not found."})
+                    return fmt_plan_stories({"error": f"Epic '{epic_id}' not found."})
 
                 draft_stories = conn.execute(
                     "SELECT * FROM stories WHERE epic_id = ? AND state IN ('draft','ready') AND archived = 0",
                     (epic_id,)
                 ).fetchall()
                 if not draft_stories:
-                    return json.dumps({"mode": "epic", "epic_id": epic_id, "message": "No draft/ready stories found in this epic."})
+                    return fmt_plan_stories({"mode": "epic", "epic_id": epic_id, "message": "No draft/ready stories found in this epic."})
                 story_ids = [_story_to_dict(s)["id"] for s in draft_stories]
 
             if not story_ids:
-                return json.dumps({"error": "Provide story_ids or epic_id."})
+                return fmt_plan_stories({"error": "Provide story_ids or epic_id."})
 
             audit_context = _load_audit_context(root=_root)
             if not per_story_paths:
@@ -146,7 +153,7 @@ def register(mcp):
                 story_list.append(sd)
 
             if not story_list:
-                return json.dumps({"error": "No plannable stories found.", "details": errors})
+                return fmt_plan_stories({"error": "No plannable stories found.", "details": errors})
 
             # Build epic context if available
             epic_prefix = ""
@@ -185,7 +192,7 @@ def register(mcp):
                         if isinstance(plan_data, list):
                             plan_data = plan_data[0]
                     except (json.JSONDecodeError, ValueError):
-                        return json.dumps({"error": f"Gemini returned malformed JSON for {sid}.", "raw": raw[:2000]})
+                        return fmt_plan_stories({"error": f"Gemini returned malformed JSON for {sid}.", "raw": raw[:2000]})
                     plans.append(plan_data)
             else:
                 prompt = _build_plan_prompt(subject, audit_context, code_content, user_context=context)
@@ -195,7 +202,7 @@ def register(mcp):
                     if not isinstance(plans, list):
                         plans = [plans]
                 except (json.JSONDecodeError, ValueError):
-                    return json.dumps({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
+                    return fmt_plan_stories({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
 
             plans_by_id = {}
             for plan_data in plans:
@@ -217,7 +224,7 @@ def register(mcp):
                 result["epic_id"] = epic_id
             if errors:
                 result["warnings"] = errors
-            return json.dumps(result)
+            return fmt_plan_stories(result)
 
     @mcp.tool()
     async def pm_plan_bulk(
@@ -278,11 +285,11 @@ def register(mcp):
             try:
                 roadmap = json.loads(raw)
             except (json.JSONDecodeError, ValueError):
-                return json.dumps({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
+                return fmt_plan_bulk({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
 
             roadmap["generated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
             roadmap["mode"] = "bulk"
-            return json.dumps(roadmap)
+            return fmt_plan_bulk(roadmap)
 
     @mcp.tool()
     async def pm_critique(
@@ -399,16 +406,16 @@ def register(mcp):
             raw = await _gemini(full_prompt, model=model, system_instruction=critique_system)
 
             if raw.startswith("[gemini error") or raw.startswith("[gemini parse error"):
-                return json.dumps({"error": raw, "story_ids": story_ids})
+                return fmt_critique({"error": raw, "story_ids": story_ids})
 
             try:
                 findings = json.loads(raw)
                 if not isinstance(findings, list):
                     findings = [findings]
             except json.JSONDecodeError:
-                return json.dumps({"error": "Gemini returned malformed JSON.", "raw": raw[:2000], "story_ids": story_ids})
+                return fmt_critique({"error": "Gemini returned malformed JSON.", "raw": raw[:2000], "story_ids": story_ids})
 
-            return json.dumps({
+            return fmt_critique({
                 "story_ids": story_ids,
                 "findings": findings,
                 "finding_count": len(findings),
@@ -453,7 +460,7 @@ def register(mcp):
             safe_parallel = [sid for sid in story_ids if sid in stories_data and sid not in conflicting_ids]
             sequential = [sid for sid in story_ids if sid in conflicting_ids]
 
-            return json.dumps({
+            return fmt_check_conflicts({
                 "conflicts": conflicts,
                 "safe_parallel": safe_parallel,
                 "sequential": sequential,

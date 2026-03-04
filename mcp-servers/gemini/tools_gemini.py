@@ -152,7 +152,8 @@ def register(mcp):
         )
 
         full_prompt = "\n\n".join(prompt_parts)
-        return await _gemini(full_prompt, system_instruction=analyze_system)
+        from format_response import fmt_analyze
+        return fmt_analyze(await _gemini(full_prompt, system_instruction=analyze_system))
 
     return {
         "gemini_chat": gemini_chat,

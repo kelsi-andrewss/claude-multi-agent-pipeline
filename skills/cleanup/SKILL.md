@@ -97,12 +97,12 @@ For each `epic-NNN` in the parsed epic IDs:
 # Fetch latest and prune deleted remote refs
 git fetch origin --prune
 
-# Find dev/* remote branches fully merged into origin/dev
-git branch -r --merged origin/dev | grep 'origin/dev/' | grep -v 'origin/dev$'
+# Find dev-* remote branches fully merged into origin/dev
+git branch -r --merged origin/dev | grep 'origin/dev-' | grep -v 'origin/dev$'
 ```
 
 For each merged remote branch returned:
-- Strip `origin/` prefix → local name (e.g., `dev/my-feature`)
+- Strip `origin/` prefix → local name (e.g., `dev-my-feature`)
 - Delete remote: `git push origin --delete <local-name> 2>/dev/null || true`
 - Delete local if it exists: `git branch -D <local-name> 2>/dev/null || true`
 - Add `<local-name>` to `deleted_branches`.
@@ -131,7 +131,7 @@ Run `pm_cleanup(confirmed=False)` for a dry-run summary.
 Then run:
 ```bash
 git fetch origin --prune
-git branch -r --merged origin/dev | grep 'origin/dev/' | grep -v 'origin/dev$'
+git branch -r --merged origin/dev | grep 'origin/dev-' | grep -v 'origin/dev$'
 git worktree list --porcelain
 ```
 

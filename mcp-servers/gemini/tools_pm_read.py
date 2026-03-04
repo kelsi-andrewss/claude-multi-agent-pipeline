@@ -7,6 +7,15 @@ import re
 from datetime import datetime, timedelta
 
 from constants import AT_RISK_DAYS_THRESHOLD, AT_RISK_PCT_THRESHOLD, EPIC_STATES, STORY_STATES
+from format_response import (
+    fmt_dev_branch,
+    fmt_get_epic,
+    fmt_get_story,
+    fmt_list_stories,
+    fmt_roadmap,
+    fmt_search,
+    fmt_view,
+)
 from tools_pm_helpers import (
     _db_op,
     _epic_to_dict,
@@ -45,7 +54,7 @@ def register(mcp):
                 story_list.append(sd)
 
             ed["stories"] = story_list
-            return json.dumps(ed)
+            return fmt_get_epic(ed)
 
     @mcp.tool()
     async def pm_get_story(story_id: str) -> str:
@@ -75,7 +84,7 @@ def register(mcp):
             if blocked_by_me:
                 sd["blocks"] = [{"id": r["id"], "title": r["title"], "state": r["state"]} for r in blocked_by_me]
 
-            return json.dumps(sd)
+            return fmt_get_story(sd)
 
     @mcp.tool()
     async def pm_list_stories(
@@ -118,7 +127,7 @@ def register(mcp):
                 f"SELECT * FROM stories WHERE {where} ORDER BY COALESCE(order_idx, 2147483647), id", params
             ).fetchall()
 
-            return json.dumps([_story_to_dict(s) for s in stories])
+            return fmt_list_stories([_story_to_dict(s) for s in stories])
 
     @mcp.tool()
     async def pm_search(query: str, scope: str | None = None) -> str:
@@ -158,7 +167,7 @@ def register(mcp):
                 for t in tasks:
                     results.append({"type": "task", **dict(t)})
 
-            return json.dumps(results)
+            return fmt_search(results)
 
     @mcp.tool()
     async def pm_view(
@@ -183,7 +192,7 @@ def register(mcp):
                     "SELECT * FROM epics WHERE id = ?", (epic_id,)
                 ).fetchall()
                 if not epic_rows:
-                    return json.dumps({"error": f"Epic '{epic_id}' not found."})
+                    return fmt_view({"error": f"Epic '{epic_id}' not found."})
             else:
                 epic_rows = conn.execute(
                     "SELECT * FROM epics WHERE state = 'active'"
@@ -220,7 +229,7 @@ def register(mcp):
                 epics_out.append(epic_entry)
 
             if detail == "summary":
-                return json.dumps({
+                return fmt_view({
                     "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
                     "scope": epic_id or "all",
                     "epics": epics_out,
@@ -329,7 +338,7 @@ def register(mcp):
                         pass
                 result["avg_cycle_hours"] = round(total_hours / count, 1) if count else 0
 
-            return json.dumps(result)
+            return fmt_view(result)
 
     @mcp.tool()
     async def pm_roadmap(
@@ -424,7 +433,7 @@ def register(mcp):
                 else:
                     unordered.append(entry)
 
-            return json.dumps({
+            return fmt_roadmap({
                 "milestones": milestones,
                 "unordered": unordered,
                 "summary": {
@@ -443,14 +452,14 @@ def register(mcp):
             epic_id: The epic ID (e.g., 'epic-022').
         """
         if epic_id == "epic-backlog":
-            return json.dumps({"dev_branch": "dev", "epic_slug": "backlog"})
+            return fmt_dev_branch({"dev_branch": "dev", "epic_slug": "backlog"})
 
         with _db_op(readonly=True) as conn:
             epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
             if not epic:
-                return json.dumps({"error": f"Epic '{epic_id}' not found."})
+                return fmt_dev_branch({"error": f"Epic '{epic_id}' not found."})
             title = epic["title"]
             slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:40]
             if not slug:
                 slug = epic_id
-            return json.dumps({"dev_branch": f"dev/{slug}", "epic_title": title, "epic_slug": slug})
+            return fmt_dev_branch({"dev_branch": f"dev-{slug}", "epic_title": title, "epic_slug": slug})

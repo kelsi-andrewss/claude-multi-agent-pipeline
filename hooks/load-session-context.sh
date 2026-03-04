@@ -60,9 +60,15 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
   SNAPSHOT="/tmp/session-mtimes-${SESSION_ID}"
   DISAGREE_MTIME=$(_mtime "$HOME/.claude/disagreements.md")
   OUTCOMES_MTIME=$(_mtime "$HOME/.claude/outcomes.md")
+  CORRECTIONS_MTIME=$(_mtime "$HOME/.claude/corrections.md")
+  FRICTION_MTIME=$(_mtime "$HOME/.claude/friction-log.md")
+  HANDOFF_MTIME=$(_mtime "$HOME/.claude/session-handoff.md")
   cat > "$SNAPSHOT" <<SNAP
 DISAGREE_MTIME=$DISAGREE_MTIME
 OUTCOMES_MTIME=$OUTCOMES_MTIME
+CORRECTIONS_MTIME=$CORRECTIONS_MTIME
+FRICTION_MTIME=$FRICTION_MTIME
+HANDOFF_MTIME=$HANDOFF_MTIME
 SNAP
 
   # Session agenda + stale detection + distillation trigger (single Python block)
@@ -371,6 +377,109 @@ print("=== END MEMORY BRIEFING ===")
 MEMBRIEFEOF
   fi
 
+  # Memory queue drain directive
+  QUEUE_FILE="$HOME/.claude/memory-queue.md"
+  if [[ -f "$QUEUE_FILE" ]]; then
+    # Count non-empty, non-header, non-format lines (actual queue items)
+    QUEUE_ITEMS=$(grep -c '^\- openmemory_store\|^## [0-9]' "$QUEUE_FILE" 2>/dev/null || echo "0")
+    if [[ "$QUEUE_ITEMS" -gt 0 ]]; then
+      echo ""
+      echo "=== MEMORY QUEUE: DRAIN REQUIRED ==="
+      echo "  $QUEUE_ITEMS items pending. Drain before starting work."
+      echo "=== END MEMORY QUEUE ==="
+    fi
+  fi
+
+  fi
+
+  # Unprocessed sessions prompt — check session-records.md for recent entries with no artifacts
+  RECORDS_FILE="$HOME/.claude/session-records.md"
+  CORRECTIONS_FILE="$HOME/.claude/corrections.md"
+  if [[ -f "$RECORDS_FILE" ]]; then
+  python3 - "$RECORDS_FILE" "$CORRECTIONS_FILE" <<'UNPROCESSEDEOF'
+import os, re, sys
+from datetime import datetime, timezone, timedelta
+
+records_file = sys.argv[1]
+corrections_file = sys.argv[2] if len(sys.argv) > 2 else ""
+
+now = datetime.now(timezone.utc)
+cutoff = now - timedelta(hours=72)
+
+try:
+    with open(records_file) as f:
+        content = f.read()
+except Exception:
+    sys.exit(0)
+
+# Parse session records
+entries = []
+current = None
+for line in content.splitlines():
+    header = re.match(r'^## (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) — (.+)', line)
+    if header:
+        if current:
+            entries.append(current)
+        current = {"date": header.group(1), "summary": header.group(2), "lines": [], "artifacts": ""}
+    elif current:
+        current["lines"].append(line)
+        if line.startswith("Artifacts updated:"):
+            current["artifacts"] = line.split(":", 1)[1].strip()
+if current:
+    entries.append(current)
+
+# Filter: last 72h, artifacts = "none"
+unprocessed = []
+for e in entries:
+    try:
+        dt = datetime.strptime(e["date"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+        if dt < cutoff:
+            continue
+    except ValueError:
+        continue
+    if e["artifacts"] == "none":
+        unprocessed.append(e)
+
+if not unprocessed:
+    sys.exit(0)
+
+# Check for AUTO corrections
+auto_count = 0
+if corrections_file and os.path.isfile(corrections_file):
+    try:
+        with open(corrections_file) as f:
+            auto_count = sum(1 for line in f if re.match(r'^## .+ — AUTO', line))
+    except Exception:
+        pass
+
+print("")
+print("=== UNPROCESSED SESSIONS ===")
+for e in unprocessed:
+    corrections_line = ""
+    for line in e["lines"]:
+        if line.startswith("Corrections detected:"):
+            corrections_line = line.split(":", 1)[1].strip()
+    key_lines = []
+    in_keys = False
+    for line in e["lines"]:
+        if line.startswith("Key exchanges:"):
+            in_keys = True
+            continue
+        if in_keys:
+            if line.startswith("  - "):
+                key_lines.append(line.strip()[4:].strip('"')[:60])
+            else:
+                in_keys = False
+    print(f"  [{e['date']}] {e['summary']}")
+    if corrections_line and corrections_line != "0":
+        print(f"    Corrections detected: {corrections_line} (see corrections.md AUTO: entries)")
+    if key_lines:
+        keys = " / ".join(key_lines[:2])
+        print(f"    Key: {keys}")
+if auto_count > 0:
+    print(f"  Review {auto_count} AUTO: correction(s) and verify/refine before starting new work.")
+print("=== END UNPROCESSED SESSIONS ===")
+UNPROCESSEDEOF
   fi
 fi
 

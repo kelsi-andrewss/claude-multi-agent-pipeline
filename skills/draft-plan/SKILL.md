@@ -24,7 +24,7 @@ Before calling Gemini, check each story for fast-path eligibility:
 
 Fast-path stories: skip Gemini entirely. Write their plan files directly in Step 5 using DB metadata only.
 All other stories: call Gemini as usual. Do NOT explore the codebase before Gemini returns its output.
-Gemini is the researcher. You are the critic. Exploration happens only during your post-Gemini critique (§6 of ORCHESTRATION.md).
+Gemini is the researcher. You are the critic. Exploration happens only during your post-Gemini critique. Read `refs/orch-critique-checklist.md` for the full 8-point checklist before writing each plan file.
 
 ---
 

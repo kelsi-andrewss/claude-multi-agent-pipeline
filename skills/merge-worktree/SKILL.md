@@ -16,6 +16,21 @@ args:
 
 User has requested: `/merge-worktree {{args}}`
 
+## Decision rules (from ORCHESTRATION §8)
+
+**NEED_DECISION handling**: If a coder returned NEED_DECISION, the main session picks an option and resumes the coder before merging. Story stays `in-progress`, worktree preserved.
+
+**Escalation**: 2 BLOCKING round-trips → escalate coder to Opus (architect stories only). Log friction: category `escalation`. Opus still BLOCKING → story `blocked`, report to user. Log friction: category `blocked`.
+
+**Restart (plan-level failure)**: If coder failed because the plan was wrong (wrong files, missing utility, wrong scope) — not because the coder was incapable:
+1. Log friction: category `restart`.
+2. Reset worktree: `git -C <worktree> reset --hard HEAD && git -C <worktree> clean -fd`
+3. Write new plan file referencing what failed: "Previous plan assumed X, but Y is actually the case."
+4. Relaunch at same model level (pivot, not escalation).
+5. Max 1 restart per story. Second failure → `blocked`, report.
+
+**Restart vs. escalation**: If coder did exactly what the plan said and it didn't work → restart. If coder couldn't execute a sound plan → escalation.
+
 ---
 
 ## Output policy
@@ -32,7 +47,7 @@ User has requested: `/merge-worktree {{args}}`
 2. Compute canonical `story-branch`:
    a. If `epic_id` is non-null: call `pm_dev_branch(epic_id)` → read the detail file for `epic_slug`
       - `story-slug` = slugify(`title`): lowercase, replace spaces/non-alphanumeric with `-`, collapse consecutive `-`, truncate to 40 chars
-      - `story-branch` = `<epic_slug>/<story-slug>`
+      - `story-branch` = `<epic_slug>--<story-slug>`
    b. If `epic_id` is null or the tool returns an error: `story-branch` = `db_branch` (verbatim)
 3. Run:
    ```bash
@@ -57,14 +72,14 @@ User has requested: `/merge-worktree {{args}}`
    ```bash
    git worktree list --porcelain | awk '/^worktree /{wt=$2} /^branch /{if(wt=="<worktree-path>") print $2}'
    ```
-   Strip the `refs/heads/` prefix to get `story-branch` (e.g., `dev/my-feature-epic/fix-auth-flow`)
+   Strip the `refs/heads/` prefix to get `story-branch` (e.g., `my-feature-epic--fix-auth-flow`)
 5. Try to find the story in the DB: call `pm_list_stories()` across all epics and scan for a `branch` field matching `story-branch`
 6. If a DB match is found: extract `story_id`, `epic_id`, `title`
 7. If no DB match: set `story_id = null`, `epic_id = null`, `title = basename of worktree-path` — proceed git-only (skip pm_update_story at the end)
 
 **At the end of Step 1 you must have:**
 - `worktree-path`: absolute path to the story worktree
-- `story-branch`: e.g., `my-feature-epic/fix-auth-flow`
+- `story-branch`: e.g., `my-feature-epic--fix-auth-flow`
 - `story_id` (may be null)
 - `epic_id` (may be null)
 - `title`: display name for commit message
@@ -81,16 +96,16 @@ User has requested: `/merge-worktree {{args}}`
 
 1. Use the `dev_branch` value from the `pm_dev_branch(epic_id)` response in Step 1 (the one-liner is the branch name).
    - For `epic-backlog`, this is `"dev"`.
-   - For other epics, this is `"dev/<epic_slug>"`.
+   - For other epics, this is `"dev-<epic_slug>"`.
 
 **If `epic_id` is null (git-only mode):**
 
 1. Run:
    ```bash
-   git branch -r | grep 'origin/dev/' | head -5
+   git branch -r | grep 'origin/dev-' | head -5
    ```
-2. Ask the user which dev branch to merge into using `AskUserQuestion`, listing the candidates. If no `dev/` branches exist, stop and report:
-   > "No dev/ branches found. Cannot determine merge target."
+2. Ask the user which dev branch to merge into using `AskUserQuestion`, listing the candidates. If no `dev-` branches exist, stop and report:
+   > "No dev- branches found. Cannot determine merge target."
 
 **Verify the branch exists on origin:**
 
@@ -98,7 +113,7 @@ User has requested: `/merge-worktree {{args}}`
 git fetch origin <dev-branch>
 ```
 
-If this fails (branch not found on origin), try `dev-branch = dev/<epic_id>` (e.g., `dev/epic-007`) as fallback before stopping. If the fallback also fails, stop and report:
+If this fails (branch not found on origin), try `dev-branch = dev-<epic_id>` (e.g., `dev-epic-007`) as fallback before stopping. If the fallback also fails, stop and report:
 > "Dev branch `<dev-branch>` does not exist on origin. Create it first or run `/run-stories` for this epic."
 
 ---

@@ -14,6 +14,15 @@ from constants import (
     VALID_EPIC_TRANSITIONS,
     VALID_STORY_TRANSITIONS,
 )
+from format_response import (
+    fmt_add_task,
+    fmt_create_epic,
+    fmt_create_story,
+    fmt_plan_items,
+    fmt_update_epic,
+    fmt_update_story,
+    fmt_update_task,
+)
 from tools_pm_helpers import (
     _add_task_to_story,
     _db_op,
@@ -85,7 +94,7 @@ def register(mcp):
                 "VALUES (?, ?, ?, ?, 'active', ?, ?, ?)",
                 (epic_id, title, branch, int(persistent), milestone_order, target_date, description)
             )
-            return json.dumps({
+            return fmt_create_epic({
                 "id": epic_id, "title": title, "branch": branch, "persistent": persistent,
                 "state": "active", "milestone_order": milestone_order, "target_date": target_date,
                 "description": description,
@@ -163,7 +172,7 @@ def register(mcp):
             }
             if created_tasks:
                 result["tasks"] = created_tasks
-            return json.dumps(result)
+            return fmt_create_story(result)
 
     @mcp.tool()
     async def pm_add_task(
@@ -200,7 +209,7 @@ def register(mcp):
                 if not target_story:
                     matched, candidates = _find_best_story_match(conn, task_title)
                     if candidates:
-                        return json.dumps({
+                        return fmt_add_task({
                             "action": "needs_clarification",
                             "task": task_title,
                             "message": "Multiple plausible stories found. Specify story_id.",
@@ -220,8 +229,8 @@ def register(mcp):
                 results.append(task)
 
             if len(results) == 1:
-                return json.dumps(results[0])
-            return json.dumps({"created": results, "count": len(results)})
+                return fmt_add_task(results[0])
+            return fmt_add_task({"created": results, "count": len(results)})
 
     @mcp.tool()
     async def pm_plan_items(
@@ -265,7 +274,7 @@ def register(mcp):
                     (pid, json.dumps(prop))
                 )
 
-                return json.dumps({
+                return fmt_plan_items({
                     "phase": "proposal",
                     "proposal_id": pid,
                     "item_count": len(items),
@@ -331,7 +340,7 @@ def register(mcp):
                     )
                     created_tasks.append({"id": task_id, "story_id": sid, "title": task_title})
 
-            return json.dumps({
+            return fmt_plan_items({
                 "phase": "committed",
                 "created_epics": created_epics,
                 "created_stories": created_stories,
@@ -455,7 +464,7 @@ def register(mcp):
             )
 
             updated = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
-            return json.dumps(_story_to_dict(updated))
+            return fmt_update_story(_story_to_dict(updated))
 
     @mcp.tool()
     async def pm_update_epic(
@@ -488,24 +497,24 @@ def register(mcp):
             epic = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
             if not epic:
                 if auto_close:
-                    return json.dumps({"closed": False, "reason": f"Epic '{epic_id}' not found.", "remaining_count": 0})
+                    return fmt_update_epic({"closed": False, "reason": f"Epic '{epic_id}' not found.", "remaining_count": 0})
                 return f"Epic '{epic_id}' not found."
 
             ed = _epic_to_dict(epic)
 
             if auto_close:
                 if ed.get("persistent"):
-                    return json.dumps({"closed": False, "reason": "Epic is persistent — will not auto-close.", "remaining_count": 0})
+                    return fmt_update_epic({"closed": False, "reason": "Epic is persistent — will not auto-close.", "remaining_count": 0})
                 if ed["state"] != "active":
-                    return json.dumps({"closed": False, "reason": f"Epic state is '{ed['state']}', not 'active'.", "remaining_count": 0})
+                    return fmt_update_epic({"closed": False, "reason": f"Epic state is '{ed['state']}', not 'active'.", "remaining_count": 0})
                 remaining = conn.execute(
                     "SELECT COUNT(*) FROM stories WHERE epic_id = ? AND archived = 0 AND state NOT IN ('done', 'shipped')",
                     (epic_id,)
                 ).fetchone()[0]
                 if remaining > 0:
-                    return json.dumps({"closed": False, "reason": f"{remaining} story(ies) still active.", "remaining_count": remaining})
+                    return fmt_update_epic({"closed": False, "reason": f"{remaining} story(ies) still active.", "remaining_count": remaining})
                 conn.execute("UPDATE epics SET state = 'done' WHERE id = ?", (epic_id,))
-                return json.dumps({"closed": True, "reason": "All stories complete or archived.", "remaining_count": 0})
+                return fmt_update_epic({"closed": True, "reason": "All stories complete or archived.", "remaining_count": 0})
 
             updates = []
             params: list = []
@@ -556,7 +565,7 @@ def register(mcp):
             )
 
             updated = conn.execute("SELECT * FROM epics WHERE id = ?", (epic_id,)).fetchone()
-            return json.dumps(_epic_to_dict(updated))
+            return fmt_update_epic(_epic_to_dict(updated))
 
     @mcp.tool()
     async def pm_update_task(
@@ -604,4 +613,4 @@ def register(mcp):
             updated = conn.execute(
                 "SELECT * FROM tasks WHERE story_id = ? AND id = ?", (story_id, task_id)
             ).fetchone()
-            return json.dumps(dict(updated))
+            return fmt_update_task(dict(updated))

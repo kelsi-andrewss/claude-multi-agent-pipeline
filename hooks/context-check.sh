@@ -36,14 +36,7 @@ echo "$COUNT" > "$COUNTER_FILE"
 # Emit clearing message when threshold is reached
 if [[ "$COUNT" -ge 3 ]]; then
   echo "" >&2
-  echo "Context checkpoint reached (3 stories closed this session)." >&2
-  echo "" >&2
-  echo "SESSION DEBRIEF REQUIRED before /clear:" >&2
-  echo "1. Write session-handoff.md (per §10)" >&2
-  echo "2. openmemory_store session summary (episodic, proj:dotclaude)" >&2
-  echo "3. Reinforce or correct attributed memories (see plan files)" >&2
-  echo "4. Store new tool learnings from this session (procedural, global)" >&2
-  echo "5. Then /clear" >&2
+  echo "Context checkpoint reached (3 stories closed this session). Run /clear to reset. All state is in epics.db." >&2
 fi
 
 exit 0

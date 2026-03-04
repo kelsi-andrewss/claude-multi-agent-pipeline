@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
+from format_response import fmt_cleanup, fmt_regroup, fmt_reorder, fmt_triage
 from tools_pm_helpers import (
     _db_op,
     _group_items,
@@ -67,7 +68,7 @@ def register(mcp):
                         (target_epic,)
                     ).fetchall()
                     result_stories = [dict(r) for r in rows]
-                return json.dumps({"mode": "reorder", "warnings": warnings, "stories": result_stories})
+                return fmt_reorder({"mode": "reorder", "warnings": warnings, "stories": result_stories})
 
             if not story_id:
                 return "Provide story_id (with before_story_id or after_story_id) or ranked."
@@ -116,7 +117,7 @@ def register(mcp):
                 "SELECT id, title, state, order_idx FROM stories WHERE epic_id = ? AND archived = 0 ORDER BY COALESCE(order_idx, 2147483647), id",
                 (target_epic,)
             ).fetchall()
-            return json.dumps({"mode": "reorder", "epic_id": target_epic, "stories": [dict(r) for r in rows]})
+            return fmt_reorder({"mode": "reorder", "epic_id": target_epic, "stories": [dict(r) for r in rows]})
 
     @mcp.tool()
     async def pm_triage(epic_id: str | None = None) -> str:
@@ -178,7 +179,7 @@ def register(mcp):
                         "reason": "keyword match",
                     })
 
-            return json.dumps({
+            return fmt_triage({
                 "mode": "triage",
                 "backlog_stories": backlog_stories,
                 "unassigned_stories": unassigned_stories,
@@ -251,7 +252,7 @@ def register(mcp):
             task_mismatches = [dict(r) for r in mismatch_rows]
 
             if not confirmed:
-                return json.dumps({
+                return fmt_cleanup({
                     "mode": "cleanup",
                     "dry_run": True,
                     "would_archive_stories": would_archive,
@@ -272,7 +273,7 @@ def register(mcp):
                 if remaining == 0:
                     conn.execute("UPDATE epics SET state = 'done' WHERE id = ?", (eid,))
 
-            return json.dumps({
+            return fmt_cleanup({
                 "mode": "cleanup",
                 "dry_run": False,
                 "archived_stories": archived_ids,
@@ -308,7 +309,7 @@ def register(mcp):
                 story_map = {r["title"]: r for r in active_stories}
 
                 if not titles:
-                    return json.dumps({"mode": "regroup", "phase": "proposal", "moves": [], "new_epics": [], "no_change": []})
+                    return fmt_regroup({"mode": "regroup", "phase": "proposal", "moves": [], "new_epics": [], "no_change": []})
 
                 open_stories_list = [{"id": r["id"], "title": r["title"]} for r in active_stories]
                 clustering = _group_items(titles, open_stories_list)
@@ -372,7 +373,7 @@ def register(mcp):
                     for ne in new_epics_proposal
                 ]
 
-                return json.dumps({
+                return fmt_regroup({
                     "mode": "regroup",
                     "phase": "proposal",
                     "moves": moves,
@@ -433,7 +434,7 @@ def register(mcp):
                 conn.execute("UPDATE stories SET epic_id = ? WHERE id = ?", (to_epic, sid))
                 moved.append({"story_id": sid, "to_epic": to_epic})
 
-            return json.dumps({
+            return fmt_regroup({
                 "mode": "regroup",
                 "phase": "committed",
                 "moved": moved,
