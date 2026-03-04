@@ -110,41 +110,6 @@ class TestGemini:
 
 
 # ---------------------------------------------------------------------------
-# gemini_generate
-# ---------------------------------------------------------------------------
-
-class TestGeminiGenerate:
-    def test_prepends_system_instruction(self, mock_subprocess):
-        _, proc = mock_subprocess
-
-        asyncio.get_event_loop().run_until_complete(
-            server.gemini_generate("do something", system_instruction="be helpful")
-        )
-
-        # Check the prompt piped to stdin
-        piped_input = proc.communicate.call_args[1]["input"].decode()
-        assert "[System:" in piped_input
-        # NO_CODE_INSTRUCTION should come first, then user's instruction
-        no_code_pos = piped_input.find(server.NO_CODE_INSTRUCTION)
-        user_instr_pos = piped_input.find("be helpful")
-        assert no_code_pos < user_instr_pos
-        assert "do something" in piped_input
-
-    def test_without_system_instruction(self, mock_subprocess):
-        _, proc = mock_subprocess
-
-        asyncio.get_event_loop().run_until_complete(
-            server.gemini_generate("do something")
-        )
-
-        piped_input = proc.communicate.call_args[1]["input"].decode()
-        # NO_CODE_INSTRUCTION is always present now
-        assert "[System:" in piped_input
-        assert server.NO_CODE_INSTRUCTION in piped_input
-        assert "do something" in piped_input
-
-
-# ---------------------------------------------------------------------------
 # gemini_chat
 # ---------------------------------------------------------------------------
 
@@ -462,16 +427,6 @@ class TestTestTool:
 # ---------------------------------------------------------------------------
 
 class TestNoCodeEnforcement:
-    def test_gemini_generate_includes_no_code(self, mock_subprocess):
-        _, proc = mock_subprocess
-
-        asyncio.get_event_loop().run_until_complete(
-            server.gemini_generate("hello")
-        )
-
-        piped_input = proc.communicate.call_args[1]["input"].decode()
-        assert server.NO_CODE_INSTRUCTION in piped_input
-
     def test_gemini_chat_includes_no_code(self, mock_subprocess):
         _, proc = mock_subprocess
 

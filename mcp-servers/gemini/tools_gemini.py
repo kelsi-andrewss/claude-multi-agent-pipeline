@@ -1,4 +1,4 @@
-"""Core Gemini tools: gemini_generate, gemini_chat, fetch_doc, plan, analyze."""
+"""Core Gemini tools: gemini_chat, fetch_doc, plan, analyze."""
 
 from __future__ import annotations
 
@@ -38,24 +38,6 @@ async def _do_plan(task: str, documents: list[str] | None = None) -> str:
 
 
 def register(mcp):
-    @mcp.tool()
-    async def gemini_generate(
-        prompt: str,
-        model: str | None = None,
-        system_instruction: str | None = None,
-    ) -> str:
-        """Raw Gemini prompt — no project context injected. Use plan() for implementation planning or analyze() for code/design review instead.
-
-        Args:
-            prompt: The input prompt to send to Gemini.
-            model: Optional Gemini model ID. Omit to use CLI default.
-            system_instruction: Optional system instruction to guide the model.
-        """
-        combined_instruction = NO_CODE_INSTRUCTION
-        if system_instruction:
-            combined_instruction = f"{NO_CODE_INSTRUCTION}\n\n{system_instruction}"
-        return await _gemini(prompt, model=model, system_instruction=combined_instruction)
-
     @mcp.tool()
     async def gemini_chat(
         messages: list[dict[str, str]],
@@ -113,7 +95,7 @@ def register(mcp):
         task: str,
         documents: list[str] | None = None,
     ) -> str:
-        """Generate an implementation plan for a task. Automatically loads CLAUDE.md, REQUIREMENTS.md, and ARCHITECTURE.md as context and uses a senior-developer system prompt. Prefer this over gemini_generate for any planning task.
+        """Generate an implementation plan for a task. Automatically loads CLAUDE.md, REQUIREMENTS.md, and ARCHITECTURE.md as context and uses a senior-developer system prompt.
 
         Args:
             task: Description of what needs to be implemented.
@@ -127,7 +109,7 @@ def register(mcp):
         input: str,
         context: str | None = None,
     ) -> str:
-        """Review code or a design proposal against project conventions. Automatically loads CLAUDE.md as context and returns a structured verdict (APPROVE/NEEDS CHANGES/REJECT for code, PROCEED/REVISE/RECONSIDER for design). Prefer this over gemini_generate for any review task.
+        """Review code or a design proposal against project conventions. Automatically loads CLAUDE.md as context and returns a structured verdict (APPROVE/NEEDS CHANGES/REJECT for code, PROCEED/REVISE/RECONSIDER for design).
 
         Args:
             input: Code snippet or design description to analyze.
