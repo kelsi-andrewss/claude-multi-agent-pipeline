@@ -34,6 +34,9 @@ _r_pm_analytics(mcp)
 from tools_pm_ship import register as _r_pm_ship
 _r_pm_ship(mcp)
 
+from tools_pm_decisions import register as _r_pm_decisions
+_r_pm_decisions(mcp)
+
 from tools_knowledge import register as _r_knowledge
 _r_knowledge(mcp)
 
