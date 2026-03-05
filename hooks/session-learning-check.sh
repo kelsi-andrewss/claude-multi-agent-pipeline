@@ -508,6 +508,13 @@ if new_tallies:
 
 TALLYEOF
 
+# --- Decision signal processing ---
+DB_FILE="$HOME/.claude/.claude/epics.db"
+if [[ -f "$DB_FILE" && -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+  python3 "$HOME/.claude/hooks/lib/signal_processor.py" \
+    "$TRANSCRIPT_PATH" "$DB_FILE" "${SESSION_ID_RAW:-}" 2>/dev/null || true
+fi
+
 # --- Dual-write to OpenMemory: corrections and outcomes ---
 OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
 if [[ -f "$OM_DB" && -f "$SNAPSHOT" ]] || [[ -f "$OM_DB" ]]; then
