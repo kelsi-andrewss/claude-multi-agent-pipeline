@@ -82,8 +82,9 @@ When the session agenda shows "BEHAVIORAL DISTILLATION DUE" or on request:
 2. Identify recurring patterns: overrides trending one direction, story types that consistently succeed or fail, approaches consistently preferred or rejected
 3. Write concise entries to behavioral-prefs.md — each a single sentence stating the preference and its evidence (e.g., "Prefers quick-fixer for CSS-only changes — 4/4 architect stories on CSS were scope overkill, per outcomes 2026-02-*")
 4. Don't duplicate existing entries. Update them if new evidence changes the pattern.
-5. Update the timestamp: `<!-- last-distilled: YYYY-MM-DD -->`
-6. Preferences with fewer than 3 supporting data points get prefixed with "(tentative)"
+5. For each new or updated entry, call `openmemory_store(content="<preference text>", tags=["behavioral-pref"], user_id="proj:dotclaude")`. This is the exclusive path for corrections to reach OpenMemory — raw corrections are never stored directly.
+6. Update the timestamp: `<!-- last-distilled: YYYY-MM-DD -->`
+7. Preferences with fewer than 3 supporting data points get prefixed with "(tentative)"
 
 ### Tool & model learnings
 When a model or tool repeatedly succeeds or fails at a specific task type (2+ occurrences):
