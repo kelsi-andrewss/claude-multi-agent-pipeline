@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
+import struct
+import time
+import uuid
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from constants import (
     DECISION_STATUSES,
@@ -15,6 +22,72 @@ from constants import (
     SCOPE_TYPES,
 )
 from tools_pm_helpers import _db_op, _next_id
+
+# OpenMemory constants
+OM_DB = Path.home() / ".claude" / ".claude" / "openmemory.sqlite"
+OLLAMA_URL = "http://localhost:11434/api/embeddings"
+OLLAMA_MODEL = "nomic-embed-text"
+
+
+def _get_embedding(text: str) -> list[float] | None:
+    """Call Ollama to embed text. Returns embedding vector or None if unavailable."""
+    payload = json.dumps({"model": OLLAMA_MODEL, "prompt": text}).encode()
+    req = Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
+    try:
+        with urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        return data.get("embedding")
+    except (URLError, OSError, json.JSONDecodeError, KeyError):
+        return None
+
+
+def _embedding_to_blob(vec: list[float]) -> bytes:
+    """Convert embedding vector to binary blob for storage."""
+    return struct.pack(f"<{len(vec)}f", *vec)
+
+
+def _om_shadow_decision(decision_id: str, content: str, user_id: str) -> None:
+    """Shadow a decision to OpenMemory for semantic search. Silently fails if OpenMemory unavailable."""
+    try:
+        if not OM_DB.exists():
+            return
+
+        # Get embedding from Ollama
+        vec = _get_embedding(content)
+        if vec is None:
+            return
+
+        # Compute simhash from content
+        simhash = hashlib.md5(content.encode()).hexdigest()[:16]
+
+        # Insert into OpenMemory
+        conn = sqlite3.connect(str(OM_DB), timeout=10)
+        try:
+            mem_id = str(uuid.uuid4())
+            now_ts = int(time.time())
+            tags = json.dumps(["decision", decision_id])
+            blob = _embedding_to_blob(vec)
+
+            conn.execute(
+                "INSERT OR IGNORE INTO memories "
+                "(id, user_id, content, simhash, primary_sector, tags, meta, "
+                "mean_dim, mean_vec, created_at, updated_at, last_seen_at, "
+                "salience, decay_lambda, feedback_score) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    mem_id, user_id, content, simhash,
+                    "semantic", tags, None,
+                    len(vec), blob,
+                    now_ts, now_ts, now_ts,
+                    0.5, 0.01, 0,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        # OpenMemory failure must never break the tool
+        return
 
 
 def _migrate_pitfalls(conn) -> dict:
@@ -94,6 +167,9 @@ def register(mcp):
                            VALUES (?, ?, ?)""",
                         (decision_id, scope_type, scope_value),
                     )
+            # Shadow decision to OpenMemory for semantic search
+            content = f"{title}: chose {chose}. {reasoning or ''}"
+            _om_shadow_decision(decision_id, content, "proj:dotclaude")
             result = {
                 "id": decision_id,
                 "title": title,
