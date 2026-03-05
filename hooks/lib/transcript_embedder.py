@@ -11,6 +11,7 @@ openmemory.sqlite with simhash dedup.
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import struct
 import sys
@@ -27,6 +28,16 @@ SECTOR = "episodic"
 USER_ID = "proj:dotclaude"
 SALIENCE = 0.3
 DECAY_LAMBDA = 0.07
+
+SYSTEM_MSG = re.compile(
+    r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
+    r'^Base directory for this skill|'
+    r'^Implement the following plan:|'
+    r'^<skill-',
+    re.IGNORECASE | re.MULTILINE
+)
+
+XML_TAG_PATTERN = re.compile(r'<[^>]+>', re.IGNORECASE)
 
 
 def parse_transcript(path):
@@ -82,6 +93,32 @@ def estimate_tokens(text):
     return len(text) // 4
 
 
+def is_system_content(text):
+    """Check if text matches system/boilerplate patterns."""
+    return bool(SYSTEM_MSG.search(text))
+
+
+def calculate_system_density(text):
+    """Calculate the ratio of system/boilerplate content to total content.
+
+    Returns a float between 0.0 and 1.0 representing the fraction of text
+    that matches system content patterns.
+    """
+    lines = text.split('\n')
+    if not lines:
+        return 0.0
+
+    system_lines = sum(1 for line in lines if is_system_content(line))
+    return system_lines / len(lines)
+
+
+def filter_content(text):
+    """Strip XML tags and filter out system content lines."""
+    text = XML_TAG_PATTERN.sub('', text)
+    lines = [line for line in text.split('\n') if not is_system_content(line)]
+    return '\n'.join(lines).strip()
+
+
 def chunk_turns(turns):
     chunks = []
     current_text = []
@@ -94,11 +131,14 @@ def chunk_turns(turns):
         seg_tokens = estimate_tokens(segment)
 
         if current_tokens + seg_tokens > CHUNK_TOKEN_TARGET and current_text:
-            chunks.append({
-                "text": "\n".join(current_text),
-                "turn_start": chunk_start,
-                "turn_end": i - 1,
-            })
+            chunk_text = "\n".join(current_text)
+            # Skip chunks with >80% system content density
+            if calculate_system_density(chunk_text) <= 0.8:
+                chunks.append({
+                    "text": filter_content(chunk_text),
+                    "turn_start": chunk_start,
+                    "turn_end": i - 1,
+                })
             current_text = []
             current_tokens = 0
             chunk_start = i
@@ -112,11 +152,14 @@ def chunk_turns(turns):
         current_tokens += seg_tokens
 
     if current_text:
-        chunks.append({
-            "text": "\n".join(current_text),
-            "turn_start": chunk_start,
-            "turn_end": len(turns) - 1,
-        })
+        chunk_text = "\n".join(current_text)
+        # Skip chunks with >80% system content density
+        if calculate_system_density(chunk_text) <= 0.8:
+            chunks.append({
+                "text": filter_content(chunk_text),
+                "turn_start": chunk_start,
+                "turn_end": len(turns) - 1,
+            })
 
     return chunks
 
