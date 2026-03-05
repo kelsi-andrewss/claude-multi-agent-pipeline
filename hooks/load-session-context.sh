@@ -522,6 +522,58 @@ print("=== END MEMORY BRIEFING ===")
 MEMBRIEFEOF
   fi
 
+  # Predicted preferences — query decision_preferences table for session-relevant patterns
+  if [[ -f "$DB_FILE" ]]; then
+  python3 - "$DB_FILE" <<'PREFPREDEOF'
+import subprocess, sys
+
+db_path = sys.argv[1]
+
+def query_db(sql):
+    try:
+        result = subprocess.run(
+            ["sqlite3", "-separator", "\t", db_path, sql],
+            capture_output=True, text=True, timeout=5
+        )
+        return [line.split("\t") for line in result.stdout.strip().splitlines() if line.strip()]
+    except Exception:
+        return []
+
+# Check if decision_preferences table exists
+tables = query_db(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='decision_preferences';"
+)
+if not tables:
+    sys.exit(0)
+
+# Get top 5 high-confidence preferences (confidence >= 0.7, ordered by recency + confidence)
+rows = query_db(
+    "SELECT domain, preference, confidence, evidence_count "
+    "FROM decision_preferences "
+    "WHERE confidence >= 0.7 "
+    "ORDER BY updated_at DESC, confidence DESC "
+    "LIMIT 5;"
+)
+
+if not rows:
+    sys.exit(0)
+
+print("")
+print("=== PREDICTED PREFERENCES ===")
+for row in rows:
+    if len(row) < 4:
+        continue
+    domain, pref, conf, evidence = row[0], row[1], row[2], row[3]
+    try:
+        conf_pct = f"{float(conf) * 100:.0f}%"
+    except ValueError:
+        conf_pct = conf
+    print(f"  [{domain}] {pref} (confidence: {conf_pct}, evidence: {evidence})")
+print("  Source: decision_preferences table. Override with explicit instruction.")
+print("=== END PREDICTED PREFERENCES ===")
+PREFPREDEOF
+  fi
+
 
   fi
 
