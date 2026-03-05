@@ -260,7 +260,9 @@ PYEOF
   SIGNAL_RECENT_FILES=$(git -C "$HOME/.claude" diff --name-only HEAD~1 2>/dev/null | head -20 || echo "")
 
   python3 - "$OM_DB" "$DB_FILE" "$SIGNAL_BRANCH" "$SIGNAL_DIR" "$SIGNAL_RECENT_FILES" <<'MEMBRIEFEOF'
-import math, os, subprocess, sys, time
+import json, math, os, struct, subprocess, sys, time
+from urllib.request import urlopen, Request
+from urllib.error import URLError
 
 om_db = sys.argv[1]
 epics_db = sys.argv[2] if len(sys.argv) > 2 else None
@@ -369,6 +371,114 @@ if signal_terms:
         f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
     )
 
+# 5. Episodic transcript recall via vector similarity
+TRANSCRIPT_DECAY = 0.07
+SIMILARITY_THRESHOLD = 0.3
+TRANSCRIPT_LIMIT = 5
+OLLAMA_TIMEOUT = 2
+
+transcript_recalls = []
+
+# Build query from signals: branch, directory, in-progress story titles, recent key exchanges
+query_parts = []
+if signal_branch and signal_branch not in ("main", "master", "HEAD"):
+    query_parts.append(signal_branch.replace("-", " ").replace("/", " "))
+if signal_dir and signal_dir not in (".", "/"):
+    query_parts.append(signal_dir)
+
+# In-progress story titles from epics.db
+if epics_db and os.path.isfile(epics_db):
+    try:
+        r = subprocess.run(
+            ["sqlite3", "-separator", "\t", epics_db,
+             "SELECT title FROM stories WHERE state IN "
+             "('in-progress','ready','in-review') AND archived=0 LIMIT 5;"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in r.stdout.strip().splitlines():
+            if line.strip():
+                query_parts.append(line.strip())
+    except Exception:
+        pass
+
+# Last 2 key exchanges from session-records.md
+# om_db is ~/.claude/.claude/openmemory.sqlite, so two dirnames up is ~/.claude
+try:
+    records_path = os.path.join(os.path.dirname(os.path.dirname(om_db)), "session-records.md")
+    if os.path.isfile(records_path):
+        with open(records_path) as f:
+            rec_content = f.read()
+        import re as _re
+        key_matches = _re.findall(r'Key exchanges:\n((?:  - .+\n)*)', rec_content)
+        recent_keys = []
+        for block in key_matches[-2:]:
+            for line in block.strip().splitlines():
+                line = line.strip().lstrip("- ").strip('"')
+                if line:
+                    recent_keys.append(line[:100])
+        query_parts.extend(recent_keys)
+except Exception:
+    pass
+
+query_text = " ".join(query_parts)
+
+if query_text.strip():
+    try:
+        # Embed the query via Ollama
+        payload = json.dumps({"model": "nomic-embed-text", "prompt": query_text}).encode()
+        req = Request("http://localhost:11434/api/embeddings", data=payload,
+                      headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
+            embed_data = json.loads(resp.read())
+        query_vec = embed_data.get("embedding")
+
+        if query_vec:
+            # Fetch transcript memories with embeddings
+            import sqlite3 as _sqlite3
+            conn = _sqlite3.connect(om_db, timeout=5)
+            try:
+                rows = conn.execute(
+                    "SELECT content, mean_vec, mean_dim, created_at, tags "
+                    "FROM memories "
+                    "WHERE tags LIKE '%transcript%' AND mean_vec IS NOT NULL"
+                ).fetchall()
+
+                if rows:
+                    q_norm = math.sqrt(sum(x * x for x in query_vec))
+                    scored = []
+                    for content, blob, dim, created_at, tags_str in rows:
+                        if not blob or not dim:
+                            continue
+                        vec = struct.unpack(f"<{dim}f", blob)
+                        # Cosine similarity
+                        dot = sum(a * b for a, b in zip(query_vec, vec))
+                        v_norm = math.sqrt(sum(x * x for x in vec))
+                        if q_norm == 0 or v_norm == 0:
+                            continue
+                        sim = dot / (q_norm * v_norm)
+                        if sim < SIMILARITY_THRESHOLD:
+                            continue
+                        # Decay weighting
+                        age_days = (now - created_at) / 86400.0
+                        score = sim * math.exp(-TRANSCRIPT_DECAY * age_days)
+                        # Extract session date from tags
+                        session_date = ""
+                        try:
+                            for tag in json.loads(tags_str):
+                                if tag.startswith("session-"):
+                                    session_date = tag[8:]
+                                    break
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        scored.append((score, sim, session_date, content))
+
+                    scored.sort(key=lambda x: -x[0])
+                    transcript_recalls = scored[:TRANSCRIPT_LIMIT]
+            finally:
+                conn.close()
+    except (URLError, OSError, json.JSONDecodeError, KeyError, ValueError):
+        pass
+
 # Output
 print("")
 print("=== MEMORY BRIEFING ===")
@@ -402,8 +512,66 @@ if tech_memories:
 else:
     print("    (none yet)")
 
+if transcript_recalls:
+    print("  Transcript recall:")
+    for score, sim, session_date, content in transcript_recalls:
+        date_prefix = f"[{session_date}] " if session_date else ""
+        print(f"    - {date_prefix}{trunc(content, 150)}")
+
 print("=== END MEMORY BRIEFING ===")
 MEMBRIEFEOF
+  fi
+
+  # Predicted preferences — query decision_preferences table for session-relevant patterns
+  if [[ -f "$DB_FILE" ]]; then
+  python3 - "$DB_FILE" <<'PREFPREDEOF'
+import subprocess, sys
+
+db_path = sys.argv[1]
+
+def query_db(sql):
+    try:
+        result = subprocess.run(
+            ["sqlite3", "-separator", "\t", db_path, sql],
+            capture_output=True, text=True, timeout=5
+        )
+        return [line.split("\t") for line in result.stdout.strip().splitlines() if line.strip()]
+    except Exception:
+        return []
+
+# Check if decision_preferences table exists
+tables = query_db(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='decision_preferences';"
+)
+if not tables:
+    sys.exit(0)
+
+# Get top 5 high-confidence preferences (confidence >= 0.7, ordered by recency + confidence)
+rows = query_db(
+    "SELECT domain, preference, confidence, evidence_count "
+    "FROM decision_preferences "
+    "WHERE confidence >= 0.7 "
+    "ORDER BY updated_at DESC, confidence DESC "
+    "LIMIT 5;"
+)
+
+if not rows:
+    sys.exit(0)
+
+print("")
+print("=== PREDICTED PREFERENCES ===")
+for row in rows:
+    if len(row) < 4:
+        continue
+    domain, pref, conf, evidence = row[0], row[1], row[2], row[3]
+    try:
+        conf_pct = f"{float(conf) * 100:.0f}%"
+    except ValueError:
+        conf_pct = conf
+    print(f"  [{domain}] {pref} (confidence: {conf_pct}, evidence: {evidence})")
+print("  Source: decision_preferences table. Override with explicit instruction.")
+print("=== END PREDICTED PREFERENCES ===")
+PREFPREDEOF
   fi
 
 
