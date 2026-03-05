@@ -601,6 +601,11 @@ if os.path.isfile(outcomes_file) and get_mtime(outcomes_file) > outcomes_mtime_s
 OMWRITEEOF
 fi
 
+# Transcript embedding (background, non-blocking)
+if [[ -f "$OM_DB" && -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+  python3 "$HOME/.claude/hooks/lib/transcript_embedder.py" "$TRANSCRIPT_PATH" "$OM_DB" &
+fi
+
 # Cleanup session start timestamp
 SESSION_START_FILE="/tmp/session-start-${SESSION_ID}"
 rm -f "$SESSION_START_FILE"
