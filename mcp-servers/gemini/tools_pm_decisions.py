@@ -1,10 +1,12 @@
-"""PM decision preference tools: pm_record_decision, pm_list_decisions_by_type."""
+"""PM decision preference tools: record, list, predict, and surface insights."""
 
 from __future__ import annotations
 
 import json
+import math
 import time
 import uuid
+from collections import defaultdict
 
 from tools_pm_helpers import _db_op, _get_db
 
@@ -146,3 +148,162 @@ def register(mcp):
                     f"\n    chose: {d['chosen_path']}{alt_str}"
                 )
             return "\n".join(lines)
+
+    @mcp.tool()
+    async def pm_predict_preference(
+        decision_type: str,
+        context: str,
+    ) -> str:
+        """Predict user preference for a decision based on historical signal data.
+
+        Queries past decisions of the same type, weights by context relevance,
+        recency, and signal strength to predict the most likely preferred path.
+
+        Args:
+            decision_type: Category of decision (routing, scope, communication, architecture).
+            context: Description of the current situation requiring a decision.
+        """
+        valid_types = ("routing", "scope", "communication", "architecture")
+        if decision_type not in valid_types:
+            return f"Invalid decision_type '{decision_type}'. Valid: {sorted(valid_types)}"
+
+        with _db_op(readonly=True) as conn:
+            _ensure_table_once(conn)
+            rows = conn.execute(
+                "SELECT * FROM decision_preferences WHERE decision_type = ? AND signal_count > 0 ORDER BY created_at DESC LIMIT 50",
+                (decision_type,),
+            ).fetchall()
+
+        if len(rows) < 3:
+            return json.dumps({
+                "predicted_path": None,
+                "confidence": 0,
+                "reason": "insufficient data",
+                "evidence_count": len(rows),
+                "fallback": "check behavioral-prefs.md",
+            })
+
+        now = time.time()
+        context_words = set(context.lower().split())
+        path_weights: dict[str, float] = defaultdict(float)
+        path_counts: dict[str, int] = defaultdict(int)
+
+        for row in rows:
+            d = dict(row)
+            past_words = set(d["context"].lower().split())
+            intersection = context_words & past_words
+            union = context_words | past_words
+            relevance = len(intersection) / len(union) if union else 0
+
+            age_days = (now - d["created_at"]) / 86400
+            recency_boost = math.exp(-0.05 * age_days)
+
+            signal_strength = d["signal_score"] / max(d["signal_count"], 1)
+
+            weight = relevance * recency_boost * abs(signal_strength)
+            if signal_strength < 0:
+                weight = -weight
+
+            path_weights[d["chosen_path"]] += weight
+            path_counts[d["chosen_path"]] += 1
+
+        if not path_weights:
+            return json.dumps({
+                "predicted_path": None,
+                "confidence": 0,
+                "reason": "no weighted signal found",
+                "evidence_count": len(rows),
+                "fallback": "check behavioral-prefs.md",
+            })
+
+        sorted_paths = sorted(path_weights.items(), key=lambda x: x[1], reverse=True)
+        best_path, best_weight = sorted_paths[0]
+
+        total_abs = sum(abs(w) for _, w in sorted_paths)
+        confidence = abs(best_weight) / total_abs if total_abs > 0 else 0
+        confidence = min(confidence, 1.0)
+
+        alternatives = [
+            {"path": p, "weight": round(w, 4)}
+            for p, w in sorted_paths[1:]
+        ]
+
+        return json.dumps({
+            "predicted_path": best_path,
+            "confidence": round(confidence, 3),
+            "evidence_count": sum(path_counts.values()),
+            "alternatives": alternatives,
+        })
+
+    @mcp.tool()
+    async def pm_decision_insights(
+        decision_type: str | None = None,
+        min_signals: int = 3,
+    ) -> str:
+        """Surface preference patterns from accumulated decision signal data.
+
+        Aggregates signal scores across decisions to identify strong preferences
+        suitable for promotion to behavioral-prefs.md.
+
+        Args:
+            decision_type: Filter by category (routing, scope, communication, architecture). Omit for all types.
+            min_signals: Minimum total signal events to include a pattern (default 3).
+        """
+        with _db_op(readonly=True) as conn:
+            _ensure_table_once(conn)
+
+            if decision_type:
+                valid_types = ("routing", "scope", "communication", "architecture")
+                if decision_type not in valid_types:
+                    return f"Invalid decision_type '{decision_type}'. Valid: {sorted(valid_types)}"
+                rows = conn.execute(
+                    "SELECT * FROM decision_preferences WHERE decision_type = ? AND signal_count > 0 ORDER BY created_at DESC",
+                    (decision_type,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM decision_preferences WHERE signal_count > 0 ORDER BY created_at DESC",
+                ).fetchall()
+
+        if not rows:
+            return "No decisions with signal data found."
+
+        patterns: dict[tuple[str, str], dict] = {}
+        for row in rows:
+            d = dict(row)
+            key = (d["decision_type"], d["chosen_path"])
+            if key not in patterns:
+                patterns[key] = {
+                    "decision_type": d["decision_type"],
+                    "chosen_path": d["chosen_path"],
+                    "total_signal": 0.0,
+                    "total_events": 0,
+                    "decision_count": 0,
+                }
+            patterns[key]["total_signal"] += d["signal_score"]
+            patterns[key]["total_events"] += d["signal_count"]
+            patterns[key]["decision_count"] += 1
+
+        filtered = [p for p in patterns.values() if p["total_events"] >= min_signals]
+
+        if not filtered:
+            return f"No patterns meet the minimum signal threshold ({min_signals} events)."
+
+        by_type: dict[str, list] = defaultdict(list)
+        for p in filtered:
+            by_type[p["decision_type"]].append(p)
+
+        lines = []
+        for dtype in sorted(by_type):
+            entries = sorted(by_type[dtype], key=lambda x: x["total_signal"], reverse=True)
+            lines.append(f"## {dtype}")
+            for e in entries:
+                sentiment = "positive" if e["total_signal"] > 0 else "negative"
+                lines.append(
+                    f"  {e['chosen_path']}: signal {e['total_signal']:+.1f} "
+                    f"across {e['decision_count']} decision(s), "
+                    f"{e['total_events']} event(s) ({sentiment})"
+                )
+            lines.append("")
+
+        return "\n".join(lines).rstrip()
