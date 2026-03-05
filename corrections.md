@@ -120,3 +120,8 @@ Two entry types:
 **Context**: User said "fucking fix it dude. ship this:" with a detailed bug description. I launched quick-fixer agent directly instead of /ship skill. This is the FOURTH time this session. The word "ship" means use the /ship skill. Period. No exceptions. The /ship skill handles the full pipeline. Quick-fixer is a sub-step INSIDE /ship, not a replacement for it.
 **User said**: SHIP MEANS USE SHIP SKILL WHY ARE YOU NOT LEARNING
 **Turn**: ~20
+
+## 2026-03-04 — log it [branch cleanup deleted active story worktree]
+**Context**: Running `git branch --merged dev` to find stale branches, then bulk-deleting everything returned — including `legacylens-legibility-features--graph-traversal-from-query-results-from-444` and its worktree at `.claude/worktrees/story/graph-traversal-from-query-results-from-444`.
+**User said**: wait why did you delete those branches with work trees? i'm pretty sure they were being used?
+**Turn**: ~15
