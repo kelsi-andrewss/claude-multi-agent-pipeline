@@ -75,15 +75,18 @@ These files track patterns across sessions:
 - `~/.claude/behavioral-prefs.md` — distilled preferences inferred over time (loaded every session)
 - `~/.claude/tool-learnings.md` — model/tool capability audit log (append-only, git-tracked)
 - OpenMemory (`procedural` sector) — queryable store for tool/model observations
+- `decision_preferences` table (epics.db) — machine-learned preference predictions from correction/decision correlation (see `hooks/lib/signal_processor.py`)
 
 ### Distilling preferences
 When the session agenda shows "BEHAVIORAL DISTILLATION DUE" or on request:
 1. Read entries in disagreements.md, outcomes.md, and corrections.md since the last distillation date
-2. Identify recurring patterns: overrides trending one direction, story types that consistently succeed or fail, approaches consistently preferred or rejected
-3. Write concise entries to behavioral-prefs.md — each a single sentence stating the preference and its evidence (e.g., "Prefers quick-fixer for CSS-only changes — 4/4 architect stories on CSS were scope overkill, per outcomes 2026-02-*")
-4. Don't duplicate existing entries. Update them if new evidence changes the pattern.
-5. Update the timestamp: `<!-- last-distilled: YYYY-MM-DD -->`
-6. Preferences with fewer than 3 supporting data points get prefixed with "(tentative)"
+2. Query `decision_preferences` table for high-confidence preferences (confidence >= 0.7) — cross-reference with existing behavioral-prefs.md entries
+3. Identify recurring patterns: overrides trending one direction, story types that consistently succeed or fail, approaches consistently preferred or rejected
+4. Write concise entries to behavioral-prefs.md — each a single sentence stating the preference and its evidence (e.g., "Prefers quick-fixer for CSS-only changes — 4/4 architect stories on CSS were scope overkill, per outcomes 2026-02-*")
+5. If a `decision_preferences` entry contradicts a behavioral-prefs.md entry, flag it for user review rather than silently overwriting
+6. Don't duplicate existing entries. Update them if new evidence changes the pattern.
+7. Update the timestamp: `<!-- last-distilled: YYYY-MM-DD -->`
+8. Preferences with fewer than 3 supporting data points get prefixed with "(tentative)"
 
 ### Tool & model learnings
 When a model or tool repeatedly succeeds or fails at a specific task type (2+ occurrences):
@@ -101,6 +104,13 @@ Features that expose registries, hooks, or plugin APIs become implicit dependenc
 - **Storage:** `~/.claude/.claude/openmemory.sqlite`
 - **Scoping:** user_id="global" (cross-project) or user_id="proj:<name>" (per-project)
 - **Embeddings:** Ollama nomic-embed-text (local)
+
+### Conversation Memory Pipeline
+- **Owner:** `hooks/lib/transcript_embedder.py` (episodic storage), `hooks/lib/signal_processor.py` (correction-decision correlation)
+- **Storage:** `decision_preferences` table in `epics.db`, OpenMemory episodic sector
+- **MCP tools:** `pm_predict_preference` (query predicted preferences for a domain), `pm_decision_insights` (correlate decisions with outcomes)
+- **Session hook:** `hooks/load-session-context.sh` outputs `PREDICTED PREFERENCES` section from `decision_preferences` table at session start
+- **Write pattern:** `signal_processor.py` correlates corrections with recent decisions and updates `decision_preferences`; `transcript_embedder.py` stores session chunks to OpenMemory with sector="episodic", tags=["transcript","session-<date>"]
 
 ## Project structure
 `~/.claude/` is itself a git project. Claude Code treats `~/.claude/.claude/` as its project-level config folder. That subfolder contains the live infrastructure: `epics.db`, `scripts/epics-cli.sh`, `hooks/`, `prompts/`. Global skills and instructions live at `~/.claude/skills/` and `~/.claude/ORCHESTRATION.md` — duplicating them into `.claude/.claude/skills/` creates drift between two sources of truth.

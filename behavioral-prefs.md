@@ -2,6 +2,12 @@
 
 Distilled from disagreements and outcomes over time. Loaded into every session.
 
+This file is the **human-readable cache** of the behavioral pipeline. The authoritative
+data lives in `decision_preferences` (epics.db) and OpenMemory. During distillation,
+high-confidence preferences from `decision_preferences` should be checked against entries
+here — if a DB preference contradicts an entry here, flag it for review rather than
+silently overwriting.
+
 <!-- last-distilled: 2026-03-04 -->
 
 ## Routing
