@@ -414,7 +414,13 @@ try:
         for block in key_matches[-2:]:
             for line in block.strip().splitlines():
                 line = line.strip().lstrip("- ").strip('"')
-                if line:
+                line = _re.sub(r'<[^>]+>', '', line).strip()
+                # Strip common noise prefixes
+                for prefix in ("Caveat: The messages below", "Base directory for this skill"):
+                    if line.startswith(prefix):
+                        line = ""
+                        break
+                if line and len(line) >= 10:
                     recent_keys.append(line[:100])
         query_parts.extend(recent_keys)
 except Exception:
