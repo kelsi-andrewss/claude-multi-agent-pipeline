@@ -241,12 +241,26 @@ def count_entries_since(filepath, since_date):
                     count += 1  # undated entry — assume new
     return count
 
-unprocessed = count_entries_since(disagreements, last_distilled) + count_entries_since(outcomes, last_distilled)
+corrections = os.path.join(project_root, "corrections.md")
+unprocessed = count_entries_since(disagreements, last_distilled) + count_entries_since(outcomes, last_distilled) + count_entries_since(corrections, last_distilled)
 
-if unprocessed >= 5:
+triggered = unprocessed >= 5
+if last_distilled and not triggered:
+    from datetime import datetime, timedelta
+    try:
+        ld_date = datetime.strptime(last_distilled, "%Y-%m-%d")
+        if (datetime.now() - ld_date).days >= 7:
+            triggered = True
+    except ValueError:
+        pass
+
+if triggered:
     print("")
     print("=== BEHAVIORAL DISTILLATION DUE ===")
-    print(f"  {unprocessed} unprocessed entries in disagreements.md + outcomes.md")
+    if unprocessed >= 5:
+        print(f"  {unprocessed} unprocessed entries in disagreements.md + outcomes.md + corrections.md")
+    else:
+        print(f"  Last distillation was {last_distilled} (>7 days ago)")
     print("  Review and distill before starting work.")
     print("")
 PYEOF
@@ -583,15 +597,75 @@ PREFPREDEOF
 
   fi
 
-  # Correction patterns — grouped by theme, counts only
-  TALLIES_FILE="$HOME/.claude/correction-tallies.jsonl"
-  if [[ -f "$TALLIES_FILE" ]] && [[ -s "$TALLIES_FILE" ]]; then
-  python3 - "$TALLIES_FILE" <<'CORRPATTERNSEOF'
-import json, sys
+  # Correction patterns — triaged from correction_groups DB table, fallback to tallies file
+  if [[ -f "$DB_FILE" ]]; then
+  python3 - "$DB_FILE" "$HOME/.claude/correction-tallies.jsonl" <<'CORRPATTERNSEOF'
+import json, subprocess, sys
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
-tallies_file = sys.argv[1]
+db_path = sys.argv[1]
+tallies_file = sys.argv[2] if len(sys.argv) > 2 else ""
+
+def query_db(sql):
+    try:
+        result = subprocess.run(
+            ["sqlite3", "-separator", "\t", db_path, sql],
+            capture_output=True, text=True, timeout=5
+        )
+        return [line.split("\t") for line in result.stdout.strip().splitlines() if line.strip()]
+    except Exception:
+        return []
+
+# Check if correction_groups table exists
+tables = query_db(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='correction_groups';"
+)
+
+if tables:
+    rows = query_db(
+        "SELECT theme, status, count, correction_dates, promoted_at "
+        "FROM correction_groups "
+        "ORDER BY CASE status WHEN 'pending_promotion' THEN 0 WHEN 'accumulating' THEN 1 WHEN 'promoted' THEN 2 END, count DESC;"
+    )
+    if rows:
+        pending = [r for r in rows if r[1] == "pending_promotion"]
+        accumulating = [r for r in rows if r[1] == "accumulating"]
+        promoted = [r for r in rows if r[1] == "promoted"]
+
+        # Skip output if only promoted entries exist (nothing for Claude to do)
+        if not pending and not accumulating:
+            sys.exit(0)
+
+        print("")
+        print("=== CORRECTION PATTERNS (triaged) ===")
+        if pending:
+            print("  Pending promotion:")
+            for r in pending:
+                theme, status, count, dates, promoted_at = r[0], r[1], r[2], r[3], r[4] if len(r) > 4 else ""
+                print(f'    [{count}x] "{theme}" (evidence: {dates})')
+            print("  Process pending promotions: write preference text to behavioral-prefs.md")
+        if accumulating:
+            print("  Accumulating:")
+            for r in accumulating:
+                theme, status, count, dates = r[0], r[1], r[2], r[3]
+                needed = 3 - int(count)
+                if needed < 1:
+                    needed = 1
+                print(f'    [{count}x] "{theme}" (need {needed} more)')
+        if promoted and (pending or accumulating):
+            print("  Already promoted:")
+            for r in promoted:
+                theme, status, count, dates, promoted_at = r[0], r[1], r[2], r[3], r[4] if len(r) > 4 else ""
+                print(f'    [{count}x] "{theme}" (promoted {promoted_at})')
+        print("=== END CORRECTION PATTERNS ===")
+        sys.exit(0)
+
+# Fallback: read correction-tallies.jsonl if DB table doesn't exist or is empty
+import os
+if not tallies_file or not os.path.isfile(tallies_file):
+    sys.exit(0)
+
 cutoff = datetime.now(timezone.utc) - timedelta(days=14)
 cutoff_str = cutoff.strftime("%Y-%m-%d")
 
@@ -617,7 +691,6 @@ except Exception:
 if not entries:
     sys.exit(0)
 
-# Group by theme: first 40 chars of message (deduplicates near-identical corrections)
 themes = defaultdict(list)
 for e in entries:
     key = e.get("user_msg", "")[:40].strip().lower()
@@ -625,7 +698,6 @@ for e in entries:
 
 print("")
 print(f"=== CORRECTION PATTERNS ({len(entries)} unprocessed) ===")
-# Show themes sorted by count (highest first), with representative message
 for key in sorted(themes, key=lambda k: -len(themes[k])):
     group = themes[key]
     representative = group[0].get("user_msg", "")[:80]
