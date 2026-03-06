@@ -231,7 +231,10 @@ Determine outcome metadata:
   - 6+ → "large"
   - If file_count is "unknown" → "unknown"
 - `cycle_time`: compute from epics.db — time between story state entering `in-progress` and
-  current timestamp. Format as hours (e.g., "2.1h"). If timestamps unavailable, "unknown".
+  current timestamp. **Format: decimal hours, one decimal place, no prefix symbols.**
+  Examples: `2.1h`, `0.5h`, `0.0h`. Never use `~`, `<`, `>`, or minute-based formats.
+  If DB timestamps are unavailable, derive from the `coder_effort` duration field
+  (e.g., 90s → 0.0h, 3600s → 1.0h). If neither source exists, use `0.0h`.
 - `coder_effort`: read `/tmp/coder-effort-<story_id>.json` (written by run-stories Step 5 on
   agent completion). Format as "[model] · [tokens] tokens · [calls] calls · [duration]s".
   If the file doesn't exist (story was run outside run-stories, or pre-dates this change),
