@@ -90,31 +90,18 @@ User has requested: `/merge-worktree {{args}}`
 
 ## Step 2: Determine the dev branch
 
-**If `epic_id` is non-null:**
+> Note: The dev branch is always `dev`. `pm_dev_branch` is called in Step 1 for `epic_slug` only.
 
-> Note: `pm_dev_branch` was already called in Step 1 if `epic_id` was non-null. Reuse those results here.
-
-1. Use the `dev_branch` value from the `pm_dev_branch(epic_id)` response in Step 1 (the one-liner is the branch name).
-   - For `epic-backlog`, this is `"dev"`.
-   - For other epics, this is `"dev-<epic_slug>"`.
-
-**If `epic_id` is null (git-only mode):**
-
-1. Run:
-   ```bash
-   git branch -r | grep 'origin/dev-' | head -5
-   ```
-2. Ask the user which dev branch to merge into using `AskUserQuestion`, listing the candidates. If no `dev-` branches exist, stop and report:
-   > "No dev- branches found. Cannot determine merge target."
+Set `dev-branch` = `dev`.
 
 **Verify the branch exists on origin:**
 
 ```bash
-git fetch origin <dev-branch>
+git fetch origin dev
 ```
 
-If this fails (branch not found on origin), try `dev-branch = dev-<epic_id>` (e.g., `dev-epic-007`) as fallback before stopping. If the fallback also fails, stop and report:
-> "Dev branch `<dev-branch>` does not exist on origin. Create it first or run `/run-stories` for this epic."
+If this fails (branch not found on origin), stop and report:
+> "Dev branch `dev` does not exist on origin. Create it first."
 
 ---
 

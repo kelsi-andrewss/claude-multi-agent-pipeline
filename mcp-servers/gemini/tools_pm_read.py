@@ -446,7 +446,7 @@ def register(mcp):
 
     @mcp.tool()
     async def pm_dev_branch(epic_id: str) -> str:
-        """Compute the dev branch name and slug for an epic.
+        """Returns the dev branch name (always `dev`) and the epic slug for story branch naming.
 
         Args:
             epic_id: The epic ID (e.g., 'epic-022').
@@ -462,4 +462,4 @@ def register(mcp):
             slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:40]
             if not slug:
                 slug = epic_id
-            return fmt_dev_branch({"dev_branch": f"dev-{slug}", "epic_title": title, "epic_slug": slug})
+            return fmt_dev_branch({"dev_branch": "dev", "epic_title": title, "epic_slug": slug})
