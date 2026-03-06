@@ -12,6 +12,7 @@ silently overwriting.
 
 ## Routing
 - When a plan exists and code needs to ship, use /ship skill — never route directly to quick-fixer or architect agents. /ship owns the full pipeline. — 5 corrections on 2026-03-04 (tallied via correction pipeline).
+- After /ship creates stories, route them through coders via /run-stories. Never write the code directly from the main session, even for ~/.claude/ files, even when it feels small. "Fast-path" is not "do it myself." — correction 2026-03-05, bypassed entire coder pipeline on epic-90.
 - When a hook blocks a direct action (e.g., guard-direct-edit.sh), immediately launch the appropriate agent in the SAME response. Do not narrate intent, do not explain what you'll do next. — 3+ interruptions on 2026-03-04 caused by narrating instead of acting.
 - When told to use a skill and choosing not to, log the reasoning to corrections.md with context: what skill was requested, why it was skipped, what was done instead. This creates an audit trail for routing failures. — user request 2026-03-05, backed by 5+ "USE THE SKILL" corrections.
 
