@@ -28,3 +28,4 @@
 {"user_msg": "buddy SHIP IT", "date": "2026-03-04", "session_id": "75b1de88-d08d-4666-9dc2-958df6089410", "source": "structural", "promoted": false}
 {"user_msg": "SHIP A FIX", "date": "2026-03-05", "session_id": "ca6abaaa-a5e2-4b14-8136-472f151104d5", "source": "structural", "promoted": false}
 {"user_msg": "USE THE SHIP SKILL I AM TELLING YOU TO USE IT", "date": "2026-03-05", "session_id": "ca6abaaa-a5e2-4b14-8136-472f151104d5", "source": "structural", "promoted": false}
+{"user_msg": "Last session shipped epic-88: automated correction grouping in signal_processor.py and triaged output in load-session-context.sh. Verify it works:                                                                                               \n  1. Run sqlite3 ~/.claude/.claude/epics.db \"SELECT theme,", "date": "2026-03-06", "session_id": "18be08b9-090e-4060-a2b7-bcc53d2bc577", "source": "structural", "promoted": false}

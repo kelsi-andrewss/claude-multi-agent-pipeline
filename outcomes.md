@@ -2,6 +2,51 @@
 
 Post-merge/rejection log for pattern recognition across sessions. Consulted on-demand, not loaded into every session.
 
+## 2026-03-06 -- story-505 -- PostToolUse friction capture hook + settings.json registration
+**Intent**: Auto-detect friction events from Agent tool results and log to friction-log.md
+**Result**: merged
+**Agent**: qf
+**Model**: sonnet
+**Cycle time**: ~3.5min
+**Coder effort**: sonnet · 37486 tokens · 34 calls · 211s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 2
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-story execution; coder verified with multiple test inputs (BLOCKED, multi-match, clean, skip-type) and cleaned up after
+**What failed**: nothing
+
+## 2026-03-06 -- story-502 -- Add correction grouping to signal processor
+**Intent**: Add correction grouping to signal processor
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: ~2min
+**Coder effort**: haiku · 52594 tokens · 27 calls · 129s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-file extension. Haiku followed the plan precisely — matched transcript_embedder patterns for Ollama integration.
+**What failed**: nothing
+
+## 2026-03-06 -- story-503 -- Update session start with triaged corrections and distillation detection
+**Intent**: Update session start with triaged corrections and distillation detection
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: ~1.5min
+**Coder effort**: haiku · 40333 tokens · 18 calls · 92s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean extension of existing shell script. Embedded Python block pattern well understood by Haiku.
+**What failed**: nothing
+
 ```
 
 ## 2026-03-04 -- story-471 -- Fix Next.js 16 build failure: remove deprecated request.ip

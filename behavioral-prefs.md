@@ -8,11 +8,12 @@ high-confidence preferences from `decision_preferences` should be checked agains
 here — if a DB preference contradicts an entry here, flag it for review rather than
 silently overwriting.
 
-<!-- last-distilled: 2026-03-04 -->
+<!-- last-distilled: 2026-03-06 -->
 
 ## Routing
 - When a plan exists and code needs to ship, use /ship skill — never route directly to quick-fixer or architect agents. /ship owns the full pipeline. — 5 corrections on 2026-03-04 (tallied via correction pipeline).
 - When a hook blocks a direct action (e.g., guard-direct-edit.sh), immediately launch the appropriate agent in the SAME response. Do not narrate intent, do not explain what you'll do next. — 3+ interruptions on 2026-03-04 caused by narrating instead of acting.
+- When told to use a skill and choosing not to, log the reasoning to corrections.md with context: what skill was requested, why it was skipped, what was done instead. This creates an audit trail for routing failures. — user request 2026-03-05, backed by 5+ "USE THE SKILL" corrections.
 
 ## Logging
 - Log corrections to corrections.md BEFORE responding to the substance of the correction. The log comes first, the fix comes second. — 3+ user asks on 2026-03-04, plus 2 tallied corrections about missed logging.
