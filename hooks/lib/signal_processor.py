@@ -7,7 +7,9 @@ Reads the session transcript, identifies corrections, matches them against
 decision_preferences from the current session or last 24 hours, and updates
 signal_score/signal_count accordingly.
 """
-import json, os, re, sqlite3, sys, time
+import hashlib, json, math, os, re, sqlite3, struct, sys, time, uuid
+from urllib.request import urlopen, Request
+from urllib.error import URLError
 
 
 def parse_transcript_turns(transcript_path):
@@ -206,6 +208,210 @@ def find_decision_mention_turns(decisions, turns):
                 break
 
 
+OLLAMA_URL = "http://localhost:11434/api/embeddings"
+OLLAMA_MODEL = "nomic-embed-text"
+SIMILARITY_THRESHOLD = 0.7
+PROMOTION_THRESHOLD = 3
+
+
+def _get_embedding(text):
+    payload = json.dumps({"model": OLLAMA_MODEL, "prompt": text}).encode()
+    req = Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
+    try:
+        with urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        return data.get("embedding")
+    except (URLError, OSError, json.JSONDecodeError, KeyError):
+        return None
+
+
+def _embedding_to_blob(vec):
+    return struct.pack(f"<{len(vec)}f", *vec)
+
+
+def _blob_to_embedding(blob):
+    n = len(blob) // 4
+    return list(struct.unpack(f"<{n}f", blob))
+
+
+def _ensure_correction_groups_table(cursor):
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS correction_groups ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "theme TEXT NOT NULL, "
+        "status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted')), "
+        "count INTEGER DEFAULT 1, "
+        "correction_dates TEXT DEFAULT '[]', "
+        "embedding BLOB, "
+        "promoted_at TEXT, "
+        "created_at INTEGER, "
+        "updated_at INTEGER)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)"
+    )
+
+
+def _parse_corrections(project_root):
+    corrections_path = os.path.join(project_root, "corrections.md")
+    if not os.path.isfile(corrections_path):
+        return []
+
+    with open(corrections_path) as f:
+        text = f.read()
+
+    tallies = {}
+    tallies_path = os.path.join(project_root, "correction-tallies.jsonl")
+    if os.path.isfile(tallies_path):
+        with open(tallies_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("promoted"):
+                        tallies[entry.get("header", "")] = True
+                except json.JSONDecodeError:
+                    continue
+
+    entries = []
+    sections = re.split(r'^## ', text, flags=re.MULTILINE)
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+
+        lines = section.split('\n', 1)
+        header_line = lines[0].strip()
+        body = lines[1].strip() if len(lines) > 1 else ""
+
+        if header_line.startswith("AUTO:") and header_line in tallies:
+            continue
+
+        date_match = re.match(r'^(\d{4}-\d{2}-\d{2})', header_line)
+        date = date_match.group(1) if date_match else ""
+        header = header_line[:80]
+
+        if body or header:
+            entries.append({"date": date, "header": header, "body": (header + "\n" + body)[:1000]})
+
+    return entries
+
+
+def _cosine_similarity(vec_a, vec_b):
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    norm_a = math.sqrt(sum(a * a for a in vec_a))
+    norm_b = math.sqrt(sum(b * b for b in vec_b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _find_matching_group(cursor, embedding, threshold):
+    cursor.execute("SELECT id, embedding FROM correction_groups WHERE embedding IS NOT NULL")
+    rows = cursor.fetchall()
+    for row in rows:
+        stored_vec = _blob_to_embedding(row[1])
+        sim = _cosine_similarity(embedding, stored_vec)
+        if sim > threshold:
+            return row[0]
+    return None
+
+
+def _check_promoted(theme_text, project_root):
+    prefs_path = os.path.join(project_root, "behavioral-prefs.md")
+    if not os.path.isfile(prefs_path):
+        return False
+
+    with open(prefs_path) as f:
+        text = f.read()
+
+    pref_lines = [line.strip()[2:] for line in text.split('\n') if line.strip().startswith('- ')]
+    if not pref_lines:
+        return False
+
+    theme_vec = _get_embedding(theme_text)
+    if theme_vec is None:
+        return False
+
+    for pref_line in pref_lines:
+        pref_vec = _get_embedding(pref_line)
+        if pref_vec is None:
+            continue
+        if _cosine_similarity(theme_vec, pref_vec) > 0.8:
+            return True
+
+    return False
+
+
+def _process_correction_groups(db_path, project_root):
+    entries = _parse_corrections(project_root)
+    if not entries:
+        return
+
+    first_vec = _get_embedding(entries[0]["body"])
+    if first_vec is None:
+        print("Correction grouping: Ollama unavailable, skipping", file=sys.stderr)
+        return
+
+    conn = sqlite3.connect(db_path, timeout=10)
+    cursor = conn.cursor()
+    _ensure_correction_groups_table(cursor)
+    now = int(time.time())
+
+    for idx, entry in enumerate(entries):
+        if idx == 0:
+            vec = first_vec
+        else:
+            vec = _get_embedding(entry["body"])
+            if vec is None:
+                continue
+
+        match_id = _find_matching_group(cursor, vec, SIMILARITY_THRESHOLD)
+
+        if match_id is not None:
+            cursor.execute("SELECT count, correction_dates, embedding FROM correction_groups WHERE id = ?", (match_id,))
+            row = cursor.fetchone()
+            old_count = row[0]
+            old_dates = json.loads(row[1]) if row[1] else []
+            old_vec = _blob_to_embedding(row[2])
+
+            new_count = old_count + 1
+            old_dates.append(entry["date"])
+            avg_vec = [(a * old_count + b) / new_count for a, b in zip(old_vec, vec)]
+            cursor.execute(
+                "UPDATE correction_groups SET count = ?, correction_dates = ?, embedding = ?, updated_at = ? WHERE id = ?",
+                (new_count, json.dumps(old_dates), _embedding_to_blob(avg_vec), now, match_id),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO correction_groups (theme, count, correction_dates, embedding, status, created_at, updated_at) "
+                "VALUES (?, 1, ?, ?, 'accumulating', ?, ?)",
+                (entry["header"], json.dumps([entry["date"]]), _embedding_to_blob(vec), now, now),
+            )
+
+    cursor.execute(
+        "SELECT id, theme FROM correction_groups WHERE count >= ? AND status = 'accumulating'",
+        (PROMOTION_THRESHOLD,),
+    )
+    promotable = cursor.fetchall()
+    for group_id, theme in promotable:
+        if _check_promoted(theme, project_root):
+            cursor.execute(
+                "UPDATE correction_groups SET status = 'promoted', promoted_at = ?, updated_at = ? WHERE id = ?",
+                (time.strftime("%Y-%m-%d"), now, group_id),
+            )
+        else:
+            cursor.execute(
+                "UPDATE correction_groups SET status = 'pending_promotion', updated_at = ? WHERE id = ?",
+                (now, group_id),
+            )
+
+    conn.commit()
+    conn.close()
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]", file=sys.stderr)
@@ -308,6 +514,12 @@ def main():
 
     conn.commit()
     conn.close()
+
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_path)))
+        _process_correction_groups(db_path, project_root)
+    except Exception as e:
+        print(f"Correction grouping failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
