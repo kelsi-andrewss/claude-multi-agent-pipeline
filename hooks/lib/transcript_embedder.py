@@ -32,28 +32,35 @@ SYSTEM_DENSITY_THRESHOLD = 0.5
 MIN_CONTENT_LENGTH = 100
 
 SYSTEM_MSG = re.compile(
-    r"^(User:|Assistant:)|"
-    r"(^User:.*\n.*task-id>|^User:.*\n.*task-notification>)|"
-    r"^(Merging|Already merged|Cleaning up|All .* merged)|"
-    r"^User has requested:|"
-    r"^ToolSearch:|"
-    r"^select:mcp__|"
-    r"^## Coder Result",
-    re.MULTILINE
+    r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
+    r'^Base directory for this skill|'
+    r'^Implement the following plan:|'
+    r'^<skill-|'
+    r'^(Merging|Already merged|Cleaning up|All .* merged)|'
+    r'^User has requested:|'
+    r'^ToolSearch:|'
+    r'^select:mcp__|'
+    r'^## Coder Result',
+    re.IGNORECASE | re.MULTILINE
 )
+
+XML_TAG_PATTERN = re.compile(r'<[^>]+>', re.IGNORECASE)
 
 
 def filter_content(text):
-    return SYSTEM_MSG.sub("", text).strip()
+    """Strip XML tags and filter out system content lines."""
+    text = XML_TAG_PATTERN.sub('', text)
+    lines = [line for line in text.split('\n') if not SYSTEM_MSG.search(line)]
+    return '\n'.join(lines).strip()
 
 
 def calculate_system_density(text):
-    if not text:
+    """Ratio of system/boilerplate lines to total lines."""
+    lines = text.split('\n')
+    if not lines:
         return 0.0
-    filtered = filter_content(text)
-    if not filtered:
-        return 1.0
-    return 1.0 - (len(filtered) / len(text))
+    system_lines = sum(1 for line in lines if SYSTEM_MSG.search(line))
+    return system_lines / len(lines)
 
 
 def parse_transcript(path):
@@ -128,7 +135,7 @@ def chunk_turns(turns):
                 filtered = filter_content(chunk_text)
                 if len(filtered) >= MIN_CONTENT_LENGTH:
                     chunks.append({
-                        "text": chunk_text,
+                        "text": filtered,
                         "turn_start": chunk_start,
                         "turn_end": i - 1,
                     })
@@ -153,7 +160,7 @@ def chunk_turns(turns):
             filtered = filter_content(chunk_text)
             if len(filtered) >= MIN_CONTENT_LENGTH:
                 chunks.append({
-                    "text": chunk_text,
+                    "text": filtered,
                     "turn_start": chunk_start,
                     "turn_end": len(turns) - 1,
                 })
