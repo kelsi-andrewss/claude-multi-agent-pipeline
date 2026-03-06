@@ -113,6 +113,8 @@ Compute for each story:
   - `architect` → "Make full architectural changes as specified in the plan. Follow all structural decisions."
   - anything else → "Follow the plan exactly."
 
+**Model-specific warnings:** When the story's agent is `quick-fixer` (Haiku-tier), append to agent-approach: "CRITICAL: PRESERVE existing patterns. When extending or expanding code (regexes, arrays, switch cases, config objects), ADD new entries — never replace the existing block wholesale. Read the target section first, then insert your additions alongside what's already there."
+
 **Before constructing each coder's prompt**, perform per-story enrichment:
 
 **Pitfalls:** Extract file extensions from write_files (from the detail file), map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`, `py` in `mcp-servers/` → `python-mcp`, `md` in `skills/` → `skill-markdown`, `md` in `CLAUDE.md`/`ORCHESTRATION.md` → `claude-md`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
@@ -120,6 +122,10 @@ Compute for each story:
 **Read-only context:** Read the story's plan file, extract paths from the `## Read-only context` section (if present). Prefix paths with the worktree path.
 
 **Protected files:** Check if `<project-root>/.claude/protected-files.md` exists. If so, read it and include the list in the prompt.
+
+**Learnings:** Call `openmemory_query(query="<tech-stack-keywords> <write-target-filenames>", user_id="global", n=5)`. Filter to procedural/semantic sectors. Include non-empty results in the coder prompt as a `## Learnings` section after `## Pitfalls`. Tech-stack keywords: derive from file extensions and framework indicators in the plan (e.g., "react hooks", "python mcp", "firebase firestore"). If no results, omit the section.
+
+**Gitignore check:** Run `git -C <project-root> check-ignore <write_files>` (space-separated). If any file is gitignored, remove it from the write scope and add a warning to the coder prompt: "WARNING: <file> is gitignored — do not create or modify it. Achieve the story's goal without this file, or report NEED_DECISION." If ALL write targets are gitignored, skip the story and report as BLOCKED.
 
 Each background agent receives this prompt (fill all placeholders before launching):
 
@@ -151,6 +157,10 @@ Gemini is a research tool for the orchestrator — not available to coders.
 ## Pitfalls
 
 <pitfalls from pm_list_patterns, or "No pitfalls for this story's file types.">
+
+## Learnings
+
+<openmemory results formatted as bullet points, or omit section if none>
 
 ## Steps
 

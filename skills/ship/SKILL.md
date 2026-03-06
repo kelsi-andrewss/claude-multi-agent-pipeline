@@ -152,6 +152,8 @@ For each story, call `pm_get_story(story_id=<id>)` — read the detail file for 
    - <how to verify the changes work>
    ```
 
+   **Critique gate:** Before writing each plan file, read `refs/orch-critique-checklist.md` and apply all checks against the Gemini-planned story data. Significant issues (missing files, scope creep, convention violations, conflicts with recorded decisions) → surface to user before proceeding. Minor gaps (edge cases, existing utilities) → incorporate silently into the plan file. This is necessary because ship skips draft-plan's critique step.
+
    **Read-only context:** Determine from files referenced by tasks but not in the story's write_files scope. These give coders the interface contracts and utilities they need without modifying them. If `briefing_path` was set in Step 0 (presearch briefing), include it:
    - `<briefing_path>` — technical research briefing (APIs, data model, decisions, gotchas)
 
