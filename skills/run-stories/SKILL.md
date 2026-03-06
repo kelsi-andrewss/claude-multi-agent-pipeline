@@ -117,7 +117,7 @@ Compute for each story:
 
 **Before constructing each coder's prompt**, perform per-story enrichment:
 
-**Pitfalls:** Extract file extensions from write_files (from the detail file), map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
+**Pitfalls:** Extract file extensions from write_files (from the detail file), map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`, `py` in `mcp-servers/` → `python-mcp`, `md` in `skills/` → `skill-markdown`, `md` in `CLAUDE.md`/`ORCHESTRATION.md` → `claude-md`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
 
 **Read-only context:** Read the story's plan file, extract paths from the `## Read-only context` section (if present). Prefix paths with the worktree path.
 

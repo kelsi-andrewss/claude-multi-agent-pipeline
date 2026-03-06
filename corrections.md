@@ -1,9 +1,19 @@
 # Corrections Log
 
+## 2026-03-06 — why do you keep putting worktrees on main? i don't want worktrees from main
+**Context**: Worktrees being created from main or dev branches instead of feature branches. This means direct edits are happening on main/dev rather than proper feature branch isolation.
+**User said**: why do you keep putting worktrees on main? i don't want work trees from main or dev (that means you're doing direct edits), only on feature branches
+**Turn**: 1
+
 ## 2026-03-05 — why did you do things directly? that *directly* breaks our workflow
 **Context**: User asked to ship a skill-changelog hook. I invoked /ship, got epic-90 with 3 stories, then wrote the hook, seeded the changelog, and edited settings.json directly from the main session instead of writing plan files and routing through coders. The guard-direct-edit hook didn't block because ~/.claude/ files are allowlisted. But the workflow contract is clear: /ship means plan→coder→merge, not "I'll just do it myself."
 **User said**: why did you do things directly? that *directly* breaks our workflow
 **Turn**: ~10
+
+## 2026-03-06 — honestly those just seem like bad rules because that's what you thought
+**Context**: Proposing pitfall docs for .py and .md files, scoped only to past coder failures
+**User said**: honestly those just seem like bad rules because that's what you thought i wanted. i want them to be scoped but also geared toward best practices
+**Turn**: ~25
 
 ## 2026-03-05 — so you're able to autodetect these things worth noting, why did you also
 **Context**: After catching a Haiku coder regex replacement bug during merge review, I noted it verbally but didn't log it to tool-learnings.md or OpenMemory until user asked where to note it. User pointed out I should have auto-logged it when I detected it.

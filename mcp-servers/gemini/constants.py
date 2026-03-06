@@ -159,6 +159,9 @@ PITFALLS_CATEGORY_MAP = {
     "pitfalls-firebase.md": "firebase",
     "pitfalls-css.md": "css",
     "pitfalls-konva.md": "konva",
+    "pitfalls-python-mcp.md": "python-mcp",
+    "pitfalls-skill-markdown.md": "skill-markdown",
+    "pitfalls-claude-md.md": "claude-md",
 }
 
 # ---------------------------------------------------------------------------

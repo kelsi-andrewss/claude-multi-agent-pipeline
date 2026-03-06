@@ -98,6 +98,32 @@ def startup_migrate(db_path: Path | None = None) -> None:
                     raise
             conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (3)")
 
+        if current < 4:
+            # Expand patterns category CHECK constraint to include new pitfall categories
+            existing = conn.execute("SELECT sql FROM sqlite_master WHERE name='patterns'").fetchone()
+            if existing and "python-mcp" not in existing[0]:
+                conn.executescript("""
+                    ALTER TABLE patterns RENAME TO patterns_old;
+                    CREATE TABLE patterns (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        category TEXT NOT NULL CHECK (category IN (
+                            'react', 'firebase', 'css', 'konva', 'architecture', 'general',
+                            'python-mcp', 'skill-markdown', 'claude-md'
+                        )),
+                        severity TEXT DEFAULT 'must' CHECK (severity IN ('must', 'should', 'prefer')),
+                        source TEXT,
+                        status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deprecated')),
+                        created_at TEXT DEFAULT (date('now'))
+                    );
+                    INSERT INTO patterns SELECT * FROM patterns_old;
+                    DROP TABLE patterns_old;
+                    CREATE INDEX IF NOT EXISTS idx_patterns_category ON patterns(category);
+                    CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status) WHERE status = 'active';
+                """)
+            conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (4)")
+
         conn.commit()
     finally:
         conn.close()
@@ -245,7 +271,10 @@ def _ensure_knowledge_tables(conn: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             description TEXT NOT NULL,
-            category TEXT NOT NULL CHECK (category IN ('react', 'firebase', 'css', 'konva', 'architecture', 'general')),
+            category TEXT NOT NULL CHECK (category IN (
+                'react', 'firebase', 'css', 'konva', 'architecture', 'general',
+                'python-mcp', 'skill-markdown', 'claude-md'
+            )),
             severity TEXT DEFAULT 'must' CHECK (severity IN ('must', 'should', 'prefer')),
             source TEXT,
             status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deprecated')),

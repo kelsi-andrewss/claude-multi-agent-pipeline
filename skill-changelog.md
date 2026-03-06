@@ -41,3 +41,9 @@ these dates to compare friction rates before and after skill changes.
 - 2026-03-04 modified /run-stories — updated
 - 2026-03-04 modified /argue — updated
 - 2026-03-05 modified /bootstrap-memory — updated
+- 2026-03-05 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-05 modified /skill-health — Friction and skill health dashboard: friction events by category and trend, skil
+- 2026-03-05 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-05 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-05 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-05 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i

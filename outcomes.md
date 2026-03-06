@@ -2,6 +2,126 @@
 
 Post-merge/rejection log for pattern recognition across sessions. Consulted on-demand, not loaded into every session.
 
+## 2026-03-06 -- story-515 -- Normalize pm_dev_branch to always return dev
+**Intent**: Change pm_dev_branch tool to use a single dev branch
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: 0.1h
+**Coder effort**: haiku · 22769 tokens · 16 calls · 66s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: tool-learnings (pm_dev_branch prefix collision)
+**What worked**: clean execution, surgical 2-line change
+**What failed**: nothing
+
+## 2026-03-06 -- story-516 -- Simplify merge-worktree to use single dev branch
+**Intent**: Update merge-worktree skill to merge into dev
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: 0.1h
+**Coder effort**: haiku · 31033 tokens · 24 calls · 131s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: clean execution, removed 18 lines of fallback logic
+**What failed**: coder couldn't call pm_update_story (not available as deferred tool) — orchestrator handled state transition
+
+## 2026-03-06 -- story-517 -- Simplify run-stories to use single dev branch
+**Intent**: Update run-stories skill to use dev instead of per-epic branches
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: 0.1h
+**Coder effort**: haiku · 31486 tokens · 22 calls · 111s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: clean execution, hardcoded dev branch regardless of pm_dev_branch return value
+**What failed**: nothing
+
+## 2026-03-05 -- story-510 -- Tag normalization for OpenMemory
+**Intent**: Normalize tags in openmemory.sqlite to compact JSON, add normalization to transcript_embedder.py
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: ~2min
+**Coder effort**: haiku · 59260 tokens · 30 calls · 130s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: tool-learning (Haiku regex replacement pattern)
+**What worked**: Clean execution, coder correctly identified mcp.ts didn't need changes
+**What failed**: nothing
+
+## 2026-03-05 -- story-511 -- Decay in MCP mode
+**Intent**: Add periodic decay scheduling to ai/mcp.ts
+**Result**: merged (applied directly — file is gitignored)
+**Agent**: quick-fixer (manual override — gitignored file)
+**Model**: N/A (main session applied)
+**Cycle time**: ~3min
+**Coder effort**: haiku · 18512 tokens · 20 calls · 65s (BLOCKED, manual fix)
+**Skills used**: ship, run-stories
+**Friction events**: 1: blocked (gitignored write target)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Main session applied fix directly after coder blocked
+**What failed**: Coder couldn't commit to gitignored file — plan should have flagged this
+
+## 2026-03-05 -- story-512 -- Transcript quality improvement
+**Intent**: Raise quality bar for transcript embedding
+**Result**: merged (with post-merge fix)
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: ~1.5min
+**Coder effort**: haiku · 29043 tokens · 18 calls · 90s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 1: restart (coder dropped original regex patterns)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: tool-learning (Haiku regex replacement — 2nd occurrence)
+**What worked**: is_repetitive filter and MIN_CONTENT_LENGTH change implemented correctly
+**What failed**: Haiku replaced SYSTEM_MSG regex wholesale, dropping all 9 original patterns. Post-merge fixup required. This is the SECOND time this exact bug has occurred (tool-learnings.md).
+
+## 2026-03-06 -- story-514 -- Add cycle_time parser normalization to skill-health Step 4
+**Intent**: Add cycle_time parser normalization note to skill-health/SKILL.md Step 4
+**Result**: merged
+**Agent**: qf
+**Model**: haiku
+**Cycle time**: 0.0h
+**Coder effort**: haiku · 25264 tokens · 18 calls · 71s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-file edit. Haiku inserted normalization block at correct position in Step 4.
+**What failed**: nothing
+
+## 2026-03-06 -- story-513 -- Tighten merge-worktree cycle_time format
+**Intent**: Tighten merge-worktree/SKILL.md cycle_time instruction to always use decimal hours
+**Result**: merged
+**Agent**: qf
+**Model**: haiku
+**Cycle time**: 0.0h
+**Coder effort**: haiku · 26416 tokens · 12 calls · 51s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-file edit. Haiku replaced the cycle_time instruction precisely.
+**What failed**: nothing
+
 ## 2026-03-06 -- story-505 -- PostToolUse friction capture hook + settings.json registration
 **Intent**: Auto-detect friction events from Agent tool results and log to friction-log.md
 **Result**: merged
