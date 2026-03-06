@@ -65,6 +65,13 @@ Read all four data sources. Missing files are not errors — report what's avail
 
 ## Step 4: Compute efficiency metrics (from outcomes with extended fields)
 
+Before computing metrics, normalize all `cycle_time` values to float hours:
+- Strip leading `~`, `<`, `>` characters
+- If value ends with `min` (e.g., "2min", "1.5min"), parse the number and divide by 60
+- If value ends with `h` (e.g., "2.1h", "0.5h"), parse the number as-is
+- If value is "unknown" or unparseable, exclude that outcome from cycle time calculations
+  (do not treat as zero — zero means "measured at zero", not "unmeasured")
+
 - Avg cycle time for 0-friction stories vs. 2+-friction stories (parse cycle_time field)
 - Avg coder effort (tokens, calls) for clean vs. friction-heavy outcomes (parse coder_effort field)
 - Cycle time trend over time (by week, last 4 weeks)

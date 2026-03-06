@@ -90,31 +90,18 @@ User has requested: `/merge-worktree {{args}}`
 
 ## Step 2: Determine the dev branch
 
-**If `epic_id` is non-null:**
+> Note: The dev branch is always `dev`. `pm_dev_branch` is called in Step 1 for `epic_slug` only.
 
-> Note: `pm_dev_branch` was already called in Step 1 if `epic_id` was non-null. Reuse those results here.
-
-1. Use the `dev_branch` value from the `pm_dev_branch(epic_id)` response in Step 1 (the one-liner is the branch name).
-   - For `epic-backlog`, this is `"dev"`.
-   - For other epics, this is `"dev-<epic_slug>"`.
-
-**If `epic_id` is null (git-only mode):**
-
-1. Run:
-   ```bash
-   git branch -r | grep 'origin/dev-' | head -5
-   ```
-2. Ask the user which dev branch to merge into using `AskUserQuestion`, listing the candidates. If no `dev-` branches exist, stop and report:
-   > "No dev- branches found. Cannot determine merge target."
+Set `dev-branch` = `dev`.
 
 **Verify the branch exists on origin:**
 
 ```bash
-git fetch origin <dev-branch>
+git fetch origin dev
 ```
 
-If this fails (branch not found on origin), try `dev-branch = dev-<epic_id>` (e.g., `dev-epic-007`) as fallback before stopping. If the fallback also fails, stop and report:
-> "Dev branch `<dev-branch>` does not exist on origin. Create it first or run `/run-stories` for this epic."
+If this fails (branch not found on origin), stop and report:
+> "Dev branch `dev` does not exist on origin. Create it first."
 
 ---
 
@@ -231,7 +218,10 @@ Determine outcome metadata:
   - 6+ → "large"
   - If file_count is "unknown" → "unknown"
 - `cycle_time`: compute from epics.db — time between story state entering `in-progress` and
-  current timestamp. Format as hours (e.g., "2.1h"). If timestamps unavailable, "unknown".
+  current timestamp. **Format: decimal hours, one decimal place, no prefix symbols.**
+  Examples: `2.1h`, `0.5h`, `0.0h`. Never use `~`, `<`, `>`, or minute-based formats.
+  If DB timestamps are unavailable, derive from the `coder_effort` duration field
+  (e.g., 90s → 0.0h, 3600s → 1.0h). If neither source exists, use `0.0h`.
 - `coder_effort`: read `/tmp/coder-effort-<story_id>.json` (written by run-stories Step 5 on
   agent completion). Format as "[model] · [tokens] tokens · [calls] calls · [duration]s".
   If the file doesn't exist (story was run outside run-stories, or pre-dates this change),
