@@ -5,7 +5,7 @@ Usage: python3 transcript_embedder.py <transcript_path> <om_db_path>
 
 Parses JSONL transcript, groups turns into ~500-token chunks,
 calls Ollama nomic-embed-text for embeddings, and inserts into
-openmemory.sqlite with simhash dedup.
+openmemory.sqlite with (session-tag, chunk_index) dedup.
 """
 
 import hashlib
@@ -28,16 +28,39 @@ SECTOR = "episodic"
 USER_ID = "proj:dotclaude"
 SALIENCE = 0.3
 DECAY_LAMBDA = 0.07
+SYSTEM_DENSITY_THRESHOLD = 0.5
+MIN_CONTENT_LENGTH = 100
 
 SYSTEM_MSG = re.compile(
     r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
     r'^Base directory for this skill|'
     r'^Implement the following plan:|'
-    r'^<skill-',
+    r'^<skill-|'
+    r'^(Merging|Already merged|Cleaning up|All .* merged)|'
+    r'^User has requested:|'
+    r'^ToolSearch:|'
+    r'^select:mcp__|'
+    r'^## Coder Result',
     re.IGNORECASE | re.MULTILINE
 )
 
 XML_TAG_PATTERN = re.compile(r'<[^>]+>', re.IGNORECASE)
+
+
+def filter_content(text):
+    """Strip XML tags and filter out system content lines."""
+    text = XML_TAG_PATTERN.sub('', text)
+    lines = [line for line in text.split('\n') if not SYSTEM_MSG.search(line)]
+    return '\n'.join(lines).strip()
+
+
+def calculate_system_density(text):
+    """Ratio of system/boilerplate lines to total lines."""
+    lines = text.split('\n')
+    if not lines:
+        return 0.0
+    system_lines = sum(1 for line in lines if SYSTEM_MSG.search(line))
+    return system_lines / len(lines)
 
 
 def parse_transcript(path):
@@ -93,32 +116,6 @@ def estimate_tokens(text):
     return len(text) // 4
 
 
-def is_system_content(text):
-    """Check if text matches system/boilerplate patterns."""
-    return bool(SYSTEM_MSG.search(text))
-
-
-def calculate_system_density(text):
-    """Calculate the ratio of system/boilerplate content to total content.
-
-    Returns a float between 0.0 and 1.0 representing the fraction of text
-    that matches system content patterns.
-    """
-    lines = text.split('\n')
-    if not lines:
-        return 0.0
-
-    system_lines = sum(1 for line in lines if is_system_content(line))
-    return system_lines / len(lines)
-
-
-def filter_content(text):
-    """Strip XML tags and filter out system content lines."""
-    text = XML_TAG_PATTERN.sub('', text)
-    lines = [line for line in text.split('\n') if not is_system_content(line)]
-    return '\n'.join(lines).strip()
-
-
 def chunk_turns(turns):
     chunks = []
     current_text = []
@@ -132,13 +129,16 @@ def chunk_turns(turns):
 
         if current_tokens + seg_tokens > CHUNK_TOKEN_TARGET and current_text:
             chunk_text = "\n".join(current_text)
-            # Skip chunks with >80% system content density
-            if calculate_system_density(chunk_text) <= 0.8:
-                chunks.append({
-                    "text": filter_content(chunk_text),
-                    "turn_start": chunk_start,
-                    "turn_end": i - 1,
-                })
+
+            if calculate_system_density(chunk_text) <= SYSTEM_DENSITY_THRESHOLD:
+                filtered = filter_content(chunk_text)
+                if len(filtered) >= MIN_CONTENT_LENGTH:
+                    chunks.append({
+                        "text": filtered,
+                        "turn_start": chunk_start,
+                        "turn_end": i - 1,
+                    })
+
             current_text = []
             current_tokens = 0
             chunk_start = i
@@ -153,13 +153,15 @@ def chunk_turns(turns):
 
     if current_text:
         chunk_text = "\n".join(current_text)
-        # Skip chunks with >80% system content density
-        if calculate_system_density(chunk_text) <= 0.8:
-            chunks.append({
-                "text": filter_content(chunk_text),
-                "turn_start": chunk_start,
-                "turn_end": len(turns) - 1,
-            })
+
+        if calculate_system_density(chunk_text) <= SYSTEM_DENSITY_THRESHOLD:
+            filtered = filter_content(chunk_text)
+            if len(filtered) >= MIN_CONTENT_LENGTH:
+                chunks.append({
+                    "text": filtered,
+                    "turn_start": chunk_start,
+                    "turn_end": len(turns) - 1,
+                })
 
     return chunks
 
@@ -203,7 +205,8 @@ def main():
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now_ts = int(time.time())
-    tags = json.dumps(["transcript", f"session-{today}"])
+    session_tag = f"session-{today}"
+    tags = json.dumps(["transcript", session_tag])
 
     # Test Ollama availability with first chunk
     first_vec = get_embedding(chunks[0]["text"])
@@ -215,8 +218,10 @@ def main():
         for idx, chunk in enumerate(chunks):
             simhash = hashlib.md5(chunk["text"].encode()).hexdigest()[:16]
 
+            # Dedup by (session-tag, chunk_index)
             row = conn.execute(
-                "SELECT 1 FROM memories WHERE simhash = ?", (simhash,)
+                "SELECT 1 FROM memories WHERE tags LIKE ? AND meta LIKE ? AND user_id = ?",
+                (f"%{session_tag}%", f'%"chunk_index": {idx}%', USER_ID)
             ).fetchone()
             if row:
                 continue
