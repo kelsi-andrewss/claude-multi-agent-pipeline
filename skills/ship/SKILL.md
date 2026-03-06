@@ -223,7 +223,7 @@ If any stories are BLOCKED, list their reasons. Continue to Step 5b only if at l
 
 After all stories merge into the dev branch, review the combined output:
 
-1. Determine `<dev-branch>` from the epic mapping and `<base>` (the commit the dev branch was created from, or `main`).
+1. Determine `<dev-branch>` from the epic mapping and `<base>` (the commit the dev branch was created from, i.e. where it diverged from `dev`).
 2. Generate the full diff: `git diff <base>...<dev-branch>`
 3. Launch reviewer agent (background, **Sonnet**) on the full diff. The reviewer sees the combined output of all stories and checks for:
    - Cross-story naming inconsistencies
