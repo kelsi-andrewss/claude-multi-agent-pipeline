@@ -8,7 +8,7 @@ high-confidence preferences from `decision_preferences` should be checked agains
 here — if a DB preference contradicts an entry here, flag it for review rather than
 silently overwriting.
 
-<!-- last-distilled: 2026-03-06 -->
+<!-- last-distilled: 2026-03-05 -->
 
 ## Routing
 - When a plan exists and code needs to ship, use /ship skill — never route directly to quick-fixer or architect agents. /ship owns the full pipeline. — 5 corrections on 2026-03-04 (tallied via correction pipeline).
@@ -17,7 +17,7 @@ silently overwriting.
 
 ## Logging
 - Log corrections to corrections.md BEFORE responding to the substance of the correction. The log comes first, the fix comes second. — 3+ user asks on 2026-03-04, plus 2 tallied corrections about missed logging.
-- (tentative) When catching a coder bug during merge review, log it to tool-learnings.md + OpenMemory in the same response as the fix. Don't wait for a second occurrence — concrete evidence is enough. — 1 correction on 2026-03-05.
+- When you detect something noteworthy (coder bug, tool failure, pattern, learning), log it to the appropriate place (tool-learnings.md, OpenMemory, friction-log.md) immediately in the same response. Don't wait to be asked, don't wait for a second occurrence. If you can identify it, you can log it. — 16 corrections across 2026-03-04/05 (grouped from "autodetect and log" theme).
 
 ## Directness (HIGHEST PRIORITY — 8+ corrections, 2026-03-04)
 - State problems you can see. Don't ask the user to confirm what's visible.
