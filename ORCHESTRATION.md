@@ -10,6 +10,10 @@ These are decision rules and constraints for the main Claude Code session. Spawn
 
 **Main session worktree prohibition**: MUST NOT use `EnterWorktree` or `git worktree add`. All story worktrees are created by background coder agents only. Exception: `/merge-worktree` uses ephemeral `/tmp/` worktrees.
 
+**No direct commits to main or dev**: All work — including hotfixes and quickfixes — must happen on a named feature branch (`hotfix/<slug>`, `quickfix/<slug>`, or story branch). Never commit directly to main or dev from any session.
+
+**Branch merge hierarchy**: `main` is production. The ONLY thing that merges to main is `dev`. Everything else (story branches, hotfixes, quickfixes, epic dev branches) merges to `dev`.
+
 **Gemini** — research and planning via MCP tools (`pm_*`, `gemini_*`). Writes to `epics.db`.
 **Coders** (`quick-fixer`, `architect`) — execute approved plan files in worktrees. Never plan. Always `run_in_background: true`.
 **Reviewer/Unit-tester/Git-ops** — on-demand, always `run_in_background: true`.
@@ -108,8 +112,14 @@ Before `/clear`: write `session-handoff.md`, store summary to OpenMemory, run de
 
 ## 10. HOTFIX AND QUICKFIX
 
-**Hotfix**: single file, not protected, ≤30 lines, no schema/AI. Inline edit, squash PR. Max 3/session.
-**Quickfix**: 1-3 files, none protected, no schema/AI. Worktree + quick-fixer (Haiku). Max 2/session.
+**Hotfix**: single file, not protected, ≤30 lines, no schema/AI. Max 3/session.
+- Create branch `hotfix/<slug>` from `dev`, edit there, merge back to `dev`.
+- Never commit directly to main or dev.
+
+**Quickfix**: 1-3 files, none protected, no schema/AI. Max 2/session.
+- Create branch `quickfix/<slug>` from `dev`. Worktree + quick-fixer (Haiku) on that branch. Merge to `dev`.
+- Never commit directly to main or dev.
+
 Both skip `/todo` and epics.db. Rejected → `/todo`.
 
 ---
@@ -120,19 +130,13 @@ Read from `<project>/.claude/protected-files.md`. Stories touching protected fil
 
 ---
 
-## 12. SPECULATIVE EXECUTION
-
-User-requested only. Two plan files, two parallel worktrees, same base branch. Max 1/session, architect only. Loser worktree cleaned up.
-
----
-
-## 13. `/ship`
+## 12. `/ship`
 
 One-shot pipeline: QUEUE→PLAN→DRAFT→RUN→MERGE. Default for new projects, isolated features, MVPs. Full procedures: ship/SKILL.md. Fall back to full pipeline for protected files, schema changes, or production iteration.
 
 ---
 
-## 14. MEMORY
+## 13. MEMORY
 
 Two layers: **eager** (CLAUDE.md, ORCHESTRATION.md, behavioral-prefs.md — loaded at session start) and **lazy** (OpenMemory — queried on demand).
 
@@ -140,7 +144,7 @@ All templates, tag taxonomy, scoping rules, synthesis, debrief: `refs/orch-memor
 
 ---
 
-## 15. FRICTION TRACKING
+## 14. FRICTION TRACKING
 
 Friction = deviations from the expected path. Two types: **automatic** (escalation, restart, blocked, need_decision, conflict, test retry) and **judgment** (with counterfactual). Corrections capture what the user said; friction captures what went wrong. Not every correction is friction.
 

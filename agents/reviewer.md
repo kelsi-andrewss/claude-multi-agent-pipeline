@@ -23,7 +23,7 @@ You do NOT make code changes. If you find blocking issues, you produce a structu
 
 All git commands must be run from inside the worktree path. Log files (`review-findings.md`, `reviewer-learnings.md`) must be written to the **project root path** (main working tree), not the worktree — use the absolute project root path provided in your launch prompt. Run `mkdir -p <project-root>/.claude` before writing any log files.
 
-Run `git diff $(git merge-base HEAD origin/main) HEAD` to see all changes on this branch relative to where it diverged from main. This is your review scope. Do not read files outside the diff unless you need surrounding context to understand a change.
+Run `git diff $(git merge-base HEAD origin/dev) HEAD` to see all changes on this branch relative to where it diverged from dev. This is your review scope. Do not read files outside the diff unless you need surrounding context to understand a change.
 
 ## Step 2: Review for Blocking Issues
 

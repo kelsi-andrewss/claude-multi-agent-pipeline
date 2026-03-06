@@ -66,9 +66,9 @@ Exactly one of the following applies (in priority order):
 **A. story_id is set:**
 - Call `pm_get_story("<story_id>")` → read the detail file to extract `branch`.
 - If the story is not found or `branch` is null, stop and report: "story_id not found or has no branch."
-- Run: `git -C <project-root> diff main...story/<branch> --name-only`
+- Run: `git -C <project-root> diff dev...story/<branch> --name-only`
 - Collect the output lines as the target file list.
-- If the list is empty, report: "No files changed in story/<branch> vs main." and stop.
+- If the list is empty, report: "No files changed in story/<branch> vs dev." and stop.
 
 **B. flag_since is set:**
 - Run: `git -C <project-root> log --since="<flag_since>" --name-only --pretty=format:"" | sort -u`
