@@ -949,3 +949,11 @@ Key exchanges:
   - "<command-name>/clear</command-name>"
   - "does our skill efficiency tool work well?"
 Artifacts updated: none
+<!-- session: 261f8391-4fb9-462d-843a-c9f0a6ed8044 -->
+## 2026-03-06 04:43 — 39min — 26 turns — 13 edits
+Files: SKILL.md, bright-leaf.md, calm-river.md, constants.py, corrections.md, outcomes.md, pitfalls-claude-md.md, pitfalls-python-mcp.md, pitfalls-skill-markdown.md, quiet-stone.md, tools_pm_helpers.py
+Key exchanges:
+  - "why do you think the dev branch is not "dev"? should we normalize our workflow for git?"
+  - "Base directory for this skill: /Users/kelsiandrews/.claude/skills/ship"
+  - "Base directory for this skill: /Users/kelsiandrews/.claude/skills/run-stories"
+Artifacts updated: none
