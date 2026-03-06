@@ -27,13 +27,23 @@ CHUNK_TOKEN_TARGET = 500
 MIN_CONTENT_LENGTH = 200
 
 SYSTEM_MSG = re.compile(
-    r'^(Merged|Worktree removed|Branch deleted|Story updated|Epic updated|Branch cleanup):'
-    r'|^(Commit|commit) [0-9a-f]{7,40}'
-    r'|^\s*```\s*$'
-    r'|^(Ship complete|Run complete|Hotfix|Integration verified):'
-    r'|^Full transcript available at:'
-    r'|^\s*\|.*\|.*\|'
-    r'|^story-\d+\s+(batch|DONE|BLOCKED)'
+    r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
+    r'^Base directory for this skill|'
+    r'^Implement the following plan:|'
+    r'^<skill-|'
+    r'^(Merging|Already merged|Cleaning up|All .* merged)|'
+    r'^User has requested:|'
+    r'^ToolSearch:|'
+    r'^select:mcp__|'
+    r'^## Coder Result|'
+    r'^(Merged|Worktree removed|Branch deleted|Story updated|Epic updated|Branch cleanup):|'
+    r'^(Commit|commit) [0-9a-f]{7,40}|'
+    r'^\s*```\s*$|'
+    r'^(Ship complete|Run complete|Hotfix|Integration verified):|'
+    r'^Full transcript available at:|'
+    r'^\s*\|.*\|.*\||'
+    r'^story-\d+\s+(batch|DONE|BLOCKED)',
+    re.IGNORECASE | re.MULTILINE
 )
 SECTOR = "episodic"
 USER_ID = "proj:dotclaude"
