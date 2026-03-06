@@ -8,6 +8,7 @@ calls Ollama nomic-embed-text for embeddings, and inserts into
 openmemory.sqlite with simhash dedup.
 """
 
+import difflib
 import hashlib
 import json
 import os
@@ -188,6 +189,13 @@ def normalize_tags(conn):
     conn.commit()
 
 
+def is_similar(text, existing_texts, threshold=0.8):
+    for existing in existing_texts:
+        if difflib.SequenceMatcher(None, text, existing).ratio() > threshold:
+            return True
+    return False
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(1)
@@ -221,6 +229,11 @@ def main():
 
     conn = sqlite3.connect(om_db, timeout=10)
     normalize_tags(conn)
+    existing = conn.execute(
+        "SELECT content FROM memories WHERE primary_sector = ? AND tags LIKE ? AND user_id = ?",
+        (SECTOR, f'%session-{today}%', USER_ID)
+    ).fetchall()
+    existing_texts = [row[0] for row in existing]
     try:
         for idx, chunk in enumerate(chunks):
             simhash = hashlib.md5(chunk["text"].encode()).hexdigest()[:16]
@@ -229,6 +242,9 @@ def main():
                 "SELECT 1 FROM memories WHERE simhash = ?", (simhash,)
             ).fetchone()
             if row:
+                continue
+
+            if is_similar(chunk["text"], existing_texts, 0.8):
                 continue
 
             if idx == 0:
