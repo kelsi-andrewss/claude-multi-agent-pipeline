@@ -160,7 +160,8 @@ def main():
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now_ts = int(time.time())
-    tags = json.dumps(["transcript", f"session-{today}"])
+    session_tag = f"session-{today}"
+    tags = json.dumps(["transcript", session_tag])
 
     # Test Ollama availability with first chunk
     first_vec = get_embedding(chunks[0]["text"])
@@ -172,8 +173,10 @@ def main():
         for idx, chunk in enumerate(chunks):
             simhash = hashlib.md5(chunk["text"].encode()).hexdigest()[:16]
 
+            # Dedup by (session-tag, chunk_index)
             row = conn.execute(
-                "SELECT 1 FROM memories WHERE simhash = ?", (simhash,)
+                "SELECT 1 FROM memories WHERE tags LIKE ? AND meta LIKE ? AND user_id = ?",
+                (f"%{session_tag}%", f'%"chunk_index": {idx}%', USER_ID)
             ).fetchone()
             if row:
                 continue
