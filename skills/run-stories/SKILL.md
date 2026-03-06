@@ -80,19 +80,17 @@ Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each depende
 
 ---
 
-## Step 3: Ensure dev branches exist
+## Step 3: Ensure dev branch exists
 
 For each unique epic referenced by the stories being run:
 
-1. Call `pm_dev_branch(epic_id)` → the response is the branch name (e.g., `dev-my-feature`). Read the detail file for `epic_slug` if needed.
-2. If `epic_id` is `"epic-backlog"`, `dev-branch = "dev"` — skip branch creation.
-3. Otherwise, `dev-branch` is the branch name from the response. Run these git commands (in the project root):
-   ```bash
-   git show-ref --verify --quiet refs/heads/<dev-branch> || git branch <dev-branch> dev
-   git push -u origin <dev-branch> 2>/dev/null || true
-   ```
+1. Call `pm_dev_branch(epic_id)` → read the detail file for `epic_slug`.
+2. Store the mapping: `epic_id → {dev_branch: "dev", epic_slug}` for use in step 4.
 
-Store the mapping: `epic_id → {dev_branch, epic_slug}` for use in step 4. (Read the detail file from each `pm_dev_branch` call for the `epic_slug`.)
+After collecting all epic slugs, ensure the `dev` branch exists on origin:
+```bash
+git fetch origin dev 2>/dev/null || { git branch dev main && git push -u origin dev; }
+```
 
 ---
 
@@ -281,7 +279,7 @@ For each story that passes validation (diff gate + testing), invoke `/merge-work
 Print a final summary:
 
 ```
-Run complete.  Dev branch: dev-my-feature
+Run complete.  Dev branch: dev
 
 story-001  batch 0   my-feature--fix-auth-flow      DONE    abc1234   tests: pass
 story-003  batch 0   my-feature--update-dashboard   DONE    def5678   tests: skipped (no infra)
