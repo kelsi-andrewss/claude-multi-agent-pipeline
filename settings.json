@@ -10,7 +10,8 @@
       "Bash(~/.claude/hooks/session-learning-check.sh*)",
       "Bash(~/.claude/hooks/log-skill-invocation.sh*)",
       "mcp__openmemory__openmemory_store",
-      "mcp__openmemory__openmemory_query"
+      "mcp__openmemory__openmemory_query",
+      "Bash(~/.claude/hooks/capture-friction.sh*)"
     ],
     "defaultMode": "default"
   },
@@ -102,6 +103,17 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/log-skill-invocation.sh",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/capture-friction.sh",
             "timeout": 5,
             "async": true
           }
