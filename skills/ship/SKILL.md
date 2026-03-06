@@ -24,7 +24,9 @@ Parse `{{args}}` to determine the mode:
 1. **Resume mode**: first token matches `epic-\d+` → set `epic_id` to that token.
 2. **File mode**: a token ends with `.md` and the file exists → read it:
    - If path starts with `plans/` and file contains `## What changes` → **Execute mode** (existing plan file).
-   - Otherwise → **PRD mode** (requirements doc). Read file contents as `context`.
+   - Otherwise → **PRD mode** (requirements doc). Read file contents, then check for a `## Summary` section:
+     - If `## Summary` exists → **presearch briefing**. Extract `## Summary` content as `context` (not the full file). Extract numbered items from `## Features` > `### MVP` as `items`. Store the briefing path as `briefing_path` for use in Step 3. Read and store the full file contents as `briefing_contents` for use in Steps 2c and 2d.
+     - If `## Summary` absent → existing behavior (full file as `context`).
 3. **Inline mode**: everything else. Extract:
    - Quoted string or text before numbered items → `title`
    - `by YYYY-MM-DD` → `target_date`
@@ -70,7 +72,7 @@ For an existing plan file:
 After Step 2 (or Step 2b), run Gemini planning as a separate step:
 
 1. Note `epic_id` from the `pm_ship` response (read the detail file at the path in the response if needed).
-2. Call `pm_plan_stories(epic_id=<epic_id>)` to generate tasks, write_files, agent assignments, and parallel groups for all draft stories.
+2. Call `pm_plan_stories(epic_id=<epic_id>, context=<briefing_contents>)` where `briefing_contents` is the full presearch briefing read in Step 0. If no briefing (non-presearch mode), omit context.
 3. Read the detail file for planned stories with tasks and execution order.
 
 **Skip this step in Execute mode** (Step 2b), since that path uses a pre-written plan file.
@@ -89,16 +91,16 @@ Validate the plan and produce acceptance criteria before writing plan files:
 **Default path** (no `--argue` flag):
 
 3. Load analyze: `ToolSearch: select:mcp__gemini__analyze`
-4. Call `analyze(input="Review this implementation plan for <epic title>. For each story: 1) Check decomposition, file targets, and missing dependencies. 2) Define concrete acceptance criteria — observable behaviors proving correctness (e.g., 'GET /users returns 200 with user list', 'clicking Submit shows confirmation modal'). Format acceptance criteria under per-story headings.\n\n<plan summary>")`.
+4. Call `analyze(input="Review this implementation plan for <epic title>. Cross-reference against the technical briefing below — flag any plan that ignores gotchas, uses wrong API patterns, or contradicts research decisions.\n\nFor each story: 1) Check decomposition, file targets, and missing dependencies. 2) Define concrete acceptance criteria — observable behaviors proving correctness (e.g., 'GET /users returns 200 with user list', 'clicking Submit shows confirmation modal'). Format acceptance criteria under per-story headings.\n\n## Technical Briefing\n<briefing_contents>\n\n## Plan Summary\n<plan summary>")`. If no briefing (non-presearch mode), omit the Technical Briefing section and use the existing format.
 5. Parse response:
    - Plan issues → adjust in Step 3 plan files or call `pm_update_story`.
    - Acceptance criteria → extract per-story criteria and include in plan files (Step 3).
 
 **`--argue` path** (`use_argue = true`):
 
-3. Write plan summary to `/tmp/ship-plan-<epic-id>.md`.
+3. Write plan summary to `/tmp/ship-plan-<epic-id>.md`. If `briefing_contents` exists, append it under a `## Technical Briefing` heading.
 4. Load argue: `ToolSearch: select:mcp__gemini__argue`
-5. Call `argue(topic="Implementation plan for <epic title>: 1) Verify decomposition, file targets, approach, and missing dependencies. 2) For each story, define concrete acceptance criteria — observable behaviors that prove the story works correctly. Output these under a per-story ACCEPTANCE CRITERIA heading.", topic_type="plan", context_docs=["/tmp/ship-plan-<epic-id>.md"], max_rounds=3)`.
+5. Call `argue(topic="Implementation plan for <epic title>: 1) Verify decomposition, file targets, approach, and missing dependencies. Cross-reference against the technical briefing — flag any plan that ignores gotchas, uses wrong API patterns, or contradicts research decisions. 2) For each story, define concrete acceptance criteria — observable behaviors that prove the story works correctly. Output these under a per-story ACCEPTANCE CRITERIA heading.", topic_type="plan", context_docs=["/tmp/ship-plan-<epic-id>.md"], max_rounds=3)`.
 6. Parse synthesis:
    - Plan issues → adjust in Step 3 plan files or call `pm_update_story`.
    - Acceptance criteria → extract per-story criteria and include in plan files (Step 3).
@@ -150,7 +152,10 @@ For each story, call `pm_get_story(story_id=<id>)` — read the detail file for 
    - <how to verify the changes work>
    ```
 
-   **Read-only context:** Determine from files referenced by tasks but not in the story's write_files scope. These give coders the interface contracts and utilities they need without modifying them.
+   **Read-only context:** Determine from files referenced by tasks but not in the story's write_files scope. These give coders the interface contracts and utilities they need without modifying them. If `briefing_path` was set in Step 0 (presearch briefing), include it:
+   - `<briefing_path>` — technical research briefing (APIs, data model, decisions, gotchas)
+
+   **Briefing references in tasks:** When `briefing_path` is set, write task descriptions that reference specific briefing sections for any task involving APIs, data models, patterns, or gotchas. Format: `(see briefing ## <Section> > <Subsection> for <what>)`. This eliminates ambiguity — coders know exactly which research to follow.
 
    **Acceptance criteria:** If plan validation ran (Step 2d), extract per-story criteria from the analyze/argue response. If validation was skipped (`--quick`), write basic criteria derived from the story's task descriptions — focus on observable behaviors, not implementation details.
 
