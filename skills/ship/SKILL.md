@@ -31,6 +31,19 @@ Parse `{{args}}` to determine the mode:
    - Quoted string or text before numbered items → `title`
    - `by YYYY-MM-DD` → `target_date`
    - Remaining numbered or comma-separated items → `items` list
+
+   **Sufficiency check (inline mode only):** After parsing, check for actionable signals:
+   - Specific technologies/frameworks mentioned? (e.g., "Stripe", "React", "Firebase")
+   - Existing file paths referenced?
+   - Numbered feature items (≥2)?
+   - If ANY of these signals are present → pass through silently.
+   - If NONE are present (pure prose, no structure), warn:
+     ```
+     This looks like a high-level idea. /presearch produces better results by
+     researching APIs and constraints first. Continue anyway? (y/presearch)
+     ```
+   - User says "y" or similar → continue. User says "presearch" → invoke `/presearch` with the same args. This is a warning, not a gate.
+
 4. **No args**: Ask the user: "Describe what to build (features or file path):" and stop.
 
 ---

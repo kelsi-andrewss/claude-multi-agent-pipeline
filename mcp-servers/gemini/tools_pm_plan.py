@@ -60,7 +60,7 @@ def register(mcp):
                 f"Current write_files: {sd.get('write_files') or []}\n\n"
                 f"Other open stories (for dependency awareness):\n{open_stories_text}\n\n"
                 "Return a single JSON object (not an array) with fields: "
-                "agent, write_files, tasks, parallel_group, depends_on."
+                "agent, write_files, read_files, tasks, parallel_group, depends_on."
             )
 
             prompt = _build_plan_prompt(subject, audit_context, code_content, user_context=context)
@@ -78,16 +78,20 @@ def register(mcp):
                 (plan_data.get("agent"), json.dumps(plan_data.get("write_files", [])), story_id)
             )
             depends_on = plan_data.get("depends_on", [])
+            dep_warnings: list[str] = []
             if depends_on:
-                _set_story_deps(conn, story_id, depends_on)
-            return fmt_plan_story({
+                dep_warnings = _set_story_deps(conn, story_id, depends_on)
+            result = {
                 "mode": "story",
                 "story_id": story_id,
                 "title": sd["title"],
                 "agent": plan_data.get("agent"),
                 "write_files": plan_data.get("write_files", []),
                 "tasks_created": len(plan_data.get("tasks", [])),
-            })
+            }
+            if dep_warnings:
+                result["dep_warnings"] = dep_warnings
+            return fmt_plan_story(result)
 
     @mcp.tool()
     async def pm_plan_stories(
@@ -167,7 +171,7 @@ def register(mcp):
                 epic_prefix
                 + "Stories to plan (return a JSON array, one object per story in the same order):\n"
                 + "\n".join(subject_lines)
-                + "\n\nEach array element must have: story_id, agent, write_files, tasks, parallel_group, depends_on."
+                + "\n\nEach array element must have: story_id, agent, write_files, read_files, tasks, parallel_group, depends_on."
             )
 
             if per_story_paths:
@@ -183,7 +187,7 @@ def register(mcp):
                         f"Current agent: {s.get('agent') or 'unassigned'}\n"
                         f"Current write_files: {s.get('write_files') or []}\n\n"
                         "Return a single JSON object (not an array) with fields: "
-                        "story_id, agent, write_files, tasks, parallel_group, depends_on."
+                        "story_id, agent, write_files, read_files, tasks, parallel_group, depends_on."
                     )
                     story_prompt = _build_plan_prompt(story_subject, audit_context, story_code, user_context=context)
                     raw = await _gemini(story_prompt)
@@ -431,8 +435,9 @@ def register(mcp):
         """
         with _db_op(readonly=True) as conn:
             stories_data = {}
+            stories_read_data = {}
             for sid in story_ids:
-                row = conn.execute("SELECT id, write_files FROM stories WHERE id = ?", (sid,)).fetchone()
+                row = conn.execute("SELECT id, write_files, read_files FROM stories WHERE id = ?", (sid,)).fetchone()
                 if not row:
                     continue
                 wf = row["write_files"]
@@ -443,6 +448,15 @@ def register(mcp):
                         wf = []
                 stories_data[sid] = set(wf or [])
 
+                rf = row["read_files"] if "read_files" in row.keys() else None
+                if rf and isinstance(rf, str):
+                    try:
+                        rf = json.loads(rf)
+                    except json.JSONDecodeError:
+                        rf = []
+                stories_read_data[sid] = set(rf or [])
+
+            # Write-write conflicts
             conflicts = []
             file_to_stories: dict[str, list[str]] = {}
             for sid, files in stories_data.items():
@@ -453,15 +467,29 @@ def register(mcp):
                 if len(sids) > 1:
                     conflicts.append({"file": f, "stories": sids})
 
+            # Write-read conflicts
+            read_conflicts = []
+            for writer_id, write_files in stories_data.items():
+                for reader_id, read_files in stories_read_data.items():
+                    if writer_id == reader_id:
+                        continue
+                    overlap = write_files & read_files
+                    for f in overlap:
+                        read_conflicts.append({"file": f, "writer": writer_id, "reader": reader_id})
+
             conflicting_ids = set()
             for c in conflicts:
                 conflicting_ids.update(c["stories"])
+            # Readers must run after their writers
+            for rc in read_conflicts:
+                conflicting_ids.add(rc["reader"])
 
             safe_parallel = [sid for sid in story_ids if sid in stories_data and sid not in conflicting_ids]
             sequential = [sid for sid in story_ids if sid in conflicting_ids]
 
             return fmt_check_conflicts({
                 "conflicts": conflicts,
+                "read_conflicts": read_conflicts,
                 "safe_parallel": safe_parallel,
                 "sequential": sequential,
             })

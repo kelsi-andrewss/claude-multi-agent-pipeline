@@ -2,6 +2,96 @@
 
 Post-merge/rejection log for pattern recognition across sessions. Consulted on-demand, not loaded into every session.
 
+## 2026-03-06 -- story-523 -- Function-level write-target overlap detection
+**Intent**: Add file:symbol syntax to run-stories conflict detection for function-level parallel safety
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 26415 tokens · 13 calls · 69s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: outcomes data (story-427 merge conflict drove this change)
+**What worked**: Clean execution, coder inserted subsection and prompt update precisely
+**What failed**: nothing
+
+## 2026-03-06 -- story-522 -- Smoke test gate before merge
+**Intent**: Add test step to merge-worktree between diff review and merge
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 30716 tokens · 23 calls · 105s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: outcomes data (28/31 stories skipped testing drove this change)
+**What worked**: Clean execution, coder inserted Step 2.5 and updated outcome/report templates
+**What failed**: nothing
+
+## 2026-03-06 -- story-521 -- Default coders to Sonnet, Haiku only for truly trivial
+**Intent**: Change ORCHESTRATION.md §2 coder default from Haiku to Sonnet with Haiku threshold rule
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 25079 tokens · 16 calls · 74s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: outcomes data (Haiku 17% failure rate drove this change)
+**What worked**: Clean execution, table replacement and threshold rule insertion precise
+**What failed**: nothing
+
+## 2026-03-06 -- story-520 -- Add one-time OpenMemory dedup cleanup script
+**Intent**: Write cleanup script for duplicate OpenMemory entries
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: 0.0h
+**Coder effort**: [haiku] · 22130 tokens · 14 calls · 77s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean execution, dry-run confirmed 44 duplicates found before any deletion
+**What failed**: nothing
+
+## 2026-03-06 -- story-518 -- Remove raw correction dual-write
+**Intent**: Remove raw correction dual-write from session-learning-check.sh
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: 0.0h
+**Coder effort**: [haiku] · 28725 tokens · 25 calls · 120s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean deletion — coder correctly identified that OM_DB variable needed to be preserved for transcript embedding section
+**What failed**: nothing
+
+## 2026-03-06 -- story-519 -- Add content-similarity dedup to transcript_embedder.py
+**Intent**: Add content-similarity dedup to transcript_embedder.py
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: haiku
+**Cycle time**: 0.0h
+**Coder effort**: [haiku] · 26690 tokens · 17 calls · 70s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean execution, difflib similarity check added with single pre-loop query
+**What failed**: nothing
+
 ## 2026-03-06 -- story-515 -- Normalize pm_dev_branch to always return dev
 **Intent**: Change pm_dev_branch tool to use a single dev branch
 **Result**: merged

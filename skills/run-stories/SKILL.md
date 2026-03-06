@@ -64,19 +64,48 @@ Build an execution plan from two analyses:
   > "story-NNN deferred: depends on story-MMM (different epic, not done). Will run after story-MMM is merged."
 - **Never skip a story just because it has dependencies** — place it in the correct dependency group. Every story passed to `/run-stories` MUST appear in the execution plan, either in a parallel batch or a sequential deferred group with a clear "runs after story-NNN merges" label.
 
+### 2a-post. Bootstrap detection
+
+After building dependency groups, scan Group 0 for bootstrap stories:
+
+1. A story is a **bootstrap story** if its title matches `/bootstrap/i` AND it has no `depends_on` of its own.
+2. If a bootstrap story is found: move all other Group 0 stories (non-bootstrap) to Group 1, with an implicit dependency on the bootstrap story. Log: "Auto-serialized: story-NNN (bootstrap) runs before all others in this epic"
+3. A story titled like "Bootstrap payment provider" that has `depends_on` entries is NOT treated as bootstrap — it runs normally in its dependency group.
+4. If no bootstrap story exists in the batch, no change to execution order.
+
 ### 2b. File conflict detection (within each dependency group)
 
 Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each dependency group:
 
 1. Collect all story IDs in the group and call `pm_check_conflicts(story_ids=[...])`.
 2. Read the detail file. It contains:
-   - `conflicts`: list of `{file, stories}` overlap entries
+   - `conflicts`: list of `{file, stories}` write-write overlap entries
+   - `read_conflicts`: list of `{file, writer, reader}` write-read overlap entries
    - `safe_parallel`: story IDs with no write-file overlaps (launch together)
    - `sequential`: story IDs that must run after conflicting stories merge
 3. Use `safe_parallel` as batch 0. For `sequential` stories, chain them after their conflicting partner from `safe_parallel` finishes.
-4. Within each batch, order stories by ID (lowest first) for determinism.
+4. For `read_conflicts`: ensure the `reader` story runs in a batch after the `writer` story's batch. This prevents a reader from seeing stale file content.
+5. Within each batch, order stories by ID (lowest first) for determinism.
 
 > **Note:** A story may be placed in a later sequential batch even if it doesn't directly conflict with the story immediately before it. This happens when a downstream story conflicts with *both*, forcing them into a strict order. Stories are always chained safely to prevent merge conflicts.
+
+---
+
+## Step 2c: Post-bootstrap build verification
+
+**This step ONLY runs when a bootstrap story was detected in Step 2a-post AND that story's batch has completed and merged.** If no bootstrap story, skip entirely — zero overhead.
+
+After the bootstrap story's batch (Group 0) completes and merges into the dev branch, before launching Group 1:
+
+1. Checkout the dev branch (post-bootstrap-merge).
+2. Detect project type from the worktree and run the appropriate build command:
+   - `package.json` → `npm install && npm run build` (or `npx tsc --noEmit` if no build script)
+   - `pubspec.yaml` → `flutter pub get && flutter analyze`
+   - `pyproject.toml` → `pip install -e . 2>&1 | tail -5`
+   - `Cargo.toml` → `cargo check`
+   - `go.mod` → `go build ./...`
+3. If build succeeds → continue to Group 1 (launch feature stories).
+4. If build fails → report the error, mark all remaining stories as BLOCKED with reason "Bootstrap build verification failed: <error>", stop execution.
 
 ---
 
