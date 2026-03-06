@@ -16,6 +16,7 @@ silently overwriting.
 
 ## Logging
 - Log corrections to corrections.md BEFORE responding to the substance of the correction. The log comes first, the fix comes second. — 3+ user asks on 2026-03-04, plus 2 tallied corrections about missed logging.
+- (tentative) When catching a coder bug during merge review, log it to tool-learnings.md + OpenMemory in the same response as the fix. Don't wait for a second occurrence — concrete evidence is enough. — 1 correction on 2026-03-05.
 
 ## Directness (HIGHEST PRIORITY — 8+ corrections, 2026-03-04)
 - State problems you can see. Don't ask the user to confirm what's visible.

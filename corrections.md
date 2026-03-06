@@ -1,5 +1,10 @@
 # Corrections Log
 
+## 2026-03-05 — so you're able to autodetect these things worth noting, why did you also
+**Context**: After catching a Haiku coder regex replacement bug during merge review, I noted it verbally but didn't log it to tool-learnings.md or OpenMemory until user asked where to note it. User pointed out I should have auto-logged it when I detected it.
+**User said**: so you're able to autodetect these things worth noting, why did you also not autolog it to memory?
+**Turn**: ~25
+
 ## 2026-03-04 — why didn't u use ship skill omfg
 **Context**: User said "ship the audit" — manually launched 3 quick-fixer agents instead of using /ship skill. Work completed but wrong workflow.
 **User said**: why didn't u use ship skill omfg
