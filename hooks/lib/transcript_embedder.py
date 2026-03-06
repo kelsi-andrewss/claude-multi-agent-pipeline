@@ -11,6 +11,7 @@ openmemory.sqlite with simhash dedup.
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import struct
 import sys
@@ -27,6 +28,32 @@ SECTOR = "episodic"
 USER_ID = "proj:dotclaude"
 SALIENCE = 0.3
 DECAY_LAMBDA = 0.07
+SYSTEM_DENSITY_THRESHOLD = 0.5
+MIN_CONTENT_LENGTH = 100
+
+SYSTEM_MSG = re.compile(
+    r"^(User:|Assistant:)|"
+    r"(^User:.*\n.*task-id>|^User:.*\n.*task-notification>)|"
+    r"^(Merging|Already merged|Cleaning up|All .* merged)|"
+    r"^User has requested:|"
+    r"^ToolSearch:|"
+    r"^select:mcp__|"
+    r"^## Coder Result",
+    re.MULTILINE
+)
+
+
+def filter_content(text):
+    return SYSTEM_MSG.sub("", text).strip()
+
+
+def calculate_system_density(text):
+    if not text:
+        return 0.0
+    filtered = filter_content(text)
+    if not filtered:
+        return 1.0
+    return 1.0 - (len(filtered) / len(text))
 
 
 def parse_transcript(path):
@@ -94,11 +121,18 @@ def chunk_turns(turns):
         seg_tokens = estimate_tokens(segment)
 
         if current_tokens + seg_tokens > CHUNK_TOKEN_TARGET and current_text:
-            chunks.append({
-                "text": "\n".join(current_text),
-                "turn_start": chunk_start,
-                "turn_end": i - 1,
-            })
+            chunk_text = "\n".join(current_text)
+
+            # Check content quality: skip if too much system noise
+            if calculate_system_density(chunk_text) <= SYSTEM_DENSITY_THRESHOLD:
+                filtered = filter_content(chunk_text)
+                if len(filtered) >= MIN_CONTENT_LENGTH:
+                    chunks.append({
+                        "text": chunk_text,
+                        "turn_start": chunk_start,
+                        "turn_end": i - 1,
+                    })
+
             current_text = []
             current_tokens = 0
             chunk_start = i
@@ -112,11 +146,17 @@ def chunk_turns(turns):
         current_tokens += seg_tokens
 
     if current_text:
-        chunks.append({
-            "text": "\n".join(current_text),
-            "turn_start": chunk_start,
-            "turn_end": len(turns) - 1,
-        })
+        chunk_text = "\n".join(current_text)
+
+        # Check content quality: skip if too much system noise
+        if calculate_system_density(chunk_text) <= SYSTEM_DENSITY_THRESHOLD:
+            filtered = filter_content(chunk_text)
+            if len(filtered) >= MIN_CONTENT_LENGTH:
+                chunks.append({
+                    "text": chunk_text,
+                    "turn_start": chunk_start,
+                    "turn_end": len(turns) - 1,
+                })
 
     return chunks
 
