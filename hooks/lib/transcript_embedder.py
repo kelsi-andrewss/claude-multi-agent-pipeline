@@ -11,6 +11,7 @@ openmemory.sqlite with simhash dedup.
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import struct
 import sys
@@ -23,6 +24,27 @@ from urllib.error import URLError
 OLLAMA_URL = "http://localhost:11434/api/embeddings"
 MODEL = "nomic-embed-text"
 CHUNK_TOKEN_TARGET = 500
+MIN_CONTENT_LENGTH = 200
+
+SYSTEM_MSG = re.compile(
+    r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
+    r'^Base directory for this skill|'
+    r'^Implement the following plan:|'
+    r'^<skill-|'
+    r'^(Merging|Already merged|Cleaning up|All .* merged)|'
+    r'^User has requested:|'
+    r'^ToolSearch:|'
+    r'^select:mcp__|'
+    r'^## Coder Result|'
+    r'^(Merged|Worktree removed|Branch deleted|Story updated|Epic updated|Branch cleanup):|'
+    r'^(Commit|commit) [0-9a-f]{7,40}|'
+    r'^\s*```\s*$|'
+    r'^(Ship complete|Run complete|Hotfix|Integration verified):|'
+    r'^Full transcript available at:|'
+    r'^\s*\|.*\|.*\||'
+    r'^story-\d+\s+(batch|DONE|BLOCKED)',
+    re.IGNORECASE | re.MULTILINE
+)
 SECTOR = "episodic"
 USER_ID = "proj:dotclaude"
 SALIENCE = 0.3
@@ -82,6 +104,25 @@ def estimate_tokens(text):
     return len(text) // 4
 
 
+def filter_system_lines(text):
+    return "\n".join(
+        line for line in text.split("\n")
+        if not SYSTEM_MSG.match(line.strip())
+    )
+
+
+def is_repetitive(text):
+    lines = [l for l in text.split('\n') if l.strip()]
+    if len(lines) < 4:
+        return False
+    short_exchanges = sum(
+        1 for l in lines
+        if (l.startswith('User: ') or l.startswith('Assistant: '))
+        and len(l.split(': ', 1)[-1]) <= 30
+    )
+    return short_exchanges / len(lines) > 0.5
+
+
 def chunk_turns(turns):
     chunks = []
     current_text = []
@@ -94,11 +135,14 @@ def chunk_turns(turns):
         seg_tokens = estimate_tokens(segment)
 
         if current_tokens + seg_tokens > CHUNK_TOKEN_TARGET and current_text:
-            chunks.append({
-                "text": "\n".join(current_text),
-                "turn_start": chunk_start,
-                "turn_end": i - 1,
-            })
+            raw = "\n".join(current_text)
+            filtered = filter_system_lines(raw)
+            if len(filtered) >= MIN_CONTENT_LENGTH and not is_repetitive(filtered):
+                chunks.append({
+                    "text": filtered,
+                    "turn_start": chunk_start,
+                    "turn_end": i - 1,
+                })
             current_text = []
             current_tokens = 0
             chunk_start = i
@@ -112,11 +156,14 @@ def chunk_turns(turns):
         current_tokens += seg_tokens
 
     if current_text:
-        chunks.append({
-            "text": "\n".join(current_text),
-            "turn_start": chunk_start,
-            "turn_end": len(turns) - 1,
-        })
+        raw = "\n".join(current_text)
+        filtered = filter_system_lines(raw)
+        if len(filtered) >= MIN_CONTENT_LENGTH and not is_repetitive(filtered):
+            chunks.append({
+                "text": filtered,
+                "turn_start": chunk_start,
+                "turn_end": len(turns) - 1,
+            })
 
     return chunks
 
@@ -134,6 +181,11 @@ def get_embedding(text):
 
 def embedding_to_blob(vec):
     return struct.pack(f"<{len(vec)}f", *vec)
+
+
+def normalize_tags(conn):
+    conn.execute("UPDATE memories SET tags = REPLACE(tags, ', ', ',') WHERE tags LIKE '%, %'")
+    conn.commit()
 
 
 def main():
@@ -160,7 +212,7 @@ def main():
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now_ts = int(time.time())
-    tags = json.dumps(["transcript", f"session-{today}"])
+    tags = json.dumps(["transcript", f"session-{today}"], separators=(',', ':'))
 
     # Test Ollama availability with first chunk
     first_vec = get_embedding(chunks[0]["text"])
@@ -168,6 +220,7 @@ def main():
         sys.exit(0)
 
     conn = sqlite3.connect(om_db, timeout=10)
+    normalize_tags(conn)
     try:
         for idx, chunk in enumerate(chunks):
             simhash = hashlib.md5(chunk["text"].encode()).hexdigest()[:16]

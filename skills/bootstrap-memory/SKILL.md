@@ -15,13 +15,13 @@ Incremental seeding of OpenMemory with project knowledge. Safe to re-run — che
 2. **Seed key prompt patterns.** Read each file in `~/.claude/.claude/tracking/key-prompts/`. For each `##` entry:
    - Extract the title, category, context, prompt, and why-it-worked fields
    - Compute `simhash = md5(compressed_entry)[:16]`
-   - Call `openmemory_query(query=<first 50 chars of content>, k=1, user_id="global")` — if the top result has matching simhash in metadata or >90% content overlap, skip (count as `skip_count`)
+   - Call `openmemory_query(query=<full compressed entry text>, k=3, user_id="global")` — for each result: compare the first 80 chars of `content_preview` against the entry (case-insensitive, whitespace-normalized); if they match, skip (count as `skip_count`). If no content match but a result has matching simhash in metadata, also skip.
    - Otherwise: `openmemory_store(content="<compressed entry>", tags=["prompt-pattern"], user_id="global", metadata={"sector": "procedural", "simhash": "<simhash>"})`
    - Count stored entries as `prompt_count`
 
 3. **Shadow active decisions.** Call `pm_list_decisions(status="active")`. For each decision:
    - Compute `simhash = md5(decision_summary)[:16]`
-   - Call `openmemory_query(query=<first 50 chars of decision>, k=1, user_id="proj:dotclaude")` — if the top result has matching simhash in metadata or >90% content overlap, skip (count as `skip_count`)
+   - Call `openmemory_query(query=<full decision summary text>, k=3, user_id="proj:dotclaude")` — for each result: compare the first 80 chars of `content_preview` against the entry (case-insensitive, whitespace-normalized); if they match, skip (count as `skip_count`). If no content match but a result has matching simhash in metadata, also skip.
    - Otherwise: `openmemory_store(content="Decision [id]: <title> — <summary>", tags=["decision"], user_id="proj:dotclaude", metadata={"sector": "semantic", "decision_id": "<id>", "simhash": "<simhash>"})`
    - Count stored entries as `decision_count`
 

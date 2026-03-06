@@ -210,7 +210,7 @@ def find_decision_mention_turns(decisions, turns):
 
 OLLAMA_URL = "http://localhost:11434/api/embeddings"
 OLLAMA_MODEL = "nomic-embed-text"
-SIMILARITY_THRESHOLD = 0.7
+SIMILARITY_THRESHOLD = 0.85
 PROMOTION_THRESHOLD = 3
 
 
@@ -286,11 +286,15 @@ def _parse_corrections(project_root):
         header_line = lines[0].strip()
         body = lines[1].strip() if len(lines) > 1 else ""
 
+        # Skip non-correction sections (file header, format notes)
+        date_match = re.match(r'^(\d{4}-\d{2}-\d{2})', header_line)
+        if not date_match:
+            continue
+
         if header_line.startswith("AUTO:") and header_line in tallies:
             continue
 
-        date_match = re.match(r'^(\d{4}-\d{2}-\d{2})', header_line)
-        date = date_match.group(1) if date_match else ""
+        date = date_match.group(1)
         header = header_line[:80]
 
         if body or header:
@@ -311,12 +315,15 @@ def _cosine_similarity(vec_a, vec_b):
 def _find_matching_group(cursor, embedding, threshold):
     cursor.execute("SELECT id, embedding FROM correction_groups WHERE embedding IS NOT NULL")
     rows = cursor.fetchall()
+    best_id = None
+    best_sim = threshold
     for row in rows:
         stored_vec = _blob_to_embedding(row[1])
         sim = _cosine_similarity(embedding, stored_vec)
-        if sim > threshold:
-            return row[0]
-    return None
+        if sim > best_sim:
+            best_sim = sim
+            best_id = row[0]
+    return best_id
 
 
 def _check_promoted(theme_text, project_root):

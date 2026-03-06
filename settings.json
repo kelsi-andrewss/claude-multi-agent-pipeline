@@ -9,6 +9,7 @@
       "Bash(~/.claude/hooks/block-env-read.sh*)",
       "Bash(~/.claude/hooks/session-learning-check.sh*)",
       "Bash(~/.claude/hooks/log-skill-invocation.sh*)",
+      "Bash(~/.claude/hooks/track-skill-changes.sh*)",
       "mcp__openmemory__openmemory_store",
       "mcp__openmemory__openmemory_query"
     ],
@@ -28,6 +29,12 @@
             "type": "command",
             "command": "~/.claude/hooks/guard-protected-files.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/track-skill-changes.sh",
+            "timeout": 5,
+            "async": true
           }
         ]
       },
