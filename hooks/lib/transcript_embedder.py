@@ -136,6 +136,11 @@ def embedding_to_blob(vec):
     return struct.pack(f"<{len(vec)}f", *vec)
 
 
+def normalize_tags(conn):
+    conn.execute("UPDATE memories SET tags = REPLACE(tags, ', ', ',') WHERE tags LIKE '%, %'")
+    conn.commit()
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(1)
@@ -160,7 +165,7 @@ def main():
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now_ts = int(time.time())
-    tags = json.dumps(["transcript", f"session-{today}"])
+    tags = json.dumps(["transcript", f"session-{today}"], separators=(',', ':'))
 
     # Test Ollama availability with first chunk
     first_vec = get_embedding(chunks[0]["text"])
@@ -168,6 +173,7 @@ def main():
         sys.exit(0)
 
     conn = sqlite3.connect(om_db, timeout=10)
+    normalize_tags(conn)
     try:
         for idx, chunk in enumerate(chunks):
             simhash = hashlib.md5(chunk["text"].encode()).hexdigest()[:16]
