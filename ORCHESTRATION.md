@@ -25,11 +25,18 @@ These are decision rules and constraints for the main Claude Code session. Spawn
 | Role | Default | Escalation |
 |---|---|---|
 | Claude (main) | Sonnet | Opus if user requests or high-risk |
-| Coder | Haiku | Sonnet for standard; Opus after 2 BLOCKING round-trips |
-| Coder (`/ship`) | Sonnet | Opus after 2 BLOCKING round-trips |
-| Coder (`/ship` new project) | Sonnet | Opus for Bootstrap story |
+| Coder | Sonnet | Opus after 2 BLOCKING round-trips |
+| Coder (Haiku threshold) | Haiku | Sonnet if BLOCKED once |
 | Reviewer | Haiku | Sonnet only if coder ran on Opus |
 | Unit-tester | Haiku | Never escalated |
+
+**Haiku threshold**: Use Haiku ONLY when ALL of these are true:
+- Single write-target file
+- Plan specifies exact code (copy-paste level) or pure deletion
+- No regex or pattern manipulation
+- No complex conditional logic
+
+If any criterion fails, use the default (Sonnet). When in doubt, use Sonnet — the round-trip cost of a Haiku failure exceeds the token cost difference.
 
 Before defaulting, query OpenMemory for tool learnings about the model + file type. Consistent failures → escalate preemptively.
 
