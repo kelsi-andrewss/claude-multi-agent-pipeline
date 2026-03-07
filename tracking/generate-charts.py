@@ -568,6 +568,40 @@ html = f"""<!DOCTYPE html>
   </div>
 </div>
 
+<div class="section">
+  <div class="section-header errors">Errors</div>
+  <div class="grid">
+    <div class="card wide">
+      <h2>Errors per day</h2>
+      <canvas id="errorsDay"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header skills">Skill Health</div>
+  <div class="grid">
+    <div class="card">
+      <h2>Invocations per day</h2>
+      <canvas id="skillInvocations"></canvas>
+    </div>
+    <div class="card">
+      <h2>Success rate</h2>
+      <canvas id="skillSuccess"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header memory">OpenMemory Health</div>
+  <div class="grid">
+    <div class="card wide">
+      <h2>Operations</h2>
+      <canvas id="omOps"></canvas>
+    </div>
+  </div>
+</div>
+
 <script>
 const DATES = {dates_js};
 const COST_BY_DATE = {cost_by_date_js};
@@ -597,6 +631,14 @@ const AVG_DURATION_BY_DATE = {avg_duration_by_date_js};
 const SCATTER_DATA = {scatter_data_js};
 const TPM_DATA = {tpm_data_js};
 const DUR_HIST_RANGES = {dur_hist_ranges_js};
+const ERROR_DATES = {error_dates_js};
+const ERROR_DATASETS = {error_datasets_js};
+const SKILL_DATES = {skill_dates_js};
+const SKILL_INVOCATIONS = {skill_invocations_js};
+const SKILL_SUCCESS_RATE = {skill_success_rate_js};
+const OM_LABELS = {om_labels_js};
+const OM_VALUES = {om_values_js};
+const HAS_OM_DATA = {'true' if has_om_data else 'false'};
 
 function formatDuration(s) {{
   if (s <= 0) return '0s';
@@ -853,6 +895,84 @@ new Chart(document.getElementById('promptStack'), {{
     }}
   }}
 }});
+
+// Error trends stacked bar
+if (ERROR_DATES.length > 0) {{
+  new Chart(document.getElementById('errorsDay'), {{
+    type: 'bar',
+    data: {{
+      labels: ERROR_DATES,
+      datasets: ERROR_DATASETS
+    }},
+    options: {{ ...baseOpts,
+      scales: {{
+        x: {{ ...baseOpts.scales.x, stacked: true }},
+        y: {{ ...baseOpts.scales.y, stacked: true,
+          ticks: {{ ...baseOpts.scales.y.ticks, stepSize: 1 }} }}
+      }}
+    }}
+  }});
+}}
+
+// Skill invocations per day with success rate overlay
+if (SKILL_DATES.length > 0) {{
+  new Chart(document.getElementById('skillInvocations'), {{
+    type: 'bar',
+    data: {{
+      labels: SKILL_DATES,
+      datasets: [{{ label: 'Invocations', data: SKILL_INVOCATIONS,
+        backgroundColor: '#22d3ee', borderRadius: 4 }}]
+    }},
+    options: {{ ...baseOpts,
+      scales: {{ ...baseOpts.scales,
+        y: {{ ...baseOpts.scales.y,
+          ticks: {{ ...baseOpts.scales.y.ticks, stepSize: 1 }} }} }}
+    }}
+  }});
+
+  new Chart(document.getElementById('skillSuccess'), {{
+    type: 'line',
+    data: {{
+      labels: SKILL_DATES,
+      datasets: [{{ label: 'Success rate (%)', data: SKILL_SUCCESS_RATE,
+        borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,0.15)',
+        fill: true, tension: 0.3, pointRadius: 3 }}]
+    }},
+    options: {{ ...baseOpts,
+      scales: {{ ...baseOpts.scales,
+        y: {{ ...baseOpts.scales.y, min: 0, max: 100,
+          ticks: {{ ...baseOpts.scales.y.ticks, callback: v => v + '%' }} }} }},
+      plugins: {{ ...baseOpts.plugins,
+        tooltip: {{ callbacks: {{ label: ctx => ' ' + ctx.parsed.y + '%' }} }} }}
+    }}
+  }});
+}}
+
+// OM operations bar
+if (HAS_OM_DATA) {{
+  new Chart(document.getElementById('omOps'), {{
+    type: 'bar',
+    data: {{
+      labels: OM_LABELS,
+      datasets: [{{ label: 'Operations', data: OM_VALUES,
+        backgroundColor: '#a78bfa', borderRadius: 4 }}]
+    }},
+    options: {{ ...baseOpts,
+      plugins: {{ ...baseOpts.plugins, legend: {{ display: false }} }},
+      scales: {{ ...baseOpts.scales,
+        y: {{ ...baseOpts.scales.y,
+          ticks: {{ ...baseOpts.scales.y.ticks, stepSize: 1 }} }} }}
+    }}
+  }});
+}} else {{
+  const omCanvas = document.getElementById('omOps');
+  if (omCanvas) {{
+    const ctx = omCanvas.getContext('2d');
+    ctx.fillStyle = '#64748b';
+    ctx.font = '14px -apple-system, sans-serif';
+    ctx.fillText('No OM operations logged yet', 20, 40);
+  }}
+}}
 </script>
 </body>
 </html>
