@@ -7,14 +7,33 @@ require_profile 1
 
 # Read stdin for transcript_path and session metadata
 INPUT=$(cat)
-TRANSCRIPT_PATH=$(echo "$INPUT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('transcript_path', ''))" 2>/dev/null)
-SESSION_ID_RAW=$(echo "$INPUT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('session_id', ''))" 2>/dev/null)
-CWD=$(echo "$INPUT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('cwd', ''))" 2>/dev/null)
 
-# ── Section 1: Mtime comparison ──────────────────────────────────────────────
+TRANSCRIPT_PATH=$(echo "$INPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('transcript_path', ''))
+" 2>/dev/null)
+
+SESSION_ID_RAW=$(echo "$INPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('session_id', ''))
+" 2>/dev/null)
+
+CWD=$(echo "$INPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('cwd', ''))
+" 2>/dev/null)
+
+# ============================================================
+# Section 1: Mtime comparison
+# ============================================================
 SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
 SNAPSHOT="/tmp/session-mtimes-${SESSION_ID}"
-ARTIFACTS_CHANGED=""
+
+CORRECTIONS_CHANGED=false
+OUTCOMES_CHANGED=false
 
 if [[ -f "$SNAPSHOT" ]]; then
   source "$SNAPSHOT"
@@ -29,49 +48,90 @@ if [[ -f "$SNAPSHOT" ]]; then
 
   CURRENT_CORRECTIONS=$(mtime "$HOME/.claude/corrections.md")
   CURRENT_OUTCOMES=$(mtime "$HOME/.claude/outcomes.md")
-  CURRENT_PREFS=$(mtime "$HOME/.claude/behavioral-prefs.md")
+  CURRENT_BEHAVPREFS=$(mtime "$HOME/.claude/behavioral-prefs.md")
 
-  CORRECTIONS_CHANGED=false
-  OUTCOMES_CHANGED=false
   [[ "$CURRENT_CORRECTIONS" != "${CORRECTIONS_MTIME:-0}" ]] && CORRECTIONS_CHANGED=true
   [[ "$CURRENT_OUTCOMES" != "${OUTCOMES_MTIME:-0}" ]] && OUTCOMES_CHANGED=true
 
-  [[ "$CORRECTIONS_CHANGED" == true ]] && ARTIFACTS_CHANGED="corrections"
-  [[ "$OUTCOMES_CHANGED" == true ]] && ARTIFACTS_CHANGED="${ARTIFACTS_CHANGED:+$ARTIFACTS_CHANGED, }outcomes"
-  [[ "$CURRENT_PREFS" != "${PREFS_MTIME:-0}" ]] && ARTIFACTS_CHANGED="${ARTIFACTS_CHANGED:+$ARTIFACTS_CHANGED, }behavioral-prefs"
-
   if [[ "$CORRECTIONS_CHANGED" == true && "$OUTCOMES_CHANGED" == false ]]; then
     echo "corrections.md modified — outcomes.md unchanged"
-    echo "→ Log an outcome for this session's correction(s) next session."
   elif [[ "$CORRECTIONS_CHANGED" == true && "$OUTCOMES_CHANGED" == true ]]; then
     echo "corrections.md + outcomes.md both updated"
-    echo "→ Distillation will trigger at threshold."
   elif [[ "$OUTCOMES_CHANGED" == true ]]; then
-    echo "outcomes.md updated → distillation will trigger at threshold."
+    echo "outcomes.md updated"
   fi
 
   rm -f "$SNAPSHOT"
 fi
 
-# ── Section 2: Correction detection → correction_groups ──────────────────────
-# Writes correction count to a temp file for downstream sections.
-CORRECTION_COUNT=0
-CORRECTION_COUNT_FILE="/tmp/correction-count-$$"
-if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-python3 - "$TRANSCRIPT_PATH" "$HOME/.claude" "${SESSION_ID_RAW:-}" "${CORRECTIONS_MTIME:-0}" "$CORRECTION_COUNT_FILE" <<'PYEOF'
-import json, os, re, sqlite3, sys
+# Exit early if no transcript
+if [[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]]; then
+  exit 0
+fi
+
+# ============================================================
+# Section 2: Correction detection → correction_groups
+# ============================================================
+DB_FILE="$HOME/.claude/.claude/epics.db"
+
+python3 - "$TRANSCRIPT_PATH" "$HOME/.claude" "${SESSION_ID_RAW:-}" "${CORRECTIONS_MTIME:-0}" "$DB_FILE" <<'TALLYEOF'
+import json, os, re, sys, sqlite3
 from datetime import datetime, timezone
 
 transcript_path = sys.argv[1]
 project_root = sys.argv[2]
 session_id = sys.argv[3] if len(sys.argv) > 3 else ""
 corrections_mtime_start = sys.argv[4] if len(sys.argv) > 4 else "0"
-count_file = sys.argv[5] if len(sys.argv) > 5 else ""
+db_file = sys.argv[5] if len(sys.argv) > 5 else ""
 
-db_path = os.path.expanduser("~/.claude/.claude/epics.db")
+corrections_file = os.path.join(project_root, "corrections.md")
 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-# --- Parse transcript ---
+# Ensure correction_groups table exists
+if db_file and os.path.isfile(db_file):
+    try:
+        conn = sqlite3.connect(db_file, timeout=5)
+        conn.execute("""CREATE TABLE IF NOT EXISTS correction_groups (
+            theme TEXT PRIMARY KEY,
+            status TEXT DEFAULT 'accumulating',
+            count INTEGER DEFAULT 1,
+            correction_dates TEXT,
+            promoted_at TEXT
+        )""")
+        conn.commit()
+    except Exception:
+        conn = None
+else:
+    conn = None
+
+def upsert_correction(theme_text):
+    if not conn:
+        return
+    theme_key = theme_text[:80].strip().lower()
+    try:
+        row = conn.execute(
+            "SELECT theme, count, correction_dates, status FROM correction_groups "
+            "WHERE LOWER(SUBSTR(theme, 1, 40)) = LOWER(SUBSTR(?, 1, 40))",
+            (theme_key,)
+        ).fetchone()
+        if row:
+            new_count = row[1] + 1
+            dates = row[2] + "," + today if row[2] else today
+            new_status = 'pending_promotion' if new_count >= 3 else row[3]
+            conn.execute(
+                "UPDATE correction_groups SET count=?, correction_dates=?, status=? WHERE theme=?",
+                (new_count, dates, new_status, row[0])
+            )
+        else:
+            conn.execute(
+                "INSERT INTO correction_groups (theme, status, count, correction_dates) VALUES (?, 'accumulating', 1, ?)",
+                (theme_text[:300], today)
+            )
+        conn.commit()
+    except Exception:
+        pass
+
+# Parse transcript
 lines = []
 try:
     with open(transcript_path) as f:
@@ -83,15 +143,8 @@ try:
                 except json.JSONDecodeError:
                     continue
 except Exception:
-    print("0"); sys.exit(0)
+    lines = []
 
-if not lines:
-    print("0"); sys.exit(0)
-
-if len(lines) > 5000:
-    lines = lines[-2000:]
-
-# Extract turns with tool_use info
 turns = []
 for entry in lines:
     role = entry.get("type", "")
@@ -135,16 +188,8 @@ for entry in lines:
         continue
 
     if content_text:
-        turns.append({
-            "role": role,
-            "content": content_text.strip(),
-            "has_tool_use": has_tool_use,
-        })
+        turns.append({"role": role, "content": content_text.strip(), "has_tool_use": has_tool_use})
 
-if not turns:
-    print("0"); sys.exit(0)
-
-# --- Correction detection patterns ---
 IMPERATIVE_STARTS = re.compile(
     r'^(use |stop |don\'t |do not |just |why didn\'t |why don\'t |why aren\'t |'
     r'make |run |try |ship |log |fix |check |read |write |call |add |remove |'
@@ -171,8 +216,6 @@ SYSTEM_MSG = re.compile(
     re.IGNORECASE
 )
 
-# Detect corrections from transcript
-detected = []
 prev_assistant_had_tool_use = False
 for i, turn in enumerate(turns):
     if turn["role"] == "assistant":
@@ -195,11 +238,10 @@ for i, turn in enumerate(turns):
         matched = True
 
     if matched:
-        detected.append({"msg": msg[:300], "date": today, "source": "structural"})
+        upsert_correction(msg[:300])
     prev_assistant_had_tool_use = False
 
 # Manual correction detection from corrections.md
-corrections_file = os.path.join(project_root, "corrections.md")
 try:
     corrections_mtime_start_val = int(corrections_mtime_start)
 except (ValueError, TypeError):
@@ -210,87 +252,39 @@ if os.path.isfile(corrections_file):
         current_mtime = int(os.path.getmtime(corrections_file))
     except Exception:
         current_mtime = 0
-
     if current_mtime > corrections_mtime_start_val:
         try:
             with open(corrections_file) as f:
                 content = f.read()
             for match in re.finditer(r'^## (\d{4}-\d{2}-\d{2}) — (.+)', content, re.MULTILINE):
-                if match.group(1) == today:
-                    detected.append({"msg": match.group(2).strip()[:300], "date": today, "source": "manual"})
+                entry_date = match.group(1)
+                entry_desc = match.group(2).strip()
+                if entry_date == today:
+                    upsert_correction(entry_desc[:300])
         except Exception:
             pass
 
-# Write to correction_groups table in epics.db
-if detected and os.path.isfile(db_path):
-    try:
-        conn = sqlite3.connect(db_path, timeout=10)
-        cursor = conn.cursor()
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS correction_groups ("
-            "theme TEXT PRIMARY KEY, "
-            "status TEXT DEFAULT 'accumulating', "
-            "count INTEGER DEFAULT 1, "
-            "correction_dates TEXT, "
-            "promoted_at TEXT)"
-        )
+if conn:
+    conn.close()
+TALLYEOF
 
-        for entry in detected:
-            theme_key = entry["msg"][:40].lower().strip()
-            cursor.execute(
-                "SELECT theme, count, correction_dates FROM correction_groups "
-                "WHERE LOWER(SUBSTR(theme, 1, 40)) = ?",
-                (theme_key,),
-            )
-            row = cursor.fetchone()
-            if row:
-                old_count = row[1]
-                old_dates = json.loads(row[2]) if row[2] else []
-                new_count = old_count + 1
-                old_dates.append(entry["date"])
-                new_status = "pending_promotion" if new_count >= 3 else "accumulating"
-                cursor.execute(
-                    "UPDATE correction_groups SET count = ?, correction_dates = ?, status = ? "
-                    "WHERE theme = ?",
-                    (new_count, json.dumps(old_dates), new_status, row[0]),
-                )
-            else:
-                cursor.execute(
-                    "INSERT INTO correction_groups (theme, status, count, correction_dates) "
-                    "VALUES (?, 'accumulating', 1, ?)",
-                    (entry["msg"][:300], json.dumps([entry["date"]])),
-                )
-
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
-
-if count_file:
-    with open(count_file, "w") as f:
-        f.write(str(len(detected)))
-PYEOF
-  [[ -f "$CORRECTION_COUNT_FILE" ]] && CORRECTION_COUNT=$(cat "$CORRECTION_COUNT_FILE") && rm -f "$CORRECTION_COUNT_FILE"
-  CORRECTION_COUNT="${CORRECTION_COUNT:-0}"
-fi
-
-# ── Section 3: Signal processing ─────────────────────────────────────────────
-DB_FILE="$HOME/.claude/.claude/epics.db"
+# ============================================================
+# Section 3: Signal processing
+# ============================================================
 if [[ -f "$DB_FILE" && -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
   python3 "$HOME/.claude/hooks/lib/signal_processor.py" \
     "$TRANSCRIPT_PATH" "$DB_FILE" "${SESSION_ID_RAW:-}" 2>/dev/null || true
 fi
 
-# ── Section 4: Session summary via om_write ──────────────────────────────────
-if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-python3 - "$TRANSCRIPT_PATH" "$HOME/.claude" "${ARTIFACTS_CHANGED:-}" "${CORRECTION_COUNT:-0}" <<'SUMMEOF' 2>/dev/null || true
+# ============================================================
+# Section 4: Session summary via om_write
+# ============================================================
+python3 - "$TRANSCRIPT_PATH" "$HOME/.claude" <<'SUMMARYEOF'
 import json, os, sys
-from datetime import datetime, timezone
+from datetime import datetime
 
 transcript_path = sys.argv[1]
 project_root = sys.argv[2]
-artifacts = sys.argv[3] if len(sys.argv) > 3 else ""
-correction_count = int(sys.argv[4]) if len(sys.argv) > 4 else 0
 
 lines = []
 try:
@@ -300,15 +294,15 @@ try:
             if line:
                 try:
                     lines.append(json.loads(line))
-                except json.JSONDecodeError:
+                except:
                     continue
-except Exception:
+except:
     sys.exit(0)
 
-if not lines:
+user_turns = sum(1 for e in lines if e.get("type") == "user")
+if user_turns < 3:
     sys.exit(0)
 
-# Duration from timestamps
 timestamps = []
 for entry in lines:
     ts = entry.get("timestamp", "")
@@ -316,21 +310,14 @@ for entry in lines:
         try:
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
             timestamps.append(dt.timestamp())
-        except (ValueError, TypeError):
-            try:
-                timestamps.append(float(ts))
-            except (ValueError, TypeError):
-                continue
+        except:
+            continue
 
 duration_min = int((max(timestamps) - min(timestamps)) / 60) if len(timestamps) >= 2 else 0
-user_turns = sum(1 for e in lines if e.get("type") == "user")
-
-# Only write if substantial
-if user_turns <= 3 and duration_min <= 5:
+if duration_min < 5:
     sys.exit(0)
 
-# Dominant topic from edited file extensions
-ext_counts = {}
+edited_files = set()
 for entry in lines:
     if entry.get("type") != "assistant":
         continue
@@ -341,126 +328,115 @@ for entry in lines:
     if not isinstance(content, list):
         continue
     for block in content:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "tool_use" and block.get("name") in ("Edit", "Write"):
+        if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") in ("Edit", "Write"):
             fp = block.get("input", {}).get("file_path", "")
             if fp:
-                ext = os.path.splitext(fp)[1] or os.path.basename(fp)
-                ext_counts[ext] = ext_counts.get(ext, 0) + 1
+                edited_files.add(os.path.basename(fp))
 
-topic = max(ext_counts, key=ext_counts.get) if ext_counts else "general"
-today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-artifacts_str = artifacts if artifacts else "none"
-
-summary = (
-    f"Session {today}: {duration_min}min, {user_turns} turns, "
-    f"{correction_count} corrections. Topic: {topic}. Artifacts: {artifacts_str}."
-)
+topic = ", ".join(sorted(edited_files)[:5]) if edited_files else "discussion"
+today = datetime.now().strftime("%Y-%m-%d")
 
 sys.path.insert(0, project_root)
-from hooks.lib.om_write import om_write
-om_write(content=summary, tags=["session-summary"], user_id="proj:dotclaude")
-SUMMEOF
-fi
-
-# ── Section 5: Tool learning sync via om_write ───────────────────────────────
-TOOL_LEARNINGS="$HOME/.claude/tool-learnings.md"
-if [[ -f "$TOOL_LEARNINGS" ]]; then
-python3 - "$TOOL_LEARNINGS" "$HOME/.claude" <<'TLEOF' 2>/dev/null || true
-import os, re, sys
-from datetime import datetime, timezone
-
-tl_path = sys.argv[1]
-project_root = sys.argv[2]
-today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
 try:
-    with open(tl_path) as f:
-        content = f.read()
+    from hooks.lib.om_write import om_write
+    om_write(
+        content=f"Session {today}: {duration_min}min, {user_turns} turns. Topic: {topic}.",
+        tags=["session-summary"],
+        user_id="proj:dotclaude"
+    )
 except Exception:
+    pass
+SUMMARYEOF
+
+# ============================================================
+# Section 5: Tool learning sync via om_write
+# ============================================================
+python3 - "$HOME/.claude" <<'LEARNEOF'
+import os, sys
+
+project_root = sys.argv[1]
+learnings_file = os.path.join(project_root, "tool-learnings.md")
+if not os.path.isfile(learnings_file):
     sys.exit(0)
 
-# Sync today's non-AUTO entries to OpenMemory
+with open(learnings_file) as f:
+    content = f.read()
+
 entries = []
 for line in content.splitlines():
     line = line.strip()
-    if not line.startswith("- ") or line.startswith("- AUTO:"):
+    if not line or line.startswith("#") or line.startswith("<!--"):
         continue
-    date_match = re.search(r'\d{4}-\d{2}-\d{2}', line)
-    if date_match and date_match.group(0) == today:
-        entries.append(line[2:].strip())
+    if line.startswith("- "):
+        text = line[2:].strip()
+        if not text.startswith("AUTO:"):
+            entries.append(text)
 
 if not entries:
     sys.exit(0)
 
 sys.path.insert(0, project_root)
-from hooks.lib.om_write import om_write
-for entry in entries:
-    om_write(content=entry, tags=["tool-learning"], user_id="global")
-TLEOF
-fi
-
-# ── Section 6: Auto-distillation for pending_promotion entries ────────────────
-if [[ -f "$DB_FILE" ]]; then
-python3 - "$DB_FILE" "$HOME/.claude" <<'DISTEOF' 2>/dev/null || true
-import json, os, sqlite3, sys
-from datetime import datetime, timezone
-
-db_path = sys.argv[1]
-project_root = sys.argv[2]
-today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-prefs_path = os.path.join(project_root, "behavioral-prefs.md")
-
-conn = sqlite3.connect(db_path, timeout=10)
-cursor = conn.cursor()
-
-cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='correction_groups'")
-if not cursor.fetchone():
-    conn.close()
-    sys.exit(0)
-
-cursor.execute(
-    "SELECT rowid, theme, count, correction_dates FROM correction_groups "
-    "WHERE status = 'pending_promotion'"
-)
-pending = cursor.fetchall()
-if not pending:
-    conn.close()
-    sys.exit(0)
-
-for rowid, theme, count, dates_json in pending:
-    dates = json.loads(dates_json) if dates_json else []
-    dates_str = ", ".join(dates[-3:])
-    pref_text = (
-        f"(auto-distilled) User corrected {count}x on: "
-        f"{theme[:80]} ({dates_str}). Review and refine next session."
-    )
-
-    # Append to behavioral-prefs.md
-    existing = ""
-    if os.path.isfile(prefs_path):
-        with open(prefs_path) as f:
-            existing = f.read()
-    with open(prefs_path, "a") as f:
-        if existing and not existing.endswith("\n"):
-            f.write("\n")
-        f.write(f"- {pref_text}\n")
-
-    # Write to OpenMemory via om_write
-    sys.path.insert(0, project_root)
+try:
     from hooks.lib.om_write import om_write
-    om_write(content=pref_text, tags=["behavioral-pref"], user_id="proj:dotclaude")
+    for entry in entries:
+        om_write(content=entry, tags=["tool-learning"], user_id="global")
+except Exception:
+    pass
+LEARNEOF
 
-    # Mark as promoted
-    cursor.execute(
-        "UPDATE correction_groups SET status = 'promoted', promoted_at = ? WHERE rowid = ?",
-        (today, rowid),
-    )
+# ============================================================
+# Section 6: Auto-distillation for pending_promotion entries
+# ============================================================
+if [[ -f "$DB_FILE" ]]; then
+python3 - "$DB_FILE" "$HOME/.claude" <<'DISTILLEOF'
+import os, sqlite3, sys
+from datetime import datetime
 
-conn.commit()
+db_file = sys.argv[1]
+project_root = sys.argv[2]
+prefs_file = os.path.join(project_root, "behavioral-prefs.md")
+today = datetime.now().strftime("%Y-%m-%d")
+
+try:
+    conn = sqlite3.connect(db_file, timeout=5)
+    rows = conn.execute(
+        "SELECT theme, count, correction_dates FROM correction_groups WHERE status='pending_promotion'"
+    ).fetchall()
+except Exception:
+    sys.exit(0)
+
+if not rows:
+    conn.close()
+    sys.exit(0)
+
+sys.path.insert(0, project_root)
+
+for theme, count, dates in rows:
+    pref_text = f"(auto-distilled) User corrected {count}x on: {theme[:200]} ({dates}). Review and refine next session."
+
+    try:
+        with open(prefs_file, "a") as f:
+            f.write(f"\n- {pref_text}\n")
+    except Exception:
+        pass
+
+    try:
+        from hooks.lib.om_write import om_write
+        om_write(content=pref_text, tags=["behavioral-pref"], user_id="proj:dotclaude")
+    except Exception:
+        pass
+
+    try:
+        conn.execute(
+            "UPDATE correction_groups SET status='promoted', promoted_at=? WHERE theme=?",
+            (today, theme)
+        )
+        conn.commit()
+    except Exception:
+        pass
+
 conn.close()
-DISTEOF
+DISTILLEOF
 fi
 
 # Cleanup
