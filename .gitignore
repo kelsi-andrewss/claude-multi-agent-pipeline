@@ -26,10 +26,7 @@ downloads/
 file-history/
 image-cache/
 paste-cache/
-projects/**
-!projects/*/
-!projects/*/memory/
-!projects/*/memory/**
+projects/
 session-env/
 shell-snapshots/
 statsig/
