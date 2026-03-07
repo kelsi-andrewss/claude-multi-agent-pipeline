@@ -167,6 +167,63 @@ all_categories = sorted(all_categories)
 prompt_dates = sorted(prompt_by_date.keys())
 total_prompts = sum(v["total"] for v in prompt_by_date.values())
 
+# --- Load error data ---
+errors_file = os.path.join(os.path.dirname(tokens_file), "errors.json")
+error_data = []
+if os.path.exists(errors_file):
+    try:
+        with open(errors_file) as f:
+            error_data = json.load(f)
+    except:
+        error_data = []
+
+error_by_date = defaultdict(lambda: defaultdict(int))
+for e in error_data:
+    error_by_date[e.get("date", "unknown")][e.get("error_type", "unknown")] += 1
+error_dates = sorted(error_by_date.keys())
+error_types = ["tool_error", "hook_rejection", "agent_failure"]
+total_errors = len(error_data)
+
+# --- Load skill metrics data ---
+skill_metrics_file = os.path.join(os.path.dirname(tokens_file), "skill-metrics.json")
+skill_data = []
+if os.path.exists(skill_metrics_file):
+    try:
+        with open(skill_metrics_file) as f:
+            skill_data = json.load(f)
+    except:
+        skill_data = []
+
+skill_by_date = defaultdict(lambda: {"total": 0, "success": 0, "failure": 0, "duration": 0})
+for s in skill_data:
+    d = s.get("date", "unknown")
+    skill_by_date[d]["total"] += 1
+    if s.get("outcome") == "success":
+        skill_by_date[d]["success"] += 1
+    elif s.get("outcome") == "failure":
+        skill_by_date[d]["failure"] += 1
+    skill_by_date[d]["duration"] += s.get("duration_seconds", 0)
+skill_dates = sorted(skill_by_date.keys())
+total_skill_invocations = len(skill_data)
+total_skill_success = sum(1 for s in skill_data if s.get("outcome") == "success")
+skill_success_rate = round(total_skill_success / total_skill_invocations * 100, 1) if total_skill_invocations > 0 else 0
+avg_skill_duration = sum(s.get("duration_seconds", 0) for s in skill_data) // max(total_skill_invocations, 1)
+
+# --- Load OM ops data ---
+om_ops_file = os.path.join(os.path.dirname(tokens_file), "om-ops.json")
+om_data = []
+if os.path.exists(om_ops_file):
+    try:
+        with open(om_ops_file) as f:
+            om_data = json.load(f) if os.path.getsize(om_ops_file) > 0 else []
+    except:
+        om_data = []
+
+om_by_type = defaultdict(int)
+for op in om_data:
+    om_by_type[op.get("type", "unknown")] += 1
+has_om_data = len(om_data) > 0
+
 # Build JS data structures
 dates_js = json.dumps(dates)
 cost_by_date_js = json.dumps([round(by_date[d]["cost"], 4) for d in dates])
@@ -231,6 +288,32 @@ for rkey, buckets in _dur_ranges.items():
         "values": [counts[b[0]] for b in buckets],
     }
 dur_hist_ranges_js = json.dumps(_dur_all)
+
+# Error chart data
+error_dates_js = json.dumps(error_dates)
+error_datasets = []
+error_colors = {"tool_error": "#f87171", "hook_rejection": "#f59e0b", "agent_failure": "#6366f1"}
+for etype in error_types:
+    error_datasets.append({
+        "label": etype.replace("_", " ").title(),
+        "data": [error_by_date[d].get(etype, 0) for d in error_dates],
+        "backgroundColor": error_colors.get(etype, "#94a3b8"),
+        "borderRadius": 2,
+    })
+error_datasets_js = json.dumps(error_datasets)
+
+# Skill chart data
+skill_dates_js = json.dumps(skill_dates)
+skill_invocations_js = json.dumps([skill_by_date[d]["total"] for d in skill_dates])
+skill_success_rate_js = json.dumps([
+    round(skill_by_date[d]["success"] / skill_by_date[d]["total"] * 100, 1)
+    if skill_by_date[d]["total"] > 0 else 0
+    for d in skill_dates
+])
+
+# OM ops chart data
+om_labels_js = json.dumps(list(om_by_type.keys()))
+om_values_js = json.dumps(list(om_by_type.values()))
 
 model_labels_js = json.dumps(list(by_model.keys()))
 model_costs_js = json.dumps([round(by_model[m]["cost"], 4) for m in by_model])
@@ -314,6 +397,9 @@ html = f"""<!DOCTYPE html>
   .section-header.cost  {{ border-left: 3px solid #6366f1; color: #818cf8; }}
   .section-header.time  {{ border-left: 3px solid #34d399; color: #34d399; }}
   .section-header.prompts {{ border-left: 3px solid #a78bfa; color: #a78bfa; }}
+  .section-header.errors {{ border-left: 3px solid #f87171; color: #f87171; }}
+  .section-header.skills {{ border-left: 3px solid #22d3ee; color: #22d3ee; }}
+  .section-header.memory {{ border-left: 3px solid #a78bfa; color: #a78bfa; }}
   .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
   .card {{ background: #1e2330; border: 1px solid #2d3748; border-radius: 10px;
            padding: 16px; }}
@@ -369,6 +455,16 @@ html = f"""<!DOCTYPE html>
     <div class="stat-label">Prompt efficiency</div>
     <div class="stat-value">{overall_efficiency}%</div>
     <div class="stat-sub">key / non-trivial (higher = better)</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Errors logged</div>
+    <div class="stat-value">{total_errors}</div>
+    <div class="stat-sub">tool errors, hook rejections, failures</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Skill invocations</div>
+    <div class="stat-value">{total_skill_invocations}</div>
+    <div class="stat-sub">{skill_success_rate}% success &middot; avg {format_duration(avg_skill_duration)}</div>
   </div>
 </div>
 
