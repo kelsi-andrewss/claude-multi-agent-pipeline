@@ -24,35 +24,35 @@ Parse `{{args}}` to determine the mode:
 1. **Resume mode**: first token matches `epic-\d+` → set `epic_id` to that token.
 2. **File mode**: a token ends with `.md` and the file exists → read it:
    - If path starts with `plans/` and file contains `## What changes` → **Execute mode** (existing plan file).
-   - Otherwise → **PRD mode** (requirements doc). Read file contents as `context`.
+   - Otherwise → **PRD mode** (requirements doc). Read file contents, then check for a `## Summary` section:
+     - If `## Summary` exists → **presearch briefing**. Extract `## Summary` content as `context` (not the full file). Extract numbered items from `## Features` > `### MVP` as `items`. Store the briefing path as `briefing_path` for use in Step 3. Read and store the full file contents as `briefing_contents` for use in Steps 2c and 2d.
+     - If `## Summary` absent → existing behavior (full file as `context`).
 3. **Inline mode**: everything else. Extract:
    - Quoted string or text before numbered items → `title`
    - `by YYYY-MM-DD` → `target_date`
    - Remaining numbered or comma-separated items → `items` list
+
+   **Sufficiency check (inline mode only):** After parsing, check for actionable signals:
+   - Specific technologies/frameworks mentioned? (e.g., "Stripe", "React", "Firebase")
+   - Existing file paths referenced?
+   - Numbered feature items (≥2)?
+   - If ANY of these signals are present → pass through silently.
+   - If NONE are present (pure prose, no structure), warn:
+     ```
+     This looks like a high-level idea. /presearch produces better results by
+     researching APIs and constraints first. Continue anyway? (y/presearch)
+     ```
+   - User says "y" or similar → continue. User says "presearch" → invoke `/presearch` with the same args. This is a warning, not a gate.
+
 4. **No args**: Ask the user: "Describe what to build (features or file path):" and stop.
 
 ---
 
-## Step 1: Load tool
+## Step 1: Dispatch to planner or execute mode
 
-```
-ToolSearch: select:mcp__gemini__pm_ship
-```
+### Execute mode (existing plan file)
 
----
-
-## Step 2: Call pm_ship (one tool call)
-
-Based on mode:
-
-- **Inline mode**: `pm_ship(items=[...], title="...", target_date=<or null>)`
-- **PRD mode**: `pm_ship(items=[...extracted feature lines...], title="...", context=<file contents>)`
-- **Resume mode**: `pm_ship(items=[], epic_id="epic-NNN")`
-- **Execute mode**: Skip pm_ship entirely. Go to Step 2b.
-
-### Step 2b: Execute mode (existing plan file)
-
-For an existing plan file:
+If **Execute mode** was detected in Step 0:
 1. Read the plan file.
 2. Extract the title from the first `# ` heading.
 3. Load `ToolSearch: select:mcp__gemini__pm_create_story`
@@ -61,48 +61,27 @@ For an existing plan file:
 6. Call `pm_update_story(story_id=<new story id>, plan_file="<plan file path>")`.
 7. Go to Step 4 with that single story ID.
 
----
+### All other modes — delegate to planner agent
 
-## Step 2c: Run Gemini planning
+Launch the **planner** agent (foreground) with the parsed inputs:
 
-`pm_ship` only creates the epic and stories in the DB — it does NOT run Gemini planning.
+```
+Agent(subagent_type="planner", prompt="""
+MODE: ship
+TITLE: <title>
+ITEMS: <items list>
+FLAGS: <--quick and/or --argue if set>
+CONTEXT: <briefing_contents if presearch mode, otherwise omit>
+""")
+```
 
-After Step 2 (or Step 2b), run Gemini planning as a separate step:
+For **Resume mode**, include `EPIC_ID: epic-NNN` instead of TITLE/ITEMS.
 
-1. Note `epic_id` from the `pm_ship` response (read the detail file at the path in the response if needed).
-2. Call `pm_plan_stories(epic_id=<epic_id>)` to generate tasks, write_files, agent assignments, and parallel groups for all draft stories.
-3. Read the detail file for planned stories with tasks and execution order.
+Wait for the planner to return.
 
-**Skip this step in Execute mode** (Step 2b), since that path uses a pre-written plan file.
+**On PLANNER_RESULT**: Extract `epic_id`, `dev_branch`, story list (IDs, titles, agents, detail_file paths). Proceed to Step 3.
 
----
-
-## Step 2d: Plan validation
-
-**Skip when:** `skip_validate = true` (--quick flag) or Execute mode.
-
-Validate the plan and produce acceptance criteria before writing plan files:
-
-1. Fetch all stories: `pm_list_stories(epic_id=<epic_id>)`.
-2. Assemble a plan summary: for each story, list title, agent, write_files, tasks.
-
-**Default path** (no `--argue` flag):
-
-3. Load analyze: `ToolSearch: select:mcp__gemini__analyze`
-4. Call `analyze(input="Review this implementation plan for <epic title>. For each story: 1) Check decomposition, file targets, and missing dependencies. 2) Define concrete acceptance criteria — observable behaviors proving correctness (e.g., 'GET /users returns 200 with user list', 'clicking Submit shows confirmation modal'). Format acceptance criteria under per-story headings.\n\n<plan summary>")`.
-5. Parse response:
-   - Plan issues → adjust in Step 3 plan files or call `pm_update_story`.
-   - Acceptance criteria → extract per-story criteria and include in plan files (Step 3).
-
-**`--argue` path** (`use_argue = true`):
-
-3. Write plan summary to `/tmp/ship-plan-<epic-id>.md`.
-4. Load argue: `ToolSearch: select:mcp__gemini__argue`
-5. Call `argue(topic="Implementation plan for <epic title>: 1) Verify decomposition, file targets, approach, and missing dependencies. 2) For each story, define concrete acceptance criteria — observable behaviors that prove the story works correctly. Output these under a per-story ACCEPTANCE CRITERIA heading.", topic_type="plan", context_docs=["/tmp/ship-plan-<epic-id>.md"], max_rounds=3)`.
-6. Parse synthesis:
-   - Plan issues → adjust in Step 3 plan files or call `pm_update_story`.
-   - Acceptance criteria → extract per-story criteria and include in plan files (Step 3).
-7. Delete temp file: `rm /tmp/ship-plan-<epic-id>.md`
+**On PLANNER_ERROR**: Surface the error to the user with full details (step, tool, error message, partial results). Do NOT fall back to direct MCP calls — the failure causes (MCP down, Gemini garbage, agent context limit) would also fail in the main session. Let the user decide: retry, adjust input, or abort.
 
 ---
 
@@ -150,7 +129,12 @@ For each story, call `pm_get_story(story_id=<id>)` — read the detail file for 
    - <how to verify the changes work>
    ```
 
-   **Read-only context:** Determine from files referenced by tasks but not in the story's write_files scope. These give coders the interface contracts and utilities they need without modifying them.
+   **Critique gate:** Before writing each plan file, read `refs/orch-critique-checklist.md` and apply all checks against the Gemini-planned story data. Significant issues (missing files, scope creep, convention violations, conflicts with recorded decisions) → surface to user before proceeding. Minor gaps (edge cases, existing utilities) → incorporate silently into the plan file. This is necessary because ship skips draft-plan's critique step.
+
+   **Read-only context:** Determine from files referenced by tasks but not in the story's write_files scope. These give coders the interface contracts and utilities they need without modifying them. If `briefing_path` was set in Step 0 (presearch briefing), include it:
+   - `<briefing_path>` — technical research briefing (APIs, data model, decisions, gotchas)
+
+   **Briefing references in tasks:** When `briefing_path` is set, write task descriptions that reference specific briefing sections for any task involving APIs, data models, patterns, or gotchas. Format: `(see briefing ## <Section> > <Subsection> for <what>)`. This eliminates ambiguity — coders know exactly which research to follow.
 
    **Acceptance criteria:** If plan validation ran (Step 2d), extract per-story criteria from the analyze/argue response. If validation was skipped (`--quick`), write basic criteria derived from the story's task descriptions — focus on observable behaviors, not implementation details.
 
@@ -223,7 +207,7 @@ If any stories are BLOCKED, list their reasons. Continue to Step 5b only if at l
 
 After all stories merge into the dev branch, review the combined output:
 
-1. Determine `<dev-branch>` from the epic mapping and `<base>` (the commit the dev branch was created from, i.e. where it diverged from `dev`).
+1. Determine `<dev-branch>` from the epic mapping and `<base>` (the commit the dev branch was created from, or `main`).
 2. Generate the full diff: `git diff <base>...<dev-branch>`
 3. Launch reviewer agent (background, **Sonnet**) on the full diff. The reviewer sees the combined output of all stories and checks for:
    - Cross-story naming inconsistencies
