@@ -63,6 +63,9 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
   # Session-start timestamp for debrief freshness check
   echo "$(date +%s)" > "/tmp/session-start-${SESSION_ID}"
 
+  # OpenMemory DB path (used by compact OM query below)
+  OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
+
   # Snapshot behavioral file mtimes for session-learning-check Stop hook
   if stat -f %m / >/dev/null 2>&1; then
     _mtime() { stat -f %m "$1" 2>/dev/null || echo "0"; }
@@ -72,17 +75,11 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
     _mtime() { python3 -c "import os; print(int(os.path.getmtime('$1')))" 2>/dev/null || echo "0"; }
   fi
   SNAPSHOT="/tmp/session-mtimes-${SESSION_ID}"
-  DISAGREE_MTIME=$(_mtime "$HOME/.claude/disagreements.md")
   OUTCOMES_MTIME=$(_mtime "$HOME/.claude/outcomes.md")
   CORRECTIONS_MTIME=$(_mtime "$HOME/.claude/corrections.md")
-  FRICTION_MTIME=$(_mtime "$HOME/.claude/friction-log.md")
-  HANDOFF_MTIME=$(_mtime "$HOME/.claude/session-handoff.md")
   cat > "$SNAPSHOT" <<SNAP
-DISAGREE_MTIME=$DISAGREE_MTIME
 OUTCOMES_MTIME=$OUTCOMES_MTIME
 CORRECTIONS_MTIME=$CORRECTIONS_MTIME
-FRICTION_MTIME=$FRICTION_MTIME
-HANDOFF_MTIME=$HANDOFF_MTIME
 SNAP
 
   # Session agenda + stale detection + distillation trigger (single Python block)
@@ -218,8 +215,8 @@ if has_content:
 
 # --- Distillation trigger ---
 behavioral_prefs = os.path.join(project_root, "behavioral-prefs.md")
-disagreements = os.path.join(project_root, "disagreements.md")
 outcomes = os.path.join(project_root, "outcomes.md")
+corrections = os.path.join(project_root, "corrections.md")
 
 last_distilled = None
 if os.path.isfile(behavioral_prefs):
@@ -255,12 +252,11 @@ def count_entries_since(filepath, since_date):
                     count += 1  # undated entry — assume new
     return count
 
-corrections = os.path.join(project_root, "corrections.md")
-unprocessed = count_entries_since(disagreements, last_distilled) + count_entries_since(outcomes, last_distilled) + count_entries_since(corrections, last_distilled)
+unprocessed = count_entries_since(outcomes, last_distilled) + count_entries_since(corrections, last_distilled)
 
 triggered = unprocessed >= 5
 if last_distilled and not triggered:
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     try:
         ld_date = datetime.strptime(last_distilled, "%Y-%m-%d")
         if (datetime.now() - ld_date).days >= 7:
@@ -272,34 +268,26 @@ if triggered:
     print("")
     print("=== BEHAVIORAL DISTILLATION DUE ===")
     if unprocessed >= 5:
-        print(f"  {unprocessed} unprocessed entries in disagreements.md + outcomes.md + corrections.md")
+        print(f"  {unprocessed} unprocessed entries in outcomes.md + corrections.md")
     else:
         print(f"  Last distillation was {last_distilled} (>7 days ago)")
     print("  Review and distill before starting work.")
     print("")
 PYEOF
 
-  # Memory Briefing — query openmemory.sqlite directly for session-start context
-  OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
+  # Compact OpenMemory query — top 5 behavioral prefs + top 5 tool learnings
   if [[ -f "$OM_DB" ]]; then
-  # Gather signal context for memory queries
-  SIGNAL_BRANCH=$(git -C "$HOME/.claude" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-  SIGNAL_DIR=$(basename "$PWD")
-  SIGNAL_RECENT_FILES=$(git -C "$HOME/.claude" diff --name-only HEAD~1 2>/dev/null | head -20 || echo "")
-
-  python3 - "$OM_DB" "$DB_FILE" "$SIGNAL_BRANCH" "$SIGNAL_DIR" "$SIGNAL_RECENT_FILES" <<'MEMBRIEFEOF'
-import json, math, os, struct, subprocess, sys, time
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+  python3 - "$OM_DB" <<'OMCOMPACTEOF'
+import subprocess, sys, time, math
 
 om_db = sys.argv[1]
-epics_db = sys.argv[2] if len(sys.argv) > 2 else None
-signal_branch = sys.argv[3] if len(sys.argv) > 3 else ""
-signal_dir = sys.argv[4] if len(sys.argv) > 4 else ""
-signal_files = sys.argv[5] if len(sys.argv) > 5 else ""
-
 now = time.time()
-DEFAULT_DECAY = 0.05  # ~14-day half-life
+DEFAULT_DECAY = 0.05
+
+DECAY_SCORE = (
+    f"feedback_score * EXP(-COALESCE(decay_lambda, {DEFAULT_DECAY}) "
+    f"* (({int(now)} - COALESCE(last_seen_at, created_at)) / 86400.0))"
+)
 
 def om_query(sql):
     try:
@@ -311,304 +299,41 @@ def om_query(sql):
     except Exception:
         return []
 
-def trunc(s, n=200):
+def trunc(s, n=150):
     return s[:n] + "..." if len(s) > n else s
 
-# Decay-weighted scoring SQL fragment
-DECAY_SCORE = (
-    f"feedback_score * EXP(-COALESCE(decay_lambda, {DEFAULT_DECAY}) "
-    f"* (({int(now)} - COALESCE(last_seen_at, created_at)) / 86400.0))"
+prefs = om_query(
+    f"SELECT content FROM memories "
+    f"WHERE tags LIKE '%behavioral-pref%' AND tags NOT LIKE '%bootstrap%' "
+    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
 )
-
-# 1. Last 3 session summaries (recency-ordered, no decay — these are logs)
-sessions = om_query(
-    "SELECT content FROM memories "
-    "WHERE tags LIKE '%session-summary%' AND tags NOT LIKE '%bootstrap%' "
-    "ORDER BY created_at DESC LIMIT 3;"
-)
-
-# 2. Top 5 tool learnings by decay-weighted score
 learnings = om_query(
     f"SELECT content FROM memories "
     f"WHERE tags LIKE '%tool-learning%' AND tags NOT LIKE '%bootstrap%' "
     f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
 )
 
-# 3. Top 5 conventions by decay-weighted score
-conventions = om_query(
-    f"SELECT content FROM memories "
-    f"WHERE tags LIKE '%convention%' AND tags NOT LIKE '%bootstrap%' "
-    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
-)
-
-# 4. Signal-aware tech-relevant memories
-# Gather signals from: git branch, recent files, epics.db write_files
-EXT_MAP = {
-    ".jsx": "react", ".tsx": "react", ".js": "javascript", ".ts": "typescript",
-    ".css": "css", ".scss": "css", ".dart": "flutter", ".py": "python",
-    ".go": "go", ".rs": "rust", ".java": "java", ".kt": "kotlin",
-    ".swift": "swift", ".rb": "ruby", ".vue": "vue", ".svelte": "svelte",
-    ".sh": "bash", ".md": "markdown",
-}
-signal_terms = set()
-
-# From git branch name (e.g., "feature/auth" → "auth")
-if signal_branch and signal_branch not in ("main", "master", "HEAD"):
-    for part in signal_branch.replace("/", "-").split("-"):
-        if len(part) > 2:
-            signal_terms.add(part.lower())
-
-# From recently modified files
-if signal_files:
-    for f in signal_files.strip().splitlines():
-        f = f.strip()
-        ext = os.path.splitext(f)[1].lower()
-        if ext in EXT_MAP:
-            signal_terms.add(EXT_MAP[ext])
-        # Also extract directory-level signals (e.g., "hooks/foo.sh" → "hooks")
-        dirname = os.path.dirname(f)
-        if dirname:
-            signal_terms.add(dirname.split("/")[0].lower())
-
-# From epics.db in-progress story write_files
-if epics_db and os.path.isfile(epics_db):
-    try:
-        r = subprocess.run(
-            ["sqlite3", "-separator", "\t", epics_db,
-             "SELECT write_files FROM stories WHERE state IN "
-             "('in-progress','ready','in-review','approved') AND archived=0;"],
-            capture_output=True, text=True, timeout=5
-        )
-        for line in r.stdout.strip().splitlines():
-            if not line.strip():
-                continue
-            for f in line.split(","):
-                f = f.strip()
-                ext = os.path.splitext(f)[1].lower()
-                if ext in EXT_MAP:
-                    signal_terms.add(EXT_MAP[ext])
-    except Exception:
-        pass
-
-tech_memories = []
-if signal_terms:
-    clauses = " OR ".join(f"LOWER(content) LIKE '%{t}%'" for t in signal_terms)
-    tech_memories = om_query(
-        f"SELECT content FROM memories "
-        f"WHERE ({clauses}) AND tags NOT LIKE '%bootstrap%' AND tags NOT LIKE '%session-summary%' "
-        f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
-    )
-
-# 5. Episodic transcript recall via vector similarity
-TRANSCRIPT_DECAY = 0.07
-SIMILARITY_THRESHOLD = 0.3
-TRANSCRIPT_LIMIT = 5
-OLLAMA_TIMEOUT = 2
-
-transcript_recalls = []
-
-# Build query from signals: branch, directory, in-progress story titles, recent key exchanges
-query_parts = []
-if signal_branch and signal_branch not in ("main", "master", "HEAD"):
-    query_parts.append(signal_branch.replace("-", " ").replace("/", " "))
-if signal_dir and signal_dir not in (".", "/"):
-    query_parts.append(signal_dir)
-
-# In-progress story titles from epics.db
-if epics_db and os.path.isfile(epics_db):
-    try:
-        r = subprocess.run(
-            ["sqlite3", "-separator", "\t", epics_db,
-             "SELECT title FROM stories WHERE state IN "
-             "('in-progress','ready','in-review') AND archived=0 LIMIT 5;"],
-            capture_output=True, text=True, timeout=5
-        )
-        for line in r.stdout.strip().splitlines():
-            if line.strip():
-                query_parts.append(line.strip())
-    except Exception:
-        pass
-
-# Last 2 key exchanges from session-records.md
-# om_db is ~/.claude/.claude/openmemory.sqlite, so two dirnames up is ~/.claude
-try:
-    records_path = os.path.join(os.path.dirname(os.path.dirname(om_db)), "session-records.md")
-    if os.path.isfile(records_path):
-        with open(records_path) as f:
-            rec_content = f.read()
-        import re as _re
-        key_matches = _re.findall(r'Key exchanges:\n((?:  - .+\n)*)', rec_content)
-        recent_keys = []
-        for block in key_matches[-2:]:
-            for line in block.strip().splitlines():
-                line = line.strip().lstrip("- ").strip('"')
-                line = _re.sub(r'<[^>]+>', '', line).strip()
-                # Strip common noise prefixes
-                for prefix in ("Caveat: The messages below", "Base directory for this skill"):
-                    if line.startswith(prefix):
-                        line = ""
-                        break
-                if line and len(line) >= 10:
-                    recent_keys.append(line[:100])
-        query_parts.extend(recent_keys)
-except Exception:
-    pass
-
-query_text = " ".join(query_parts)
-
-if query_text.strip():
-    try:
-        # Embed the query via Ollama
-        payload = json.dumps({"model": "nomic-embed-text", "prompt": query_text}).encode()
-        req = Request("http://localhost:11434/api/embeddings", data=payload,
-                      headers={"Content-Type": "application/json"})
-        with urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
-            embed_data = json.loads(resp.read())
-        query_vec = embed_data.get("embedding")
-
-        if query_vec:
-            # Fetch transcript memories with embeddings
-            import sqlite3 as _sqlite3
-            conn = _sqlite3.connect(om_db, timeout=5)
-            try:
-                rows = conn.execute(
-                    "SELECT content, mean_vec, mean_dim, created_at, tags "
-                    "FROM memories "
-                    "WHERE tags LIKE '%transcript%' AND mean_vec IS NOT NULL"
-                ).fetchall()
-
-                if rows:
-                    q_norm = math.sqrt(sum(x * x for x in query_vec))
-                    scored = []
-                    for content, blob, dim, created_at, tags_str in rows:
-                        if not blob or not dim:
-                            continue
-                        vec = struct.unpack(f"<{dim}f", blob)
-                        # Cosine similarity
-                        dot = sum(a * b for a, b in zip(query_vec, vec))
-                        v_norm = math.sqrt(sum(x * x for x in vec))
-                        if q_norm == 0 or v_norm == 0:
-                            continue
-                        sim = dot / (q_norm * v_norm)
-                        if sim < SIMILARITY_THRESHOLD:
-                            continue
-                        # Decay weighting
-                        age_days = (now - created_at) / 86400.0
-                        score = sim * math.exp(-TRANSCRIPT_DECAY * age_days)
-                        # Extract session date from tags
-                        session_date = ""
-                        try:
-                            for tag in json.loads(tags_str):
-                                if tag.startswith("session-"):
-                                    session_date = tag[8:]
-                                    break
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                        scored.append((score, sim, session_date, content))
-
-                    scored.sort(key=lambda x: -x[0])
-                    transcript_recalls = scored[:TRANSCRIPT_LIMIT]
-            finally:
-                conn.close()
-    except (URLError, OSError, json.JSONDecodeError, KeyError, ValueError):
-        pass
-
-# Output
-print("")
-print("=== MEMORY BRIEFING ===")
-
-print("  Recent sessions:")
-if sessions:
-    for row in sessions:
-        print(f"    - {trunc(row[0])}")
-else:
-    print("    (none yet)")
-
-print("  Tool learnings:")
-if learnings:
-    for row in learnings:
-        print(f"    - {trunc(row[0])}")
-else:
-    print("    (none yet)")
-
-print("  Conventions:")
-if conventions:
-    for row in conventions:
-        print(f"    - {trunc(row[0])}")
-else:
-    print("    (none yet)")
-
-tech_label = ", ".join(sorted(signal_terms)[:5]) if signal_terms else "no active stories"
-print(f"  Tech-relevant ({tech_label}):")
-if tech_memories:
-    for row in tech_memories:
-        print(f"    - {trunc(row[0])}")
-else:
-    print("    (none yet)")
-
-if transcript_recalls:
-    print("  Transcript recall:")
-    for score, sim, session_date, content in transcript_recalls:
-        date_prefix = f"[{session_date}] " if session_date else ""
-        print(f"    - {date_prefix}{trunc(content, 150)}")
-
-print("=== END MEMORY BRIEFING ===")
-MEMBRIEFEOF
+if prefs or learnings:
+    print("")
+    print("=== MEMORY SNAPSHOT ===")
+    if prefs:
+        print("  Behavioral prefs:")
+        for row in prefs:
+            print(f"    - {trunc(row[0])}")
+    if learnings:
+        print("  Tool learnings:")
+        for row in learnings:
+            print(f"    - {trunc(row[0])}")
+    print("=== END MEMORY SNAPSHOT ===")
+OMCOMPACTEOF
   fi
 
-  # Predicted preferences — query decision_preferences table for session-relevant patterns
-  if [[ -f "$DB_FILE" ]]; then
-  python3 - "$DB_FILE" <<'PREFPREDEOF'
-import subprocess, sys
-
-db_path = sys.argv[1]
-
-def query_db(sql):
-    try:
-        result = subprocess.run(
-            ["sqlite3", "-separator", "\t", db_path, sql],
-            capture_output=True, text=True, timeout=5
-        )
-        return [line.split("\t") for line in result.stdout.strip().splitlines() if line.strip()]
-    except Exception:
-        return []
-
-# Check if decision_preferences table exists
-tables = query_db(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name='decision_preferences';"
-)
-if not tables:
-    sys.exit(0)
-
-# Get top 5 high-confidence preferences (confidence >= 0.7, ordered by recency + confidence)
-rows = query_db(
-    "SELECT domain, preference, confidence, evidence_count "
-    "FROM decision_preferences "
-    "WHERE confidence >= 0.7 "
-    "ORDER BY updated_at DESC, confidence DESC "
-    "LIMIT 5;"
-)
-
-if not rows:
-    sys.exit(0)
-
-print("")
-print("=== PREDICTED PREFERENCES ===")
-for row in rows:
-    if len(row) < 4:
-        continue
-    domain, pref, conf, evidence = row[0], row[1], row[2], row[3]
-    try:
-        conf_pct = f"{float(conf) * 100:.0f}%"
-    except ValueError:
-        conf_pct = conf
-    print(f"  [{domain}] {pref} (confidence: {conf_pct}, evidence: {evidence})")
-print("  Source: decision_preferences table. Override with explicit instruction.")
-print("=== END PREDICTED PREFERENCES ===")
-PREFPREDEOF
-  fi
-
-
+  # Auto-distillation check — flag recently auto-distilled entries for review
+  if [[ -f "$HOME/.claude/behavioral-prefs.md" ]] && grep -q "(auto-distilled)" "$HOME/.claude/behavioral-prefs.md" 2>/dev/null; then
+    echo ""
+    echo "=== AUTO-DISTILLED ENTRIES PENDING REVIEW ==="
+    grep "(auto-distilled)" "$HOME/.claude/behavioral-prefs.md"
+    echo "  Review and remove the (auto-distilled) marker once confirmed."
   fi
 
   # Correction patterns — triaged from correction_groups DB table, fallback to tallies file
@@ -726,96 +451,6 @@ print("=== END CORRECTION PATTERNS ===")
 CORRPATTERNSEOF
   fi
 
-  # Unprocessed sessions — last 3 only, with summary line for the rest
-  RECORDS_FILE="$HOME/.claude/session-records.md"
-  if [[ -f "$RECORDS_FILE" ]]; then
-  python3 - "$RECORDS_FILE" <<'UNPROCESSEDEOF'
-import re, sys
-from datetime import datetime, timezone, timedelta
-
-records_file = sys.argv[1]
-
-now = datetime.now(timezone.utc)
-cutoff = now - timedelta(hours=72)
-
-try:
-    with open(records_file) as f:
-        content = f.read()
-except Exception:
-    sys.exit(0)
-
-# Parse session records
-entries = []
-current = None
-for line in content.splitlines():
-    header = re.match(r'^## (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) — (.+)', line)
-    if header:
-        if current:
-            entries.append(current)
-        current = {"date": header.group(1), "summary": header.group(2), "lines": [], "artifacts": ""}
-    elif current:
-        current["lines"].append(line)
-        if line.startswith("Artifacts updated:"):
-            current["artifacts"] = line.split(":", 1)[1].strip()
-if current:
-    entries.append(current)
-
-# Filter: last 72h, artifacts = "none"
-unprocessed = []
-total_friction = 0
-for e in entries:
-    try:
-        dt = datetime.strptime(e["date"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
-        if dt < cutoff:
-            continue
-    except ValueError:
-        continue
-    if e["artifacts"] == "none":
-        for line in e["lines"]:
-            if line.startswith("Friction clusters:"):
-                try:
-                    total_friction += int(line.split(":", 1)[1].strip())
-                except ValueError:
-                    pass
-        unprocessed.append(e)
-
-if not unprocessed:
-    sys.exit(0)
-
-print("")
-print("=== UNPROCESSED SESSIONS ===")
-
-# Show last 3 in detail
-shown = unprocessed[-3:]
-rest = unprocessed[:-3] if len(unprocessed) > 3 else []
-
-if rest:
-    print(f"  ({len(rest)} older sessions not shown, {total_friction} total friction clusters)")
-
-for e in shown:
-    friction_line = ""
-    for line in e["lines"]:
-        if line.startswith("Friction clusters:"):
-            friction_line = line.split(":", 1)[1].strip()
-    key_lines = []
-    in_keys = False
-    for line in e["lines"]:
-        if line.startswith("Key exchanges:"):
-            in_keys = True
-            continue
-        if in_keys:
-            if line.startswith("  - "):
-                key_lines.append(line.strip()[4:].strip('"')[:60])
-            else:
-                in_keys = False
-    print(f"  [{e['date']}] {e['summary']}")
-    if friction_line and friction_line != "0":
-        print(f"    Friction clusters: {friction_line}")
-    if key_lines:
-        keys = " / ".join(key_lines[:2])
-        print(f"    Key: {keys}")
-print("=== END UNPROCESSED SESSIONS ===")
-UNPROCESSEDEOF
   fi
 fi
 
