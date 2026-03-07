@@ -38,9 +38,45 @@ if [[ -n "$FILE_DIR" ]] && ! git -C "$FILE_DIR" rev-parse --git-dir &>/dev/null 
   exit 0
 fi
 
-# Allow edits to ~/.claude/ config files (skills, hooks, settings, CLAUDE.md at user level)
+# Allow edits to ~/.claude/ files — scoped when working IN the ~/.claude project
 if [[ "$FILE_PATH" == "$HOME/.claude/"* ]]; then
-  exit 0
+  if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
+    # Working IN ~/.claude as a project — only allow orchestration artifacts
+    case "$FILE_PATH" in
+      # Behavioral/logging files the main session writes
+      "$HOME/.claude/corrections.md"|\
+      "$HOME/.claude/disagreements.md"|\
+      "$HOME/.claude/outcomes.md"|\
+      "$HOME/.claude/behavioral-prefs.md"|\
+      "$HOME/.claude/session-handoff.md"|\
+      "$HOME/.claude/friction-log.md"|\
+      "$HOME/.claude/session-records.md"|\
+      "$HOME/.claude/tool-learnings.md"|\
+      "$HOME/.claude/todos.md"|\
+      "$HOME/.claude/skill-changelog.md"|\
+      "$HOME/.claude/correction-tallies.jsonl")
+        exit 0 ;;
+      # Tracking files
+      "$HOME/.claude/.claude/tracking/"*)
+        exit 0 ;;
+      # Memory files
+      "$HOME/.claude/memory/"*|\
+      "$HOME/.claude/projects/"*/memory/*)
+        exit 0 ;;
+      # Plan files (draft-plan writes these)
+      "$HOME/.claude/plans/"*)
+        exit 0 ;;
+      # Settings (main session manages hook config)
+      "$HOME/.claude/settings.json")
+        exit 0 ;;
+      # Everything else in ~/.claude/ is project code — block it
+      *)
+        ;; # fall through to blocking logic below
+    esac
+  else
+    # Working in a DIFFERENT project — ~/.claude/ edits are config, allow them
+    exit 0
+  fi
 fi
 
 # Allow edits inside any story worktree
