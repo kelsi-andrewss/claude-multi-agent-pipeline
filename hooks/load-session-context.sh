@@ -3,6 +3,20 @@
 # Orchestration-specific context (ORCHESTRATION.md, behavioral-prefs, agenda)
 # is only loaded when working inside the ~/.claude/ project.
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 1
+
+# Display active hook profile
+ACTIVE_PROFILE="standard"
+if [[ -f /tmp/claude-hook-profile ]]; then
+  ACTIVE_PROFILE=$(cat /tmp/claude-hook-profile 2>/dev/null)
+fi
+if [[ -n "$CLAUDE_HOOK_PROFILE" && "$ACTIVE_PROFILE" == "standard" ]]; then
+  ACTIVE_PROFILE="$CLAUDE_HOOK_PROFILE"
+fi
+echo "Hook profile: $ACTIVE_PROFILE"
+echo ""
+
 echo "=== SESSION CONTEXT: MANDATORY PRE-READ ==="
 echo "The following files have been loaded into your context. You MUST treat their"
 echo "rules as active constraints before responding to any message this session."

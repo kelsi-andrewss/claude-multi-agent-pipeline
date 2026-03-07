@@ -12,6 +12,9 @@
 # Exit 0 = allow
 # Exit 2 = block
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 2
+
 # Fast path: if inside a worktree, the worktree-level guard handles scope.
 # This hook runs at the main session level to catch main-session attempts.
 if [[ "$PWD" == */\.claude/worktrees/* ]]; then

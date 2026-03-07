@@ -64,17 +64,28 @@ Build an execution plan from two analyses:
   > "story-NNN deferred: depends on story-MMM (different epic, not done). Will run after story-MMM is merged."
 - **Never skip a story just because it has dependencies** — place it in the correct dependency group. Every story passed to `/run-stories` MUST appear in the execution plan, either in a parallel batch or a sequential deferred group with a clear "runs after story-NNN merges" label.
 
+### 2a-post. Bootstrap detection
+
+After building dependency groups, scan Group 0 for bootstrap stories:
+
+1. A story is a **bootstrap story** if its title matches `/bootstrap/i` AND it has no `depends_on` of its own.
+2. If a bootstrap story is found: move all other Group 0 stories (non-bootstrap) to Group 1, with an implicit dependency on the bootstrap story. Log: "Auto-serialized: story-NNN (bootstrap) runs before all others in this epic"
+3. A story titled like "Bootstrap payment provider" that has `depends_on` entries is NOT treated as bootstrap — it runs normally in its dependency group.
+4. If no bootstrap story exists in the batch, no change to execution order.
+
 ### 2b. File conflict detection (within each dependency group)
 
 Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each dependency group:
 
 1. Collect all story IDs in the group and call `pm_check_conflicts(story_ids=[...])`.
 2. Read the detail file. It contains:
-   - `conflicts`: list of `{file, stories}` overlap entries
+   - `conflicts`: list of `{file, stories}` write-write overlap entries
+   - `read_conflicts`: list of `{file, writer, reader}` write-read overlap entries
    - `safe_parallel`: story IDs with no write-file overlaps (launch together)
    - `sequential`: story IDs that must run after conflicting stories merge
 3. Use `safe_parallel` as batch 0. For `sequential` stories, chain them after their conflicting partner from `safe_parallel` finishes.
-4. Within each batch, order stories by ID (lowest first) for determinism.
+4. For `read_conflicts`: ensure the `reader` story runs in a batch after the `writer` story's batch. This prevents a reader from seeing stale file content.
+5. Within each batch, order stories by ID (lowest first) for determinism.
 
 > **Note:** A story may be placed in a later sequential batch even if it doesn't directly conflict with the story immediately before it. This happens when a downstream story conflicts with *both*, forcing them into a strict order. Stories are always chained safely to prevent merge conflicts.
 
@@ -94,6 +105,24 @@ Write targets support optional symbol annotations using colon syntax:
 When `pm_check_conflicts` returns file-level conflicts, check if ALL stories in the conflict use symbol-annotated targets for that file. If so, compare symbols — if all symbols are distinct, reclassify as `safe_parallel` for that file.
 
 If ANY story uses a bare filename (no symbol), it conflicts with all other stories targeting that file regardless of their annotations.
+
+---
+
+## Step 2c: Post-bootstrap build verification
+
+**This step ONLY runs when a bootstrap story was detected in Step 2a-post AND that story's batch has completed and merged.** If no bootstrap story, skip entirely — zero overhead.
+
+After the bootstrap story's batch (Group 0) completes and merges into the dev branch, before launching Group 1:
+
+1. Checkout the dev branch (post-bootstrap-merge).
+2. Detect project type from the worktree and run the appropriate build command:
+   - `package.json` → `npm install && npm run build` (or `npx tsc --noEmit` if no build script)
+   - `pubspec.yaml` → `flutter pub get && flutter analyze`
+   - `pyproject.toml` → `pip install -e . 2>&1 | tail -5`
+   - `Cargo.toml` → `cargo check`
+   - `go.mod` → `go build ./...`
+3. If build succeeds → continue to Group 1 (launch feature stories).
+4. If build fails → report the error, mark all remaining stories as BLOCKED with reason "Bootstrap build verification failed: <error>", stop execution.
 
 ---
 
@@ -130,13 +159,19 @@ Compute for each story:
   - `architect` → "Make full architectural changes as specified in the plan. Follow all structural decisions."
   - anything else → "Follow the plan exactly."
 
+**Model-specific warnings:** When the story's agent is `quick-fixer` (Haiku-tier), append to agent-approach: "CRITICAL: PRESERVE existing patterns. When extending or expanding code (regexes, arrays, switch cases, config objects), ADD new entries — never replace the existing block wholesale. Read the target section first, then insert your additions alongside what's already there."
+
 **Before constructing each coder's prompt**, perform per-story enrichment:
 
-**Pitfalls:** Extract file extensions from write_files (from the detail file), map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
+**Pitfalls:** Extract file extensions from write_files (from the detail file), map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`, `py` in `mcp-servers/` → `python-mcp`, `md` in `skills/` → `skill-markdown`, `md` in `CLAUDE.md`/`ORCHESTRATION.md` → `claude-md`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
 
 **Read-only context:** Read the story's plan file, extract paths from the `## Read-only context` section (if present). Prefix paths with the worktree path.
 
 **Protected files:** Check if `<project-root>/.claude/protected-files.md` exists. If so, read it and include the list in the prompt.
+
+**Learnings:** Call `openmemory_query(query="<tech-stack-keywords> <write-target-filenames>", user_id="global", n=5)`. Filter to procedural/semantic sectors. Include non-empty results in the coder prompt as a `## Learnings` section after `## Pitfalls`. Tech-stack keywords: derive from file extensions and framework indicators in the plan (e.g., "react hooks", "python mcp", "firebase firestore"). If no results, omit the section.
+
+**Gitignore check:** Run `git -C <project-root> check-ignore <write_files>` (space-separated). If any file is gitignored, remove it from the write scope and add a warning to the coder prompt: "WARNING: <file> is gitignored — do not create or modify it. Achieve the story's goal without this file, or report NEED_DECISION." If ALL write targets are gitignored, skip the story and report as BLOCKED.
 
 Each background agent receives this prompt (fill all placeholders before launching):
 
@@ -169,6 +204,10 @@ Gemini is a research tool for the orchestrator — not available to coders.
 ## Pitfalls
 
 <pitfalls from pm_list_patterns, or "No pitfalls for this story's file types.">
+
+## Learnings
+
+<openmemory results formatted as bullet points, or omit section if none>
 
 ## Steps
 

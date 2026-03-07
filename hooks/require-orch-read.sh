@@ -3,6 +3,9 @@
 # explicitly Read this session. The marker is set by the PostToolUse hook
 # on Read when the path matches ORCHESTRATION.md.
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 3
+
 SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
 MARKER="/tmp/orch-read-${SESSION_ID}"
 

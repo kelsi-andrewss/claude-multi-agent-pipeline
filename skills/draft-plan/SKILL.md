@@ -53,55 +53,36 @@ Classify each token in `{{args}}`:
 
 ---
 
-## Step 2: Run Gemini planning
+## Step 2: Run planning
 
 **Partition stories:**
 1. Call `pm_get_story(story_id)` for each story (parallel, single message). Read each detail file for full story data.
 2. Check fast-path criteria for each: agent = `quick-fixer`, write_files count ≤ 2, no protected files, at least one task.
 3. Split into `fast_path` and `gemini_path` lists.
-4. Run Gemini planning ONLY for `gemini_path` stories (existing logic below).
-5. `fast_path` stories skip directly to Step 5.
-
-Load the Gemini MCP tools:
-
-```
-ToolSearch: select:mcp__gemini__pm_plan_story
-ToolSearch: select:mcp__gemini__pm_plan_stories
-ToolSearch: select:mcp__gemini__pm_list_stories
-ToolSearch: select:mcp__gemini__pm_get_story
-ToolSearch: select:mcp__gemini__pm_check_conflicts
-ToolSearch: select:mcp__gemini__pm_critique
-```
+4. `fast_path` stories skip directly to Step 5.
 
 **For file paths** (`.md`):
 - Read the file and search for `story-\d+`.
-- If a story ID is found, add it to the story list and run `pm_plan_story(story_id=...)` for it (skip grouping below for these).
+- If a story ID is found, add it to the story list and include in `gemini_path`.
 - If no story ID found, ask the user: "Could not find a story ID in `<path>`. Which story does this plan belong to?"
 
-**For explicit epic IDs** (from Step 1): call `pm_plan_stories(epic_id=<id>)` directly — no grouping check needed.
+**For `gemini_path` stories — delegate to planner agent (foreground):**
 
-**For story IDs** — use epic-grouped planning where safe:
+```
+Agent(subagent_type="planner", prompt="""
+MODE: draft-plan
+STORY_IDS: [<gemini_path story IDs>]
+EPIC_IDS: [<explicit epic IDs from Step 1>]
+""")
+```
 
-1. **Fetch epic membership** (parallel): call `pm_get_story(story_id=<id>)` for each story ID to get its `epic_id` (available in the one-liner response). Do all in a single message.
+Wait for the planner to return.
 
-2. **Group stories by epic_id.**
+**On PLANNER_RESULT**: Extract story metadata (IDs, titles, agents, detail_file paths). Proceed to Step 3.
 
-3. **Determine call mode per epic** (parallel): for each unique epic, call `pm_list_stories(epic_id=<id>)` to get all non-archived stories in that epic. Do all in a single message.
+**On PLANNER_ERROR**: Surface the error to the user with full details (step, tool, error message, partial results). Do NOT fall back to direct MCP calls. Let the user decide: retry, adjust input, or abort.
 
-4. **Decide per epic**:
-   - If **all** `draft`/`ready` stories in the epic are in the target list → use epic mode: `pm_plan_stories(epic_id=<id>)`
-   - Otherwise → fall back to multi-story mode: `pm_plan_stories(story_ids=[<id>, ...])`  with all targeted stories from that epic in one call
-
-5. **Call `pm_plan_story`/`pm_plan_stories` in a single message** (parallel tool calls) — one call per epic in epic mode, one `story_ids` call per partial-epic group in multi-story mode. Include any file-path stories and explicit epic IDs from above.
-
-Wait for **all** calls to complete before proceeding.
-
-After all planning calls complete, resolve the full concrete story list:
-
-- Story IDs: already resolved.
-- Epic IDs (explicit from Step 1): call `pm_list_stories(epic_id=...)`, filter to non-archived, add to story list.
-
-Deduplicate. If the story list is empty, stop and report: "No stories found. Nothing to plan."
+After planning completes, resolve the full concrete story list (combine fast_path + planner results). Deduplicate. If the story list is empty, stop and report: "No stories found. Nothing to plan."
 
 ---
 

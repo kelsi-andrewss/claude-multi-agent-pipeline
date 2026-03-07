@@ -50,6 +50,7 @@ def startup_migrate(db_path: Path | None = None) -> None:
         _ensure_knowledge_tables(conn)
         _ensure_epic_columns(conn)
         _ensure_order_idx_column(conn)
+        _ensure_read_files_column(conn)
         conn.execute("DELETE FROM pending_proposals WHERE created_at < datetime('now', '-24 hours')")
         row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         current = row[0] or 0
@@ -98,6 +99,32 @@ def startup_migrate(db_path: Path | None = None) -> None:
                     raise
             conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (3)")
 
+        if current < 4:
+            # Expand patterns category CHECK constraint to include new pitfall categories
+            existing = conn.execute("SELECT sql FROM sqlite_master WHERE name='patterns'").fetchone()
+            if existing and "python-mcp" not in existing[0]:
+                conn.executescript("""
+                    ALTER TABLE patterns RENAME TO patterns_old;
+                    CREATE TABLE patterns (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        category TEXT NOT NULL CHECK (category IN (
+                            'react', 'firebase', 'css', 'konva', 'architecture', 'general',
+                            'python-mcp', 'skill-markdown', 'claude-md'
+                        )),
+                        severity TEXT DEFAULT 'must' CHECK (severity IN ('must', 'should', 'prefer')),
+                        source TEXT,
+                        status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deprecated')),
+                        created_at TEXT DEFAULT (date('now'))
+                    );
+                    INSERT INTO patterns SELECT * FROM patterns_old;
+                    DROP TABLE patterns_old;
+                    CREATE INDEX IF NOT EXISTS idx_patterns_category ON patterns(category);
+                    CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status) WHERE status = 'active';
+                """)
+            conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (4)")
+
         conn.commit()
     finally:
         conn.close()
@@ -143,7 +170,7 @@ def _validate_transition(
 def _story_to_dict(row: sqlite3.Row) -> dict:
     """Convert a story Row to a dict, parsing JSON fields."""
     d = dict(row)
-    for field in ("write_files",):
+    for field in ("write_files", "read_files"):
         val = d.get(field)
         if val and isinstance(val, str):
             try:
@@ -178,8 +205,49 @@ def _fetch_story_deps(conn: sqlite3.Connection, story_id: str) -> list[str]:
     return [r["depends_on"] for r in rows]
 
 
-def _set_story_deps(conn: sqlite3.Connection, story_id: str, depends_on: list[str]) -> None:
-    """Replace all dependencies for a story in the junction table."""
+def _detect_cycles(conn: sqlite3.Connection) -> list[list[str]]:
+    """DFS on story_dependencies table. Returns list of cycle paths."""
+    rows = conn.execute("SELECT story_id, depends_on FROM story_dependencies").fetchall()
+    adj: dict[str, list[str]] = defaultdict(list)
+    for r in rows:
+        adj[r["story_id"]].append(r["depends_on"])
+
+    visited: set[str] = set()
+    in_stack: set[str] = set()
+    cycles: list[list[str]] = []
+
+    def dfs(node: str, path: list[str]) -> None:
+        if node in in_stack:
+            cycle_start = path.index(node)
+            cycles.append(path[cycle_start:] + [node])
+            return
+        if node in visited:
+            return
+        visited.add(node)
+        in_stack.add(node)
+        path.append(node)
+        for neighbor in adj.get(node, []):
+            dfs(neighbor, path)
+        path.pop()
+        in_stack.remove(node)
+
+    for node in adj:
+        if node not in visited:
+            dfs(node, [])
+    return cycles
+
+
+def _set_story_deps(conn: sqlite3.Connection, story_id: str, depends_on: list[str]) -> list[str]:
+    """Replace all dependencies for a story in the junction table. Returns warning strings."""
+    warnings: list[str] = []
+
+    # Validate that dependency IDs exist
+    invalid = _validate_dependencies(conn, depends_on)
+    if invalid:
+        for inv_id in invalid:
+            warnings.append(f"Dependency {inv_id} not found, skipped")
+        depends_on = [d for d in depends_on if d not in invalid]
+
     conn.execute("DELETE FROM story_dependencies WHERE story_id = ?", (story_id,))
     for dep_id in depends_on:
         conn.execute(
@@ -187,11 +255,36 @@ def _set_story_deps(conn: sqlite3.Connection, story_id: str, depends_on: list[st
             (story_id, dep_id),
         )
 
+    # Check for cycles after insertion
+    cycles = _detect_cycles(conn)
+    if cycles:
+        # Remove the deps we just inserted that created cycles
+        cycle_nodes = set()
+        for cycle in cycles:
+            cycle_nodes.update(cycle)
+        if story_id in cycle_nodes:
+            conn.execute("DELETE FROM story_dependencies WHERE story_id = ?", (story_id,))
+            warnings.append(f"Cycle detected involving {story_id}: {cycles[0]}. Dependencies removed.")
+
+    return warnings
+
 
 def _ensure_order_idx_column(conn: sqlite3.Connection) -> None:
     """Lazily add order_idx to stories table if it doesn't exist yet."""
     try:
         conn.execute("ALTER TABLE stories ADD COLUMN order_idx INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        if "duplicate column" in str(e).lower():
+            pass
+        else:
+            raise
+
+
+def _ensure_read_files_column(conn: sqlite3.Connection) -> None:
+    """Lazily add read_files to stories table if it doesn't exist yet."""
+    try:
+        conn.execute("ALTER TABLE stories ADD COLUMN read_files TEXT DEFAULT '[]'")
         conn.commit()
     except sqlite3.OperationalError as e:
         if "duplicate column" in str(e).lower():
@@ -245,7 +338,10 @@ def _ensure_knowledge_tables(conn: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             description TEXT NOT NULL,
-            category TEXT NOT NULL CHECK (category IN ('react', 'firebase', 'css', 'konva', 'architecture', 'general')),
+            category TEXT NOT NULL CHECK (category IN (
+                'react', 'firebase', 'css', 'konva', 'architecture', 'general',
+                'python-mcp', 'skill-markdown', 'claude-md'
+            )),
             severity TEXT DEFAULT 'must' CHECK (severity IN ('must', 'should', 'prefer')),
             source TEXT,
             status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deprecated')),
@@ -311,22 +407,25 @@ def _apply_plan_to_story(conn, sid: str, plan_data: dict) -> dict:
     for task_title in plan_data.get("tasks", []):
         _add_task_to_story(conn, sid, task_title)
     conn.execute(
-        "UPDATE stories SET agent = ?, write_files = ? WHERE id = ?",
+        "UPDATE stories SET agent = ?, write_files = ?, read_files = ? WHERE id = ?",
         (
             plan_data.get("agent"),
             json.dumps(plan_data.get("write_files", [])),
+            json.dumps(plan_data.get("read_files", [])),
             sid,
         )
     )
     depends_on = plan_data.get("depends_on", [])
+    dep_warnings: list[str] = []
     if depends_on:
-        _set_story_deps(conn, sid, depends_on)
+        dep_warnings = _set_story_deps(conn, sid, depends_on)
     return {
         "story_id": sid,
         "agent": plan_data.get("agent"),
         "tasks_created": len(plan_data.get("tasks", [])),
         "parallel_group": plan_data.get("parallel_group", 1),
         "depends_on": depends_on,
+        "dep_warnings": dep_warnings,
     }
 
 

@@ -73,8 +73,19 @@ Treat all of `{{args}}` as raw todo text (one item, or a newline/comma-separated
        ...
    ```
 
-6. Call `pm_plan_items(items=[...], confirmed=True, proposal_id=<proposal_id from step 4>)` — auto-commit.
+6. Delegate the heavy commit call to the **planner** agent (foreground):
+
+   ```
+   Agent(subagent_type="planner", prompt="""
+   MODE: todo-plan
+   TODO_ITEMS: <items list from step 2>
+   PROPOSAL_ID: <proposal_id from step 4>
+   """)
+   ```
+
+   **On PLANNER_RESULT**: Extract story IDs from the result.
+   **On PLANNER_ERROR**: Surface the error to the user. Do NOT fall back to direct MCP calls.
 
 7. Delete `.claude/todos.md`.
-   - Collect story IDs from the detail file of the committed plan.
+   - Collect story IDs from the PLANNER_RESULT.
    - Immediately invoke `/draft-plan <story-ids>` (space-separated). Do not ask.

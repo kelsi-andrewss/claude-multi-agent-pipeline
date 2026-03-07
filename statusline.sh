@@ -17,6 +17,12 @@ lines_rm=$(echo "$DATA" | jq -r '.cost.total_lines_removed // empty' 2>/dev/null
 in_tok=$(echo "$DATA" | jq -r '.context_window.current_usage.input_tokens // empty' 2>/dev/null || true)
 out_tok=$(echo "$DATA" | jq -r '.context_window.current_usage.output_tokens // empty' 2>/dev/null || true)
 branch=$(git branch --show-current 2>/dev/null || true)
+hook_profile="standard"
+if [[ -f /tmp/claude-hook-profile ]]; then
+  hook_profile=$(cat /tmp/claude-hook-profile 2>/dev/null)
+elif [[ -n "$CLAUDE_HOOK_PROFILE" ]]; then
+  hook_profile="$CLAUDE_HOOK_PROFILE"
+fi
 
 # --- Helpers ---
 fmt_tokens() {
@@ -124,5 +130,5 @@ branch_display="${branch:---}"
 printf " ${c_bar}◐ %s%% %s${reset} ${c_dim}·${reset} ${c_model}%s${reset} ${c_dim}·${reset} ${c_cost}%s${reset} ${c_dim}·${reset} ${c_dim}%s${reset}\n" \
   "$pct_display" "$bar" "$model_display" "$cost_display" "$dur_display"
 
-printf "  ${c_git}%s${reset} ${c_dim}·${reset} ${c_add}+%s${reset} ${c_rm}-%s${reset} ${c_dim}·${reset} ${c_dim}%s in${reset} ${c_dim}·${reset} ${c_dim}%s out${reset}\n" \
-  "$branch_display" "$add_display" "$rm_display" "$in_display" "$out_display"
+printf "  ${c_git}%s${reset} ${c_dim}·${reset} ${c_add}+%s${reset} ${c_rm}-%s${reset} ${c_dim}·${reset} ${c_dim}%s in${reset} ${c_dim}·${reset} ${c_dim}%s out${reset} ${c_dim}·${reset} ${c_dim}⚙ %s${reset}\n" \
+  "$branch_display" "$add_display" "$rm_display" "$in_display" "$out_display" "$hook_profile"

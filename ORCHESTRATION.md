@@ -40,6 +40,15 @@ If any criterion fails, use the default (Sonnet). When in doubt, use Sonnet — 
 
 Before defaulting, query OpenMemory for tool learnings about the model + file type. Consistent failures → escalate preemptively.
 
+**Haiku threshold** — Haiku is appropriate when ALL of:
+- Single write-target file
+- Exact code provided or pure deletion
+- No regex construction or expansion
+- No complex conditional logic
+- Target file is not a pipeline file (ORCHESTRATION.md, skills/, hooks/, settings.json, CLAUDE.md, behavioral-prefs.md)
+
+Pipeline files are excluded because errors compound — a bad edit affects every future story, not just the current one.
+
 ---
 
 ## 3. WORKFLOW
