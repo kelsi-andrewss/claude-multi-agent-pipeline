@@ -611,9 +611,19 @@ if os.path.isfile(outcomes_file) and get_mtime(outcomes_file) > outcomes_mtime_s
 OMWRITEEOF
 fi
 
-# Transcript embedding (background, non-blocking)
+# Transcript embedding + observation extraction (background, non-blocking)
 if [[ -f "$OM_DB" && -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-  python3 "$HOME/.claude/hooks/lib/transcript_embedder.py" "$TRANSCRIPT_PATH" "$OM_DB" &
+  (
+    CLAUDE_SESSION_ID="${SESSION_ID_RAW:-unknown}" \
+      python3 "$HOME/.claude/hooks/lib/transcript_embedder.py" "$TRANSCRIPT_PATH" "$OM_DB" 2>/dev/null
+    SIDECAR="/tmp/session-chunks-${SESSION_ID_RAW:-unknown}.json"
+    if [[ -f "$SIDECAR" ]]; then
+      python3 "$HOME/.claude/hooks/lib/observation_extractor.py" \
+        "$SIDECAR" "$OM_DB" "$HOME/.claude" "${SESSION_ID_RAW:-}" \
+        "$TRANSCRIPT_PATH" 2>/dev/null || true
+      rm -f "$SIDECAR"
+    fi
+  ) &
 fi
 
 # Cleanup session start timestamp

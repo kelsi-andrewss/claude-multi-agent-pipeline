@@ -234,6 +234,10 @@ def main():
         (SECTOR, f'%session-{today}%', USER_ID)
     ).fetchall()
     existing_texts = [row[0] for row in existing]
+
+    # Collect chunks with embeddings for sidecar output
+    chunks_with_embeddings = []
+
     try:
         for idx, chunk in enumerate(chunks):
             simhash = hashlib.md5(chunk["text"].encode()).hexdigest()[:16]
@@ -253,6 +257,14 @@ def main():
                 vec = get_embedding(chunk["text"])
                 if vec is None:
                     continue
+
+            # Track for sidecar
+            chunks_with_embeddings.append({
+                "text": chunk["text"],
+                "turn_start": chunk["turn_start"],
+                "turn_end": chunk["turn_end"],
+                "embedding": vec,
+            })
 
             blob = embedding_to_blob(vec)
             mem_id = str(uuid.uuid4())
@@ -279,6 +291,15 @@ def main():
         conn.commit()
     finally:
         conn.close()
+
+    # Write sidecar JSON for observation_extractor
+    session_id = os.environ.get("CLAUDE_SESSION_ID", "unknown")
+    sidecar_path = f"/tmp/session-chunks-{session_id}.json"
+    try:
+        with open(sidecar_path, "w") as f:
+            json.dump(chunks_with_embeddings, f)
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":
