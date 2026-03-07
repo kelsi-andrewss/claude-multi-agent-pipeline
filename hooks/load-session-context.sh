@@ -278,11 +278,22 @@ PYEOF
   # Compact OpenMemory query — top 5 behavioral prefs + top 5 tool learnings
   if [[ -f "$OM_DB" ]]; then
   python3 - "$OM_DB" <<'OMCOMPACTEOF'
-import subprocess, sys, time, math
+import os, subprocess, sys, time
 
 om_db = sys.argv[1]
 now = time.time()
 DEFAULT_DECAY = 0.05
+
+# Prune expired entries
+try:
+    project_root = os.path.expanduser("~/.claude")
+    sys.path.insert(0, project_root)
+    from hooks.lib.om_write import prune_expired
+    pruned = prune_expired()
+    if pruned > 0:
+        print(f"  (pruned {pruned} expired OpenMemory entries)")
+except Exception:
+    pass
 
 DECAY_SCORE = (
     f"feedback_score * EXP(-COALESCE(decay_lambda, {DEFAULT_DECAY}) "
@@ -336,15 +347,12 @@ OMCOMPACTEOF
     echo "  Review and remove the (auto-distilled) marker once confirmed."
   fi
 
-  # Correction patterns — triaged from correction_groups DB table, fallback to tallies file
+  # Correction patterns — from correction_groups DB table
   if [[ -f "$DB_FILE" ]]; then
-  python3 - "$DB_FILE" "$HOME/.claude/correction-tallies.jsonl" <<'CORRPATTERNSEOF'
-import json, subprocess, sys
-from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+  python3 - "$DB_FILE" <<'CORRPATTERNSEOF'
+import subprocess, sys
 
 db_path = sys.argv[1]
-tallies_file = sys.argv[2] if len(sys.argv) > 2 else ""
 
 def query_db(sql):
     try:
@@ -360,93 +368,47 @@ def query_db(sql):
 tables = query_db(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='correction_groups';"
 )
-
-if tables:
-    rows = query_db(
-        "SELECT theme, status, count, correction_dates, promoted_at "
-        "FROM correction_groups "
-        "ORDER BY CASE status WHEN 'pending_promotion' THEN 0 WHEN 'accumulating' THEN 1 WHEN 'promoted' THEN 2 END, count DESC;"
-    )
-    if rows:
-        pending = [r for r in rows if r[1] == "pending_promotion"]
-        accumulating = [r for r in rows if r[1] == "accumulating"]
-        promoted = [r for r in rows if r[1] == "promoted"]
-
-        # Skip output if only promoted entries exist (nothing for Claude to do)
-        if not pending and not accumulating:
-            sys.exit(0)
-
-        print("")
-        print("=== CORRECTION PATTERNS (triaged) ===")
-        if pending:
-            print("  Pending promotion:")
-            for r in pending:
-                theme, status, count, dates, promoted_at = r[0], r[1], r[2], r[3], r[4] if len(r) > 4 else ""
-                print(f'    [{count}x] "{theme}" (evidence: {dates})')
-            print("  Process pending promotions: write preference text to behavioral-prefs.md")
-        if accumulating:
-            print("  Accumulating:")
-            for r in accumulating:
-                theme, status, count, dates = r[0], r[1], r[2], r[3]
-                needed = 3 - int(count)
-                if needed < 1:
-                    needed = 1
-                print(f'    [{count}x] "{theme}" (need {needed} more)')
-        if promoted and (pending or accumulating):
-            print("  Already promoted:")
-            for r in promoted:
-                theme, status, count, dates, promoted_at = r[0], r[1], r[2], r[3], r[4] if len(r) > 4 else ""
-                print(f'    [{count}x] "{theme}" (promoted {promoted_at})')
-        print("=== END CORRECTION PATTERNS ===")
-        sys.exit(0)
-
-# Fallback: read correction-tallies.jsonl if DB table doesn't exist or is empty
-import os
-if not tallies_file or not os.path.isfile(tallies_file):
+if not tables:
     sys.exit(0)
 
-cutoff = datetime.now(timezone.utc) - timedelta(days=14)
-cutoff_str = cutoff.strftime("%Y-%m-%d")
-
-entries = []
-try:
-    with open(tallies_file) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                if entry.get("promoted", False):
-                    continue
-                if entry.get("date", "") < cutoff_str:
-                    continue
-                entries.append(entry)
-            except json.JSONDecodeError:
-                continue
-except Exception:
+rows = query_db(
+    "SELECT theme, status, count, correction_dates, promoted_at "
+    "FROM correction_groups "
+    "ORDER BY CASE status WHEN 'pending_promotion' THEN 0 WHEN 'accumulating' THEN 1 WHEN 'promoted' THEN 2 END, count DESC;"
+)
+if not rows:
     sys.exit(0)
 
-if not entries:
-    sys.exit(0)
+pending = [r for r in rows if r[1] == "pending_promotion"]
+accumulating = [r for r in rows if r[1] == "accumulating"]
+promoted = [r for r in rows if r[1] == "promoted"]
 
-themes = defaultdict(list)
-for e in entries:
-    key = e.get("user_msg", "")[:40].strip().lower()
-    themes[key].append(e)
+if not pending and not accumulating:
+    sys.exit(0)
 
 print("")
-print(f"=== CORRECTION PATTERNS ({len(entries)} unprocessed) ===")
-for key in sorted(themes, key=lambda k: -len(themes[k])):
-    group = themes[key]
-    representative = group[0].get("user_msg", "")[:80]
-    source = group[0].get("source", "unknown")
-    if len(group) > 1:
-        print(f'  [{len(group)}x] "{representative}" ({source})')
-    else:
-        date = group[0].get("date", "")
-        print(f'  [{date}] "{representative}" ({source})')
-print("  Process these before starting work.")
+print("=== CORRECTION PATTERNS (triaged) ===")
+if pending:
+    print("  Pending promotion:")
+    for r in pending:
+        theme, status, count, dates = r[0], r[1], r[2], r[3]
+        promoted_at = r[4] if len(r) > 4 else ""
+        print(f'    [{count}x] "{theme}" (evidence: {dates})')
+    print("  Process pending promotions: write preference text to behavioral-prefs.md")
+if accumulating:
+    print("  Accumulating:")
+    for r in accumulating:
+        theme, status, count, dates = r[0], r[1], r[2], r[3]
+        needed = 3 - int(count)
+        if needed < 1:
+            needed = 1
+        print(f'    [{count}x] "{theme}" (need {needed} more)')
+if promoted and (pending or accumulating):
+    print("  Already promoted:")
+    for r in promoted:
+        theme, status, count, dates = r[0], r[1], r[2], r[3]
+        promoted_at = r[4] if len(r) > 4 else ""
+        print(f'    [{count}x] "{theme}" (promoted {promoted_at})')
 print("=== END CORRECTION PATTERNS ===")
 CORRPATTERNSEOF
   fi
