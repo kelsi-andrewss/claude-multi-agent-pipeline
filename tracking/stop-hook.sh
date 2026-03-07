@@ -203,6 +203,204 @@ with open(tokens_file, 'w') as f:
     f.write('\n')
 PYEOF
 
+# Parse transcript for errors — tool errors, agent failures, hook rejections
+python3 - "$TRANSCRIPT" "$TRACKING_DIR/errors.json" "$SESSION_ID" <<'ERREOF'
+import sys, json, os
+from datetime import datetime
+
+transcript_path = sys.argv[1]
+errors_file = sys.argv[2]
+session_id = sys.argv[3]
+today = datetime.now().strftime('%Y-%m-%d')
+
+errors = []
+
+with open(transcript_path, encoding='utf-8') as f:
+    for line in f:
+        try:
+            obj = json.loads(line)
+        except:
+            continue
+
+        # Check for tool_result errors in user messages
+        msg = obj.get('message', {})
+        if obj.get('type') != 'user':
+            continue
+        content = msg.get('content', []) if isinstance(msg, dict) else msg if isinstance(msg, list) else []
+        if not isinstance(content, list):
+            continue
+
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get('type') != 'tool_result':
+                continue
+
+            is_error = block.get('is_error', False)
+            result_content = block.get('content', '')
+            if isinstance(result_content, list):
+                result_content = ' '.join(
+                    p.get('text', '') for p in result_content
+                    if isinstance(p, dict) and p.get('type') == 'text'
+                )
+
+            error_type = None
+            if is_error:
+                error_type = 'tool_error'
+            elif 'hook' in str(result_content).lower() and ('BLOCKED' in str(result_content) or 'blocked' in str(result_content)):
+                error_type = 'hook_rejection'
+            elif any(kw in str(result_content) for kw in ['BLOCKED', 'FAILED', 'Exit code']):
+                error_type = 'agent_failure'
+
+            if error_type:
+                # Find the tool name from the matching tool_use_id
+                tool_name = block.get('tool_use_id', 'unknown')[:20]
+                errors.append({
+                    'date': today,
+                    'session_id': session_id,
+                    'tool': tool_name,
+                    'error_type': error_type,
+                    'message': str(result_content)[:200],
+                })
+
+if not errors:
+    sys.exit(0)
+
+# Load and append
+existing = []
+if os.path.exists(errors_file):
+    try:
+        with open(errors_file) as f:
+            existing = json.load(f)
+    except:
+        existing = []
+
+# Dedup by (session_id, message[:50])
+seen = {(e['session_id'], e['message'][:50]) for e in existing}
+for err in errors:
+    key = (err['session_id'], err['message'][:50])
+    if key not in seen:
+        existing.append(err)
+        seen.add(key)
+
+with open(errors_file, 'w') as f:
+    json.dump(existing, f, indent=2)
+    f.write('\n')
+ERREOF
+
+# Parse transcript for skill invocations and outcomes
+python3 - "$TRANSCRIPT" "$TRACKING_DIR/skill-metrics.json" "$SESSION_ID" <<'SKILLEOF'
+import sys, json, os
+from datetime import datetime
+
+transcript_path = sys.argv[1]
+metrics_file = sys.argv[2]
+session_id = sys.argv[3]
+today = datetime.now().strftime('%Y-%m-%d')
+
+# Find Skill tool_use calls and their outcomes
+entries = []
+with open(transcript_path, encoding='utf-8') as f:
+    for line in f:
+        try:
+            entries.append(json.loads(line))
+        except:
+            continue
+
+skills = []
+for i, entry in enumerate(entries):
+    if entry.get('type') != 'assistant':
+        continue
+    msg = entry.get('message', {})
+    if not isinstance(msg, dict):
+        continue
+    content = msg.get('content', [])
+    if not isinstance(content, list):
+        continue
+
+    for block in content:
+        if not isinstance(block, dict) or block.get('type') != 'tool_use':
+            continue
+        if block.get('name') != 'Skill':
+            continue
+
+        skill_name = block.get('input', {}).get('skill', 'unknown')
+        ts = entry.get('timestamp', '')
+
+        # Look forward for Agent results to determine outcome
+        outcome = 'unknown'
+        stories_created = 0
+        stories_completed = 0
+        end_ts = ''
+
+        for j in range(i + 1, min(i + 100, len(entries))):
+            later = entries[j]
+            if later.get('type') == 'assistant':
+                later_msg = later.get('message', {})
+                if isinstance(later_msg, dict):
+                    later_content = later_msg.get('content', [])
+                    if isinstance(later_content, list):
+                        text = ' '.join(
+                            p.get('text', '') for p in later_content
+                            if isinstance(p, dict) and p.get('type') == 'text'
+                        )
+                        if 'BLOCKED' in text or 'FAILED' in text:
+                            outcome = 'failure'
+                            end_ts = later.get('timestamp', '')
+                            break
+                        if 'Ship complete' in text or 'merged' in text.lower():
+                            outcome = 'success'
+                            end_ts = later.get('timestamp', '')
+                            # Count stories
+                            import re
+                            stories_created = len(re.findall(r'story-\d+', text))
+                            stories_completed = text.lower().count('merged') + text.lower().count('done')
+                            break
+
+        # Calculate duration
+        duration = 0
+        if ts and end_ts:
+            try:
+                t0 = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                t1 = datetime.fromisoformat(end_ts.replace('Z', '+00:00'))
+                duration = max(0, int((t1 - t0).total_seconds()))
+            except:
+                pass
+
+        skills.append({
+            'date': today,
+            'session_id': session_id,
+            'skill': skill_name,
+            'duration_seconds': duration,
+            'outcome': outcome,
+            'stories_created': stories_created,
+            'stories_completed': stories_completed,
+        })
+
+if not skills:
+    sys.exit(0)
+
+existing = []
+if os.path.exists(metrics_file):
+    try:
+        with open(metrics_file) as f:
+            existing = json.load(f)
+    except:
+        existing = []
+
+# Dedup by (session_id, skill)
+seen = {(e['session_id'], e['skill']) for e in existing}
+for s in skills:
+    key = (s['session_id'], s['skill'])
+    if key not in seen:
+        existing.append(s)
+        seen.add(key)
+
+with open(metrics_file, 'w') as f:
+    json.dump(existing, f, indent=2)
+    f.write('\n')
+SKILLEOF
+
 # Regenerate charts
 python3 "$SCRIPT_DIR/generate-charts.py" "$TRACKING_DIR/tokens.json" "$TRACKING_DIR/charts.html" 2>/dev/null || true
 
