@@ -45,16 +45,12 @@ if [[ "$FILE_PATH" == "$HOME/.claude/"* ]]; then
     case "$FILE_PATH" in
       # Behavioral/logging files the main session writes
       "$HOME/.claude/corrections.md"|\
-      "$HOME/.claude/disagreements.md"|\
       "$HOME/.claude/outcomes.md"|\
       "$HOME/.claude/behavioral-prefs.md"|\
       "$HOME/.claude/session-handoff.md"|\
-      "$HOME/.claude/friction-log.md"|\
-      "$HOME/.claude/session-records.md"|\
       "$HOME/.claude/tool-learnings.md"|\
       "$HOME/.claude/todos.md"|\
-      "$HOME/.claude/skill-changelog.md"|\
-      "$HOME/.claude/correction-tallies.jsonl")
+      "$HOME/.claude/skill-changelog.md")
         exit 0 ;;
       # Tracking files
       "$HOME/.claude/.claude/tracking/"*)
