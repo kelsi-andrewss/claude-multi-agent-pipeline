@@ -3,6 +3,9 @@
 # Blocks reading .env files — secret values must never flow through the API.
 # .env.example is allowed (contains placeholder names, not real values).
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 2
+
 INPUT=$(cat)
 
 FILE_PATH=$(echo "$INPUT" | python3 -c "

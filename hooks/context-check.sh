@@ -7,6 +7,9 @@
 # Counter file: /tmp/stories-closed-${SESSION_ID}
 # Exit 0 always (advisory only).
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 2
+
 INPUT=$(cat)
 
 # Extract the status field from the TaskUpdate tool input

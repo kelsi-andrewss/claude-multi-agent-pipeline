@@ -3,6 +3,9 @@
 # Logs every skill invocation to tracking/skill-telemetry.jsonl.
 # Exit 0 always (advisory). Async.
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 2
+
 INPUT=$(cat)
 
 ENTRY=$(echo "$INPUT" | python3 -c "

@@ -3,6 +3,9 @@
 # Reads transcript JSONL from stdin, writes idempotent session records.
 # Also checks behavioral file mtimes (legacy functionality preserved).
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 1
+
 # Read stdin for transcript_path and session metadata
 INPUT=$(cat)
 

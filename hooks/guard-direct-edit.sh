@@ -11,6 +11,9 @@
 # Coder agents running inside a worktree pass automatically because their
 # file paths resolve under the worktree directory.
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 3
+
 # Fast path: if the session CWD is inside a story worktree, allow all edits immediately.
 # This avoids the python3 JSON parse on every Edit call inside coder agents.
 if [[ "$PWD" == */\.claude/worktrees/* ]]; then

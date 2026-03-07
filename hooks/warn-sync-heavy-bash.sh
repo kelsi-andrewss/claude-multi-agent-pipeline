@@ -11,6 +11,9 @@
 # Exit 0 always (advisory only).
 # Hook is async: true — never blocks the Bash call.
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 2
+
 INPUT=$(cat)
 
 # Extract run_in_background and command from tool input JSON

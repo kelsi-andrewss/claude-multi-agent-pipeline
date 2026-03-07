@@ -3,6 +3,9 @@
 # Appends an entry to skill-changelog.md when a skill SKILL.md file is created or modified.
 # Always exits 0 (never blocks the write).
 
+source "$(dirname "$0")/lib/profile.sh"
+require_profile 2
+
 INPUT=$(cat)
 
 FILE_PATH=$(echo "$INPUT" | python3 -c "
