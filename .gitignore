@@ -54,3 +54,4 @@ __pycache__/
 
 # Root-level DB (copy/artifact)
 epics.db
+hooks/lib/exemplar_cache.json

@@ -89,6 +89,23 @@ Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each depende
 
 > **Note:** A story may be placed in a later sequential batch even if it doesn't directly conflict with the story immediately before it. This happens when a downstream story conflicts with *both*, forcing them into a strict order. Stories are always chained safely to prevent merge conflicts.
 
+### Function-level granularity
+
+Write targets support optional symbol annotations using colon syntax:
+- `route.ts` — whole file (conflicts with ANY other `route.ts` target)
+- `route.ts:queryPinecone` — specific function/export (conflicts only with `route.ts:queryPinecone` or bare `route.ts`)
+- `route.ts:POST handler` — named section (same rules)
+
+**Conflict rules:**
+- `file` vs `file` → CONFLICT (whole-file overlap)
+- `file` vs `file:symbol` → CONFLICT (whole-file subsumes any symbol)
+- `file:symbolA` vs `file:symbolB` → SAFE (different symbols, parallel OK)
+- `file:symbolA` vs `file:symbolA` → CONFLICT (same symbol)
+
+When `pm_check_conflicts` returns file-level conflicts, check if ALL stories in the conflict use symbol-annotated targets for that file. If so, compare symbols — if all symbols are distinct, reclassify as `safe_parallel` for that file.
+
+If ANY story uses a bare filename (no symbol), it conflicts with all other stories targeting that file regardless of their annotations.
+
 ---
 
 ## Step 2c: Post-bootstrap build verification
@@ -166,6 +183,7 @@ Agent approach: <agent-approach>
 Dev branch: <dev-branch>
 Story branch: <story-branch>
 Write files scope: <write_files list, or "not specified">
+If write targets include symbol annotations (e.g., "file.ts:functionName"), limit your changes in that file to the annotated symbol/section. Do not modify other functions or sections in the same file.
 Read-only context files: <read-only context paths prefixed with worktree path, or "none">
 Project root: <project-root>
 

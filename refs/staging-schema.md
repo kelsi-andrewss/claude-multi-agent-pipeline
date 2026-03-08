@@ -111,7 +111,7 @@ in-review → in-progress   (test/review failed, send back to coder)
 in-review → approved      (test/review passed)
 approved → done           (merged into epic branch)
 approved → shipped        (fast-track)
-done → shipped            (epic merged to main)
+done → shipped            (epic dev branch merged to dev)
 any → blocked             (stuck)
 blocked → in-progress     (manual reset)
 any → draft               (rescoped — pulled back to planning)
@@ -121,7 +121,7 @@ any → draft               (rescoped — pulled back to planning)
 
 ```
 active → done             (all stories done, PR ready)
-done → shipped            (merged to main)
+done → shipped            (merged to dev)
 done → active             (reopened)
 ```
 

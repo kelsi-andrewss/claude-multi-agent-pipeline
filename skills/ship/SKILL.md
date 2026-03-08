@@ -23,7 +23,7 @@ Parse `{{args}}` to determine the mode:
 
 1. **Resume mode**: first token matches `epic-\d+` → set `epic_id` to that token.
 2. **File mode**: a token ends with `.md` and the file exists → read it:
-   - If path starts with `plans/` and file contains `## What changes` → **Execute mode** (existing plan file).
+   - If file contains `## What changes` → **Execute mode** (existing plan file).
    - Otherwise → **PRD mode** (requirements doc). Read file contents, then check for a `## Summary` section:
      - If `## Summary` exists → **presearch briefing**. Extract `## Summary` content as `context` (not the full file). Extract numbered items from `## Features` > `### MVP` as `items`. Store the briefing path as `briefing_path` for use in Step 3. Read and store the full file contents as `briefing_contents` for use in Steps 2c and 2d.
      - If `## Summary` absent → existing behavior (full file as `context`).
@@ -53,13 +53,31 @@ Parse `{{args}}` to determine the mode:
 ### Execute mode (existing plan file)
 
 If **Execute mode** was detected in Step 0:
-1. Read the plan file.
-2. Extract the title from the first `# ` heading.
-3. Load `ToolSearch: select:mcp__gemini__pm_create_story`
-4. Call `pm_create_story(title=<extracted title>, agent="architect")`.
-5. Load `ToolSearch: select:mcp__gemini__pm_update_story`
-6. Call `pm_update_story(story_id=<new story id>, plan_file="<plan file path>")`.
-7. Go to Step 4 with that single story ID.
+
+1. Read the plan file and parse:
+   - **Title**: first `# ` heading
+   - **Agent**: value from `Agent:` line (if present)
+   - **Write targets**: file paths from the first column of the `## What changes` table (skip header row and `|---|` separator)
+
+2. Load `ToolSearch: select:mcp__gemini__pm_create_story,mcp__gemini__pm_update_story,mcp__gemini__pm_create_epic`
+
+3. **Route by scope:**
+
+   **Quick-fix path (≤2 write targets):**
+   - No epic — omit `epic_id` (story lands in `epic-backlog`)
+   - Agent: parsed `Agent:` line, or `quick-fixer`
+   - Auto-set `skip_validate = true` and `skip_verify = true` (same effect as `--quick`)
+   - `pm_create_story(title=<title>, agent=<agent>, write_files=<write targets>)`
+   - `pm_update_story(story_id=<new id>, plan_file="<plan file path>")`
+   - Go to Step 4
+
+   **Full path (>2 write targets):**
+   - `pm_create_epic(title=<title>)` → use returned `epic_id`
+   - Agent: parsed `Agent:` line, or `architect`
+   - Respect user-provided `--quick`/`--argue` flags (don't auto-set)
+   - `pm_create_story(title=<title>, epic_id=<epic_id>, agent=<agent>, write_files=<write targets>)`
+   - `pm_update_story(story_id=<new id>, plan_file="<plan file path>")`
+   - Go to Step 4
 
 ### All other modes — delegate to planner agent
 
@@ -85,13 +103,42 @@ Wait for the planner to return.
 
 ---
 
-## Step 3: Write plan files (Claude's job)
+## Step 3: Write plan files (background agents)
 
-For each story, call `pm_get_story(story_id=<id>)` — read the detail file for tasks and write_files. Then for each story:
+Plan files are written by parallel background agents to preserve main-session context.
 
-1. Generate a plan file name: `plans/<random-adjective-noun>.md`
-2. Write the plan file with this structure:
-   ```
+### Step 3a: Prepare plan-writer launches
+
+1. Read `refs/orch-critique-checklist.md` once (keep its content for the agent prompts).
+2. For each story, call `pm_get_story(story_id=<id>)` — read the detail file for tasks and write_files.
+3. Glob `plans/*.md` once to get existing names. For each story, generate a unique plan file name: `plans/<random-adjective-noun>.md`.
+
+### Step 3b: Launch plan-writer agents
+
+Launch one `general-purpose` background agent per story with `run_in_background: true`. Use this prompt template for each:
+
+```
+You are writing a plan file for story <story_id>: "<title>"
+
+Agent: <agent>
+Tasks: <task list from pm_get_story>
+Write files: <write_files list>
+Read files: <read_files list>
+Output file: plans/<name>.md
+
+## Critique Checklist
+<full checklist content from refs/orch-critique-checklist.md>
+
+## Instructions
+
+1. Read the story's write_files to understand what exists today.
+2. Read files referenced by tasks but not in write_files — these become read-only context.
+3. Apply the critique checklist against the Gemini-planned tasks:
+   - If SIGNIFICANT issues found (missing files, scope creep, convention violations):
+     Return: "NEED_DECISION: <issue>\nOption A: <fix>\nOption B: <fix>"
+   - If MINOR gaps (edge cases, existing utilities): incorporate silently.
+4. Write the plan file to plans/<name>.md with this structure:
+
    # <story title>
 
    Story: <story_id>
@@ -116,7 +163,6 @@ For each story, call `pm_get_story(story_id=<id>)` — read the detail file for 
 
    1. <task 1>
    2. <task 2>
-   ...
 
    ## Acceptance criteria
 
@@ -127,23 +173,53 @@ For each story, call `pm_get_story(story_id=<id>)` — read the detail file for 
    ## Verification
 
    - <how to verify the changes work>
-   ```
 
-   **Critique gate:** Before writing each plan file, read `refs/orch-critique-checklist.md` and apply all checks against the Gemini-planned story data. Significant issues (missing files, scope creep, convention violations, conflicts with recorded decisions) → surface to user before proceeding. Minor gaps (edge cases, existing utilities) → incorporate silently into the plan file. This is necessary because ship skips draft-plan's critique step.
+5. If briefing_path was provided, include it in read-only context and reference
+   specific sections in task descriptions.
+   Format: (see briefing ## <Section> > <Subsection> for <what>)
+6. Return: "DONE: plans/<name>.md"
+```
 
-   **Read-only context:** Determine from files referenced by tasks but not in the story's write_files scope. These give coders the interface contracts and utilities they need without modifying them. If `briefing_path` was set in Step 0 (presearch briefing), include it:
-   - `<briefing_path>` — technical research briefing (APIs, data model, decisions, gotchas)
+If `briefing_path` was set in Step 0, append to each agent's prompt:
+```
+Briefing path: <briefing_path>
+Include this file in read-only context. Reference specific briefing sections in
+task descriptions for any task involving APIs, data models, patterns, or gotchas.
+```
 
-   **Briefing references in tasks:** When `briefing_path` is set, write task descriptions that reference specific briefing sections for any task involving APIs, data models, patterns, or gotchas. Format: `(see briefing ## <Section> > <Subsection> for <what>)`. This eliminates ambiguity — coders know exactly which research to follow.
+### Step 3c: Collect results
 
-   **Acceptance criteria:** If plan validation ran (Step 2d), extract per-story criteria from the analyze/argue response. If validation was skipped (`--quick`), write basic criteria derived from the story's task descriptions — focus on observable behaviors, not implementation details.
+Wait for all background agents to complete. For each result:
 
-3. Load `ToolSearch: select:mcp__gemini__pm_update_story`
-4. Call `pm_update_story(story_id=<id>, plan_file="plans/<name>.md")` for each story.
+- `DONE: plans/<name>.md` — Load `ToolSearch: select:mcp__gemini__pm_update_story`, then call `pm_update_story(story_id=<id>, plan_file="plans/<name>.md")`.
+- `NEED_DECISION: <issue>` — Surface to user, get answer, resume agent.
+- `BLOCKED: <reason>` — Report to user, skip story.
+
+Proceed to Step 3d after all agents complete.
 
 ---
 
-## Step 3b: Environment preflight
+## Step 3d: Critique loop
+
+**Skip when:** `skip_validate = true` (--quick flag).
+
+After all plan files are written and stored in the DB, run the critique loop on each:
+
+1. For each plan file from Step 3c, invoke the critique logic (Step 3–4 from `/critique` SKILL.md):
+   - Self-critique: 2 passes max, 5 core questions, NMIP gating per question.
+   - Gemini escalation: use `mcp__gemini__pm_critique` (story IDs are available) instead of `mcp__gemini__analyze`.
+   - Fix improvements inline in the plan files.
+2. After all plan files are critiqued, note findings for the Step 5a report:
+   - Which plans were improved and what changed.
+   - Any remaining concerns Gemini raised that weren't resolved.
+   - Past blind spots checked (from OpenMemory).
+3. Store learnings per `/critique` Step 5 (tool-learning tag, blind spots if Gemini caught NMIP'd items).
+
+Do NOT append `## Self-critique` sections to plan files — coders don't need critique metadata. Findings go in the Step 5a report only.
+
+---
+
+## Step 3e: Environment preflight
 
 **Purpose**: Identify external service dependencies before coders launch. Missing env vars waste entire coder runs.
 

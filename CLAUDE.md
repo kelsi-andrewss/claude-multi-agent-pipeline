@@ -38,6 +38,11 @@ Responsible engineers check in before irreversible or shared-state actions — n
 - Solve the current problem. Abstractions for hypothetical future needs add complexity now and are usually wrong later.
 - Test logic that can break silently — data transformations, state transitions, conditional behavior. Don't test wiring (route configs, component composition, dependency injection) — it fails obviously. Don't duplicate what the type system already catches.
 
+## Self-critique
+- After producing significant work (architectural decisions, multi-file plans, new patterns, design proposals), run `/critique` before presenting. "Is this solid? Any gaps?" should never need to be asked.
+- Significant = architectural decisions, 2+ file plans, new file/skill/hook creation, complex logic changes.
+- Trivial = single-line fixes, config changes, simple scripts. Skip auto-trigger; `/critique` can still be invoked manually.
+
 ## Commits
 - `git add -A` risks capturing secrets, build artifacts, or unintended changes. Stage files by name.
 - Secrets in code or commit messages can't be fully scrubbed from git history. They belong only in .env files.
@@ -70,7 +75,6 @@ The Stop hook also auto-detects corrections from the transcript (prefixed `AUTO:
 
 ## Behavioral learning
 These files track patterns across sessions:
-- `~/.claude/disagreements.md` — overrides log (appended when I override a strong position)
 - `~/.claude/outcomes.md` — post-merge/rejection results (consulted on-demand)
 - `~/.claude/corrections.md` — course corrections (AUTO-detected + manual; verified at session start)
 - `~/.claude/behavioral-prefs.md` — distilled preferences inferred over time (loaded every session)
@@ -79,16 +83,7 @@ These files track patterns across sessions:
 - `decision_preferences` table (epics.db) — machine-learned preference predictions from correction/decision correlation (see `hooks/lib/signal_processor.py`)
 
 ### Distilling preferences
-When the session agenda shows "BEHAVIORAL DISTILLATION DUE" or on request:
-1. Read entries in disagreements.md, outcomes.md, and corrections.md since the last distillation date
-2. Query `decision_preferences` table for high-confidence preferences (confidence >= 0.7) — cross-reference with existing behavioral-prefs.md entries
-3. Identify recurring patterns: overrides trending one direction, story types that consistently succeed or fail, approaches consistently preferred or rejected
-4. Write concise entries to behavioral-prefs.md — each a single sentence stating the preference and its evidence (e.g., "Prefers quick-fixer for CSS-only changes — 4/4 architect stories on CSS were scope overkill, per outcomes 2026-02-*")
-5. If a `decision_preferences` entry contradicts a behavioral-prefs.md entry, flag it for user review rather than silently overwriting
-6. Don't duplicate existing entries. Update them if new evidence changes the pattern.
-7. For each new or updated entry, call `openmemory_store(content="<preference text>", tags=["behavioral-pref"], user_id="proj:dotclaude")`. This is the exclusive path for corrections to reach OpenMemory — raw corrections are never stored directly.
-8. Update the timestamp: `<!-- last-distilled: YYYY-MM-DD -->`
-9. Preferences with fewer than 3 supporting data points get prefixed with "(tentative)"
+Distillation is automated. The stop hook auto-promotes correction patterns (count >= 3) to behavioral-prefs.md and OpenMemory via om_write.py. Auto-distilled entries are prefixed with "(auto-distilled)". Review them at session start to refine wording if needed — but the system works without manual intervention.
 
 ### Tool & model learnings
 When a model or tool repeatedly succeeds or fails at a specific task type (2+ occurrences):
@@ -107,12 +102,19 @@ Features that expose registries, hooks, or plugin APIs become implicit dependenc
 - **Scoping:** user_id="global" (cross-project) or user_id="proj:<name>" (per-project)
 - **Embeddings:** Ollama nomic-embed-text (local)
 
+### OpenMemory Write Discipline
+- **Owner:** `hooks/lib/om_write.py`
+- **Rule:** All OpenMemory writes go through om_write(). No direct SQL inserts.
+- **Tags:** Only `behavioral-pref`, `tool-learning`, `decision`, `prompt-pattern`, `session-summary`, `critique-learning`, `gemini-blind-spot` accepted.
+- **Enforcement:** Tag whitelist, embedding-based dedup (0.85 threshold), per-category budgets, decay-weighted pruning.
+- **Ops log:** `~/.claude/.claude/tracking/om-ops.json`
+
 ### Conversation Memory Pipeline
-- **Owner:** `hooks/lib/transcript_embedder.py` (episodic storage), `hooks/lib/signal_processor.py` (correction-decision correlation)
-- **Storage:** `decision_preferences` table in `epics.db`, OpenMemory episodic sector
+- **Owner:** `hooks/lib/signal_processor.py` (correction-decision correlation)
+- **Storage:** `decision_preferences` table in `epics.db`, `correction_groups` table in `epics.db`
 - **MCP tools:** `pm_predict_preference` (query predicted preferences for a domain), `pm_decision_insights` (correlate decisions with outcomes)
 - **Session hook:** `hooks/load-session-context.sh` outputs `PREDICTED PREFERENCES` section from `decision_preferences` table at session start
-- **Write pattern:** `signal_processor.py` correlates corrections with recent decisions and updates `decision_preferences`; `transcript_embedder.py` stores session chunks to OpenMemory with sector="episodic", tags=["transcript","session-<date>"]
+- **Write pattern:** `signal_processor.py` correlates corrections with recent decisions and updates `decision_preferences`; stop hook detects corrections in transcript, writes to `correction_groups`, auto-promotes when count >= 3
 
 ## Project structure
 `~/.claude/` is itself a git project. Claude Code treats `~/.claude/.claude/` as its project-level config folder. That subfolder contains the live infrastructure: `epics.db`, `scripts/epics-cli.sh`, `hooks/`, `prompts/`. Global skills and instructions live at `~/.claude/skills/` and `~/.claude/ORCHESTRATION.md` — duplicating them into `.claude/.claude/skills/` creates drift between two sources of truth.

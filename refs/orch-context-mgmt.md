@@ -1,6 +1,6 @@
 # Context Management Reference — Handoff, Debrief & Recovery
 
-Extracted from ORCHESTRATION.md §10 and §12. Loaded on demand before /clear and at session start if recovery needed.
+Extracted from ORCHESTRATION.md §9. Loaded on demand before /clear and at session start if recovery needed.
 
 ---
 

@@ -105,6 +105,38 @@ If this fails (branch not found on origin), stop and report:
 
 ---
 
+## Step 2.5: Smoke test
+
+Run project tests in the story worktree before merging. This catches regressions early.
+
+1. Detect test infrastructure in `<worktree-path>`:
+   - `package.json` with `scripts.test` → `npm test`
+   - `pytest.ini`, `pyproject.toml` with `[tool.pytest]`, or `tests/` dir with `*_test.py`/`test_*.py` → `pytest`
+   - `go.mod` with `*_test.go` files → `go test ./...`
+   - `Cargo.toml` → `cargo test`
+   - `pubspec.yaml` with `test/` dir → `flutter test`
+
+2. If no test infrastructure detected:
+   - Set `test_result = "skipped (no infra)"`
+   - Continue to Step 3.
+
+3. If test infrastructure detected, run the test command:
+   ```bash
+   cd <worktree-path> && <test-command>
+   ```
+
+4. If tests pass:
+   - Set `test_result = "pass"`
+   - Continue to Step 3.
+
+5. If tests fail:
+   - Set `test_result = "FAIL"`
+   - Display the failure output.
+   - Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging, or re-run with `--skip-tests` to bypass."
+   - Do NOT proceed to merge.
+
+---
+
 ## Step 3: Merge story branch into dev
 
 ```bash
@@ -228,7 +260,7 @@ Determine outcome metadata:
   write "not captured". Delete the temp file after reading.
 - `skills_list`: read `~/.claude/.claude/tracking/skill-telemetry.jsonl`, filter by current
   session_id, collect distinct skill values. If missing, use "merge-worktree".
-- `friction_summary`: read `~/.claude/friction-log.md`, count entries matching this story_id.
+- `friction_summary`: query `correction_groups` table in epics.db for entries related to this story.
   Format as "N: cat1, cat2" or "0 (clean)".
 - `memory_list`: recall OpenMemory queries during this session's plan critique or coder prompt
   construction for this story. If any influenced a decision, list topics. Otherwise "none".
@@ -245,6 +277,7 @@ Append to `~/.claude/outcomes.md`:
 **Coder effort**: [coder_effort]
 **Skills used**: [skills_list]
 **Friction events**: [friction_summary]
+**Tests**: [test_result]
 **File count**: [file_count]
 **Complexity**: [complexity_bucket]
 **Memory attributed**: [memory_list]
@@ -262,6 +295,7 @@ Print a summary using the information collected above:
 Merged: <story-branch> → <dev-branch>  (commit <HASH>)
 Worktree removed: <worktree-path>
 Branch deleted: <story-branch> (local + remote)
+Tests: <test_result>
 Story updated: <story_id> → done
 Epic updated:   <epic_id> → done (all stories complete)   ← only if auto-closed
 ```

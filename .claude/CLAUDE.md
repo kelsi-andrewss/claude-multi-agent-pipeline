@@ -4,11 +4,9 @@
 When CORRECTION PATTERNS appears at session start:
 1. Group entries by theme (same underlying problem)
 2. For groups with ≥ 3 entries:
-   - **Behavioral** (communication style, judgment calls): auto-promote to `behavioral-prefs.md`, then mark entries as `promoted: true` in `correction-tallies.jsonl`
+   - **Behavioral** (communication style, judgment calls): auto-promote to `behavioral-prefs.md`. Corrections are tracked in `correction_groups` table (epics.db) and auto-promoted by stop hook when count >= 3.
    - **Process** (workflow steps, tool usage): surface to user — "This keeps happening: [pattern]. Should this become a hook or skill?"
 3. Groups with < 3 entries: leave to accumulate — don't act on them yet
-
-When UNPROCESSED SESSIONS shows friction clusters, review the session record context to understand what caused rapid-fire user turns.
 
 When you see the SESSION AGENDA, interpret it before waiting for direction:
 - If you have a clear recommendation, state it with reasoning (dependency chain, staleness, momentum)

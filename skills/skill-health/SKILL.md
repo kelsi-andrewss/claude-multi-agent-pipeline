@@ -29,12 +29,11 @@ Parse `{{args}}` for:
 
 ## Step 2: Read data sources
 
-Read all four data sources. Missing files are not errors — report what's available.
+Read all data sources. Missing files are not errors — report what's available.
 
-1. **Friction log**: Read `~/.claude/friction-log.md`. Parse each `## ` entry into structured data:
-   - date, category, story_id, type, skill, expected, actual, counterfactual, recurrence
+1. **Error data**: Read `~/.claude/.claude/tracking/errors.json`. Parse error entries for friction-related data.
    - Apply `since_date` filter if set
-   - Apply `focus_skill` filter if set (match against **Skill** field)
+   - Apply `focus_skill` filter if set
 
 2. **Skill telemetry**: Read `~/.claude/.claude/tracking/skill-telemetry.jsonl`. Parse each JSONL line:
    - timestamp, date, skill, args, session_id
@@ -49,6 +48,12 @@ Read all four data sources. Missing files are not errors — report what's avail
 4. **Skill changelog**: Read `~/.claude/skill-changelog.md`. Parse each `- ` entry:
    - date, action (created/modified/retired), skill_name, description
    - No date filter — always show all for before/after analysis
+
+5. **Skill metrics**: Read `~/.claude/.claude/tracking/skill-metrics.json`. Parse skill invocation metrics.
+   - Apply `since_date` filter if set
+
+6. **Memory system health**: Read `~/.claude/.claude/tracking/om-ops.json`. Parse OpenMemory operations log.
+   - Summarize write/dedup/prune/error counts for memory health overview
 
 ---
 
