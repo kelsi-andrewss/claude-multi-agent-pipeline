@@ -2,6 +2,198 @@
 
 Post-merge/rejection log for pattern recognition across sessions. Consulted on-demand, not loaded into every session.
 
+## 2026-03-08 -- story-570 -- Skill tracking chart integration tests
+**Intent**: Verify chart data values, sorting, timeline aggregation, and success rate edge cases
+**Result**: merged
+**Agent**: unit-tester
+**Model**: unknown
+**Cycle time**: 0.0h
+**Coder effort**: 39293 tokens · 15 calls · 99s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: pass (58/58)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-story execution, consolidated 4 overlapping stories into 1 to avoid write conflicts
+**What failed**: nothing
+
+## 2026-03-08 -- story-565 -- Dashboard Feature Additions
+**Intent**: Dashboard Feature Additions
+**Result**: merged
+**Agent**: architect
+**Model**: opus
+**Cycle time**: 0.1h
+**Coder effort**: opus · 65321 tokens · 46 calls · 235s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: pass (149 total: 100 existing + 49 new)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-file execution, all 5 features implemented in one pass, 49 tests written and passing
+**What failed**: nothing
+
+## 2026-03-08 -- story-564 -- Test Coverage: All Tracking Write Paths
+**Intent**: Add error-path and E2E tests for all 5 tracking write paths (write-turns, write-agent, backfill, patch-durations, parse_friction)
+**Result**: merged
+**Agent**: arch
+**Model**: opus
+**Cycle time**: 0.1h
+**Coder effort**: opus · 73916 tokens · 44 calls · 329s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: pass (100/100)
+**File count**: 5
+**Complexity**: medium
+**Memory attributed**: none
+**What worked**: Clean execution. AST extraction solved backfill.py module-level import problem. HOME env override for patch-durations E2E tests. All 27 new tests passed first run.
+**What failed**: nothing
+
+## 2026-03-08 -- story-545 -- /smoke-test skill for plan-writer pipeline validation
+**Intent**: Create /smoke-test skill that validates the /ship plan-writer pipeline end-to-end
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 42122 tokens · 21 calls · 128s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean execution from plan. Serialized after story-544 due to (unnecessary) dependency.
+**What failed**: nothing
+
+## 2026-03-08 -- story-544 -- Pytest unit tests for _apply_plan_to_story
+**Intent**: Unit tests for DELETE-before-INSERT idempotency and state transition to ready
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 35344 tokens · 26 calls · 98s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: self (story IS the tests)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-file test creation. Plan had exact function references and schema details.
+**What failed**: nothing
+
+## 2026-03-08 -- story-543 -- Background plan writers + task accumulation fixes
+**Intent**: Move plan-file writing to parallel background agents, fix task accumulation bugs
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 50600 tokens · 32 calls · 172s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 3
+**Complexity**: medium
+**Memory attributed**: none
+**What worked**: Clean single-story execution from existing plan file. Execute mode in /ship skipped planning overhead.
+**What failed**: nothing
+
+## 2026-03-08 -- story-541 -- Documentation updates
+**Intent**: Documentation updates
+**Result**: merged
+**Agent**: arch
+**Model**: sonnet
+**Cycle time**: 2.1h
+**Coder effort**: sonnet · 68627 tokens · 56 calls · 7388s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 7
+**Complexity**: large
+**Memory attributed**: none
+**What worked**: Clean execution — all 7 doc files updated, verification checks pass, disagreements.md reference correctly preserved in protocol section
+**What failed**: nothing
+
+## 2026-03-08 -- story-542 -- Tracking extensions (errors, skill metrics, OM health charts)
+**Intent**: Tracking extensions (errors, skill metrics, OM health charts)
+**Result**: merged
+**Agent**: arch
+**Model**: sonnet
+**Cycle time**: 0.4h
+**Coder effort**: not captured
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 1: blocked (background agent couldn't commit, main session committed from worktree)
+**Tests**: skipped (no infra)
+**File count**: 2
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Agent wrote code successfully; main session committed and pushed from worktree
+**What failed**: Agent couldn't git commit (permission issue)
+
+## 2026-03-08 -- story-540 -- Trim session start hook (load-session-context.sh)
+**Intent**: Trim session start hook (load-session-context.sh)
+**Result**: merged
+**Agent**: arch
+**Model**: sonnet
+**Cycle time**: 0.2h
+**Coder effort**: not captured
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 1: blocked (background agent couldn't write files, main session made targeted edits)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Two targeted edits (prune_expired + correction_groups simplification) instead of full rewrite — file was already partially trimmed by previous session
+**What failed**: Background agent blocked by Write/Edit permissions
+
+## 2026-03-08 -- story-539 -- Rewrite stop hook (session-learning-check.sh)
+**Intent**: Rewrite stop hook (session-learning-check.sh)
+**Result**: merged
+**Agent**: arch
+**Model**: sonnet
+**Cycle time**: 0.3h
+**Coder effort**: not captured
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 1: blocked (background agent couldn't write files, main session wrote via heredoc)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Main session rewrote file via Bash heredoc after Write tool failed with "modified since read"
+**What failed**: Background agent was blocked by Write/Edit permissions; Write tool failed twice with stale-read error
+
+## 2026-03-08 -- story-537 -- Write gate + cleanup script
+**Intent**: Write gate + cleanup script
+**Result**: merged
+**Agent**: arch
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: not captured
+**Skills used**: run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 2
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean execution, both files created correctly
+**What failed**: nothing
+
+## 2026-03-08 -- story-538 -- Dead file cleanup + guard-direct-edit update
+**Intent**: Dead file cleanup + guard-direct-edit update
+**Result**: merged
+**Agent**: qf
+**Model**: haiku
+**Cycle time**: 0.0h
+**Coder effort**: not captured
+**Skills used**: run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 9
+**Complexity**: large
+**Memory attributed**: none
+**What worked**: Deleted 7 files, cleaned tool-learnings.md, updated guard-direct-edit.sh allowlist
+**What failed**: nothing
+
 ## 2026-03-06 -- story-523 -- Function-level write-target overlap detection
 **Intent**: Add file:symbol syntax to run-stories conflict detection for function-level parallel safety
 **Result**: merged
