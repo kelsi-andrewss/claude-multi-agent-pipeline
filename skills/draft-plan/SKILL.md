@@ -170,7 +170,19 @@ Output file: plans/<name>.md
 5. Return: "DONE: plans/<name>.md"
 ```
 
-### Step 5c: Collect results and update DB
+### Step 5c: Critique loop
+
+After all plan files are written (both fast-path and agent-written), run the critique loop on each:
+
+1. For each plan file, apply the critique logic (Steps 3–4 from `/critique` SKILL.md):
+   - Self-critique: 2 passes max, 5 core questions, NMIP gating per question.
+   - Gemini escalation: use `mcp__gemini__pm_critique` (story IDs are available).
+   - Fix improvements inline in the plan files.
+2. Mandatory even for fast-path stories.
+3. Store learnings per `/critique` Step 5 (tool-learning tag, blind spots if Gemini caught NMIP'd items).
+4. Do NOT append `## Self-critique` sections to plan files — note findings in the Step 6 report instead.
+
+### Step 5d: Collect results and update DB
 
 Wait for all background agents to complete. For each result:
 
@@ -180,7 +192,7 @@ Wait for all background agents to complete. For each result:
 
 Also call `pm_update_story` for each fast-path story written in the main session.
 
-### Step 5d: Cleanup
+### Step 5e: Cleanup
 
 Delete any source `.md` files (from the file path list in Step 1) using `Bash: rm <path>`.
 

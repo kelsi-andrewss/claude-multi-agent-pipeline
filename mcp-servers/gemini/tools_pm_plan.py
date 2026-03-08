@@ -71,16 +71,8 @@ def register(mcp):
             except (json.JSONDecodeError, ValueError):
                 return fmt_plan_story({"error": "Gemini returned malformed JSON.", "raw": raw[:2000]})
 
-            for task_title in plan_data.get("tasks", []):
-                _add_task_to_story(conn, story_id, task_title)
-            conn.execute(
-                "UPDATE stories SET agent = ?, write_files = ? WHERE id = ?",
-                (plan_data.get("agent"), json.dumps(plan_data.get("write_files", [])), story_id)
-            )
-            depends_on = plan_data.get("depends_on", [])
-            dep_warnings: list[str] = []
-            if depends_on:
-                dep_warnings = _set_story_deps(conn, story_id, depends_on)
+            applied = _apply_plan_to_story(conn, story_id, plan_data)
+            dep_warnings = applied.get("dep_warnings", [])
             result = {
                 "mode": "story",
                 "story_id": story_id,
