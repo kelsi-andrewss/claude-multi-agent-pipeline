@@ -15,6 +15,8 @@ ALLOWED_TAGS = {
     "decision",
     "prompt-pattern",
     "session-summary",
+    "critique-learning",
+    "gemini-blind-spot",
 }
 
 BUDGETS = {
@@ -23,6 +25,8 @@ BUDGETS = {
     "decision": 50,
     "prompt-pattern": 30,
     "session-summary": 20,
+    "critique-learning": 30,
+    "gemini-blind-spot": 20,
 }
 
 OM_DB_PATH = os.path.expanduser("~/.claude/.claude/openmemory.sqlite")
