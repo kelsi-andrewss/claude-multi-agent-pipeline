@@ -109,6 +109,7 @@ Scale depth to input clarity.
 ## Step 4: Web research
 
 Extract search queries from Gemini's response — focus on the most critical unknowns (API docs, SDK docs, framework guides).
+- If cost estimates are needed (non-internal project): include 1-2 searches for current pricing of recommended hosting/database/API vendors (e.g. "Vercel pricing 2026", "Supabase pricing tiers").
 
 1. Load web tools: `ToolSearch: select:WebSearch,WebFetch`
 2. Run 2-4 `WebSearch` calls in parallel for the most important topics.
@@ -140,6 +141,9 @@ Given this research, produce a structured technical briefing. Include:
 - For greenfield: a Bootstrap item (feature 0) listing the scaffold command, shared type files to create, and initial configs
 - Recommended test framework for the stack (e.g. vitest for Vite projects, jest for CRA, pytest for Python) — Bootstrap will set this up
 - Coding patterns for coder consistency: HTTP client choice, error handling approach, validation library, naming conventions. These go in ## Architecture > ### Patterns and become the project CLAUDE.md.
+- Risk assessment: for each major technical choice or external dependency, rate likelihood and impact (high/med/low) and state a mitigation. Focus on: API deprecation, scaling bottlenecks, vendor lock-in, breaking changes, cost surprises.
+- Cost projections: estimate monthly operational costs at 3 tiers (1K, 10K, 100K users/month) covering compute, database, storage, third-party APIs, and managed services. Identify the primary cost drivers first, then use published pricing. Provide ranges ("$5-15/mo"), not single numbers. Flag rough estimates. For development: estimate complexity per MVP feature using T-shirt sizes (S/M/L/XL) — not hours or days.
+- Deployment: for web apps, always include a publicly accessible deployment path. Recommend hosting platform (Vercel, Cloudflare Pages, Fly.io, Railway, etc.) with reasoning. Specify: build command, deploy command or CI/CD approach, domain/URL strategy, platform-specific config files, and where production secrets are stored (e.g. Vercel Dashboard, GitHub Secrets). Bootstrap (feature 0) should create deployment config files (vercel.json, fly.toml, etc.) — not provision infrastructure. For non-web projects (CLI tools, libraries, internal scripts), skip or adapt (e.g. npm publish, PyPI, homebrew).
 
 Flag anything you're uncertain about.
 
@@ -158,6 +162,9 @@ Web research results: <all web results>
 Read Gemini's synthesis and cross-check:
 - Are the APIs real? Do the package names exist? Are there contradictions?
 - Do recommendations respect existing stack constraints from Step 1? Stack conflicts are failures — reject and find alternatives.
+- Are cost estimates grounded in real pricing? Flag any that seem fabricated.
+- Are risks actionable? Each risk needs a concrete mitigation, not "monitor closely."
+- Does the deployment path actually work? Is the recommended platform compatible with the stack (e.g. don't recommend Vercel for a Python backend)?
 - If `--deep`: run a second Gemini pass on any uncertain areas.
 
 **Scope assessment**: if >5 features, present MVP phasing to user:
@@ -188,7 +195,7 @@ Mark MVP vs Phase 2 vs Cut in the briefing's `## Features` section.
 
 ## Features
 ### MVP
-0. Bootstrap: <scaffold command> + install ALL dependencies from ## Dependencies + create shared types/interfaces from ## Shared Interfaces + create `.env.example` from ## Environment + set up test config (<test framework>) + create project CLAUDE.md from ## Architecture > Patterns + configure <configs> (greenfield only — omit for existing projects)
+0. Bootstrap: <scaffold command> + install ALL dependencies from ## Dependencies + create shared types/interfaces from ## Shared Interfaces + create `.env.example` from ## Environment + set up test config (<test framework>) + create project CLAUDE.md from ## Architecture > Patterns + configure deployment from ## Deployment + configure <configs> (greenfield only — omit for existing projects)
 1. <Feature one — clear, scoped, shippable. Include target file paths where possible, e.g. "User auth — src/lib/auth.ts, src/app/login/page.tsx">
 2. <Feature two — same: name + key file paths>
 
@@ -241,6 +248,44 @@ Mark MVP vs Phase 2 vs Cut in the briefing's `## Features` section.
 
 ### Gotchas
 - <Known pitfalls, rate limits, breaking changes, version incompatibilities>
+
+### Risks
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| <risk description> | High/Med/Low | High/Med/Low | <concrete mitigation> |
+
+- External-facing: API deprecation, scaling limits, vendor lock-in, breaking changes, cost surprises
+- Internal tooling: auth/security gaps, data privacy, secret management, bus factor
+- Always include — adapt focus to project type, don't skip
+
+### Cost Estimate
+**Development complexity:**
+| Feature | Size | Notes |
+|---------|------|-------|
+| 0. Bootstrap | S | <scaffolding, config> |
+| 1. <Feature> | M | <what drives complexity> |
+
+**Monthly operational costs:**
+| Component | 1K users | 10K users | 100K users |
+|-----------|----------|-----------|------------|
+| Compute | <range> | <range> | <range> |
+| Database | <range> | <range> | <range> |
+| Third-party APIs | <range> | <range> | <range> |
+| **Total** | **<range>** | **<range>** | **<range>** |
+
+- Use ranges ($5-15/mo), not single numbers. Flag rough estimates with ~
+- Web search for current pricing of recommended vendors before estimating
+- Skip for internal tools or projects where cost isn't a factor
+
+### Deployment
+- **Platform**: <Vercel | Cloudflare Pages | Fly.io | Railway | etc.> — <why this fits the stack>
+- **Build**: `<build command>`
+- **Deploy**: `<deploy command or CI/CD approach>`
+- **URL**: <domain strategy — custom domain, platform subdomain, etc.>
+- **Config**: <platform-specific config files needed, e.g. vercel.json, fly.toml>
+- **Secrets**: <where production secrets are stored — Vercel Dashboard, GitHub Secrets, etc.>
+- Bootstrap (feature 0) creates deployment config files — not provision infrastructure.
+- For non-web projects: adapt (npm publish, PyPI, homebrew) or skip.
 
 ## Environment
 - `<ENV_VAR_NAME>` — <what service/feature needs it> (required | optional)
