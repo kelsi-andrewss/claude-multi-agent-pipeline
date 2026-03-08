@@ -77,3 +77,25 @@ these dates to compare friction rates before and after skill changes.
 - 2026-03-06 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
 - 2026-03-06 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
 - 2026-03-06 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-07 created /hook-profile — updated
+- 2026-03-07 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-07 modified /skill-health — Friction and skill health dashboard: friction events by category and trend, skil
+- 2026-03-07 modified /skill-health — Friction and skill health dashboard: friction events by category and trend, skil
+- 2026-03-07 modified /skill-health — Friction and skill health dashboard: friction events by category and trend, skil
+- 2026-03-07 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-07 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-07 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-07 created /critique — updated
+- 2026-03-07 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-07 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-07 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-07 created /smoke-test — updated
+- 2026-03-07 modified /critique — Self-critique loop: iteratively improve whatever Claude just produced — plans, c
+- 2026-03-07 modified /critique — Self-critique loop: iteratively improve whatever Claude just produced — plans, c
+- 2026-03-07 modified /critique — Self-critique loop: iteratively improve whatever Claude just produced — plans, c
+- 2026-03-08 created /link-local — updated
+- 2026-03-08 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-08 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-08 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", \"/ship path/to/any-plan.md\", or \"/ship epic-NNN\". Supports executing from existing plan files (any .md with ## What changes or ## Feature sections) — skips Gemini planning and goes straight to coder execution.
+- 2026-03-08 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-08 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".

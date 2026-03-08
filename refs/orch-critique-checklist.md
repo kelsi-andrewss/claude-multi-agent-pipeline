@@ -13,3 +13,7 @@ Read this file during /draft-plan Step 5 (critique phase). Before writing the pl
 
 **Significant issues** → surface to user before writing the plan file.
 **Minor gaps** → incorporate silently into the plan file.
+
+---
+
+**See also:** `/critique` skill (`skills/critique/SKILL.md`) — self-critique loop for Claude's own output. This checklist validates Gemini's plans; `/critique` validates Claude's work. Both fire during `/ship` and `/draft-plan`.

@@ -1,7 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(/opt/homebrew/opt/claude-code-tracker/libexec/src/stop-hook.sh*)",
       "Bash(~/.claude/hooks/context-check.sh*)",
       "Bash(~/.claude/hooks/cost-alert.sh*)",
       "Bash(~/.claude/hooks/guard-protected-files.sh*)",
@@ -11,7 +10,9 @@
       "Bash(~/.claude/hooks/log-skill-invocation.sh*)",
       "Bash(~/.claude/hooks/track-skill-changes.sh*)",
       "mcp__openmemory__openmemory_store",
-      "mcp__openmemory__openmemory_query"
+      "mcp__openmemory__openmemory_query",
+      "Bash(/Users/kelsiandrews/.claude/tracking/stop-hook.sh*)",
+      "Bash(/Users/kelsiandrews/.claude/tracking/subagent-stop-hook.sh*)"
     ],
     "defaultMode": "default"
   },
@@ -120,16 +121,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/homebrew/opt/claude-code-tracker/libexec/src/stop-hook.sh",
-            "timeout": 30,
-            "async": true
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "~/.claude/hooks/cost-alert.sh",
             "timeout": 10,
             "async": true
@@ -145,6 +136,16 @@
             "async": true
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/kelsiandrews/.claude/tracking/stop-hook.sh",
+            "timeout": 30,
+            "async": true
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -152,9 +153,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/homebrew/opt/claude-code-tracker/libexec/src/stop-hook.sh --backfill-only",
-            "timeout": 60,
-            "async": true
+            "command": "~/.claude/hooks/load-session-context.sh",
+            "timeout": 10
           }
         ]
       },
@@ -162,8 +162,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/load-session-context.sh",
-            "timeout": 10
+            "command": "/Users/kelsiandrews/.claude/tracking/stop-hook.sh --backfill-only",
+            "timeout": 60,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/kelsiandrews/.claude/tracking/subagent-stop-hook.sh",
+            "timeout": 30,
+            "async": true
           }
         ]
       }
