@@ -260,7 +260,7 @@ Determine outcome metadata:
   write "not captured". Delete the temp file after reading.
 - `skills_list`: read `~/.claude/.claude/tracking/skill-telemetry.jsonl`, filter by current
   session_id, collect distinct skill values. If missing, use "merge-worktree".
-- `friction_summary`: read `~/.claude/friction-log.md`, count entries matching this story_id.
+- `friction_summary`: query `correction_groups` table in epics.db for entries related to this story.
   Format as "N: cat1, cat2" or "0 (clean)".
 - `memory_list`: recall OpenMemory queries during this session's plan critique or coder prompt
   construction for this story. If any influenced a decision, list topics. Otherwise "none".
