@@ -108,35 +108,56 @@ Skip this step entirely if all stories already have agent assignments and the us
 
 ---
 
-## Step 5: Write plan files inline
+## Step 5: Write plan files (background agents)
 
-Load `ToolSearch: select:mcp__gemini__pm_update_story`.
+Plan files are written by background agents to preserve main-session context.
 
-Do all of the following **in the main session** (no background agents):
+### Step 5a: Prepare plan-writer launches
 
-1. **Generate unique whimsical names**: Glob `plans/*.md` once to get existing names. For each story, pick a unique `<adjective>-<noun>` name not already in use.
+1. Read `refs/orch-critique-checklist.md` once (keep its content for the agent prompts).
+2. Glob `plans/*.md` once to get existing names. For each story, generate a unique `<adjective>-<noun>` plan file name not already in use.
 
-2. **Write all plan files in a single message** (parallel `Write` tool calls), one per story:
+### Step 5b: Launch plan-writer agents
 
-   **For fast-path stories:**
-   Write plan file using story metadata directly:
-   ```
-   ## Context
-   story-NNN: <title>
-   Files: <write_files>
+**For fast-path stories:** Write plan files directly in the main session (no agent needed — metadata-only, no file reads):
+```
+## Context
+story-NNN: <title>
+Files: <write_files>
 
-   ## What changes
-   - <task 1 description>
-   - <task 2 description>
+## What changes
+- <task 1 description>
+- <task 2 description>
 
-   ## Verification
-   - Confirm each task is implemented correctly
-   - No changes outside write scope
-   ```
+## Verification
+- Confirm each task is implemented correctly
+- No changes outside write scope
+```
 
-   **For Gemini-planned stories:**
-   Each file at `plans/<whimsical-name>.md` uses this format:
-   ```
+**For Gemini-planned stories:** Launch one `general-purpose` background agent per story with `run_in_background: true`. Use this prompt template:
+
+```
+You are writing a plan file for story <story_id>: "<title>"
+
+Agent: <agent>
+Tasks: <task list from pm_get_story>
+Write files: <write_files list>
+Read files: <read_files list>
+Output file: plans/<name>.md
+
+## Critique Checklist
+<full checklist content from refs/orch-critique-checklist.md>
+
+## Instructions
+
+1. Read the story's write_files to understand what exists today.
+2. Read files referenced by tasks but not in write_files — these become read-only context.
+3. Apply the critique checklist against the Gemini-planned tasks:
+   - If SIGNIFICANT issues found (missing files, scope creep, convention violations):
+     Return: "NEED_DECISION: <issue>\nOption A: <fix>\nOption B: <fix>"
+   - If MINOR gaps (edge cases, existing utilities): incorporate silently.
+4. Write the plan file to plans/<name>.md with this structure:
+
    ## Context
    <what this story is about, which files are affected>
 
@@ -145,13 +166,23 @@ Do all of the following **in the main session** (no background agents):
 
    ## Verification
    <how to verify the implementation is correct>
-   ```
-   Content comes from the `pm_get_story` detail files collected in Step 3.
 
-3. **Call `pm_update_story` for all stories in a single message** (parallel tool calls):
-   - `pm_update_story("<story_id>", plan_file="plans/<whimsical-name>.md")` for each
+5. Return: "DONE: plans/<name>.md"
+```
 
-4. **Delete any source `.md` files** (from the file path list in Step 1) using `Bash: rm <path>`.
+### Step 5c: Collect results and update DB
+
+Wait for all background agents to complete. For each result:
+
+- `DONE: plans/<name>.md` — Load `ToolSearch: select:mcp__gemini__pm_update_story`, then call `pm_update_story(story_id=<id>, plan_file="plans/<name>.md")`.
+- `NEED_DECISION: <issue>` — Surface to user, get answer, resume agent.
+- `BLOCKED: <reason>` — Report to user, skip story.
+
+Also call `pm_update_story` for each fast-path story written in the main session.
+
+### Step 5d: Cleanup
+
+Delete any source `.md` files (from the file path list in Step 1) using `Bash: rm <path>`.
 
 ---
 

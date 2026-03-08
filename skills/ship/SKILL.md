@@ -85,13 +85,42 @@ Wait for the planner to return.
 
 ---
 
-## Step 3: Write plan files (Claude's job)
+## Step 3: Write plan files (background agents)
 
-For each story, call `pm_get_story(story_id=<id>)` — read the detail file for tasks and write_files. Then for each story:
+Plan files are written by parallel background agents to preserve main-session context.
 
-1. Generate a plan file name: `plans/<random-adjective-noun>.md`
-2. Write the plan file with this structure:
-   ```
+### Step 3a: Prepare plan-writer launches
+
+1. Read `refs/orch-critique-checklist.md` once (keep its content for the agent prompts).
+2. For each story, call `pm_get_story(story_id=<id>)` — read the detail file for tasks and write_files.
+3. Glob `plans/*.md` once to get existing names. For each story, generate a unique plan file name: `plans/<random-adjective-noun>.md`.
+
+### Step 3b: Launch plan-writer agents
+
+Launch one `general-purpose` background agent per story with `run_in_background: true`. Use this prompt template for each:
+
+```
+You are writing a plan file for story <story_id>: "<title>"
+
+Agent: <agent>
+Tasks: <task list from pm_get_story>
+Write files: <write_files list>
+Read files: <read_files list>
+Output file: plans/<name>.md
+
+## Critique Checklist
+<full checklist content from refs/orch-critique-checklist.md>
+
+## Instructions
+
+1. Read the story's write_files to understand what exists today.
+2. Read files referenced by tasks but not in write_files — these become read-only context.
+3. Apply the critique checklist against the Gemini-planned tasks:
+   - If SIGNIFICANT issues found (missing files, scope creep, convention violations):
+     Return: "NEED_DECISION: <issue>\nOption A: <fix>\nOption B: <fix>"
+   - If MINOR gaps (edge cases, existing utilities): incorporate silently.
+4. Write the plan file to plans/<name>.md with this structure:
+
    # <story title>
 
    Story: <story_id>
@@ -116,7 +145,6 @@ For each story, call `pm_get_story(story_id=<id>)` — read the detail file for 
 
    1. <task 1>
    2. <task 2>
-   ...
 
    ## Acceptance criteria
 
@@ -127,23 +155,33 @@ For each story, call `pm_get_story(story_id=<id>)` — read the detail file for 
    ## Verification
 
    - <how to verify the changes work>
-   ```
 
-   **Critique gate:** Before writing each plan file, read `refs/orch-critique-checklist.md` and apply all checks against the Gemini-planned story data. Significant issues (missing files, scope creep, convention violations, conflicts with recorded decisions) → surface to user before proceeding. Minor gaps (edge cases, existing utilities) → incorporate silently into the plan file. This is necessary because ship skips draft-plan's critique step.
+5. If briefing_path was provided, include it in read-only context and reference
+   specific sections in task descriptions.
+   Format: (see briefing ## <Section> > <Subsection> for <what>)
+6. Return: "DONE: plans/<name>.md"
+```
 
-   **Read-only context:** Determine from files referenced by tasks but not in the story's write_files scope. These give coders the interface contracts and utilities they need without modifying them. If `briefing_path` was set in Step 0 (presearch briefing), include it:
-   - `<briefing_path>` — technical research briefing (APIs, data model, decisions, gotchas)
+If `briefing_path` was set in Step 0, append to each agent's prompt:
+```
+Briefing path: <briefing_path>
+Include this file in read-only context. Reference specific briefing sections in
+task descriptions for any task involving APIs, data models, patterns, or gotchas.
+```
 
-   **Briefing references in tasks:** When `briefing_path` is set, write task descriptions that reference specific briefing sections for any task involving APIs, data models, patterns, or gotchas. Format: `(see briefing ## <Section> > <Subsection> for <what>)`. This eliminates ambiguity — coders know exactly which research to follow.
+### Step 3c: Collect results
 
-   **Acceptance criteria:** If plan validation ran (Step 2d), extract per-story criteria from the analyze/argue response. If validation was skipped (`--quick`), write basic criteria derived from the story's task descriptions — focus on observable behaviors, not implementation details.
+Wait for all background agents to complete. For each result:
 
-3. Load `ToolSearch: select:mcp__gemini__pm_update_story`
-4. Call `pm_update_story(story_id=<id>, plan_file="plans/<name>.md")` for each story.
+- `DONE: plans/<name>.md` — Load `ToolSearch: select:mcp__gemini__pm_update_story`, then call `pm_update_story(story_id=<id>, plan_file="plans/<name>.md")`.
+- `NEED_DECISION: <issue>` — Surface to user, get answer, resume agent.
+- `BLOCKED: <reason>` — Report to user, skip story.
+
+Proceed to Step 3d after all agents complete.
 
 ---
 
-## Step 3b: Environment preflight
+## Step 3d: Environment preflight
 
 **Purpose**: Identify external service dependencies before coders launch. Missing env vars waste entire coder runs.
 

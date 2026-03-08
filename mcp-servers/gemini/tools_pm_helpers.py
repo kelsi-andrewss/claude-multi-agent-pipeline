@@ -404,10 +404,11 @@ def _build_plan_prompt(subject: str, context_block: str, code_block: str, user_c
 
 def _apply_plan_to_story(conn, sid: str, plan_data: dict) -> dict:
     """Write tasks, dependencies, and update story agent/write_files from plan data. Returns summary."""
+    conn.execute("DELETE FROM tasks WHERE story_id = ?", (sid,))
     for task_title in plan_data.get("tasks", []):
         _add_task_to_story(conn, sid, task_title)
     conn.execute(
-        "UPDATE stories SET agent = ?, write_files = ?, read_files = ? WHERE id = ?",
+        "UPDATE stories SET agent = ?, write_files = ?, read_files = ?, state = 'ready' WHERE id = ?",
         (
             plan_data.get("agent"),
             json.dumps(plan_data.get("write_files", [])),
