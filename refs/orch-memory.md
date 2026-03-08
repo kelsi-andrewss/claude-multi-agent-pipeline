@@ -17,7 +17,7 @@ All writes go through `hooks/lib/om_write.py`. No direct SQL inserts.
 **API:** `om_write(content, tags, user_id, sector, salience, decay_lambda) -> id | None`
 
 **Enforcement:**
-- Tag whitelist: only ALLOWED_TAGS accepted (behavioral-pref, tool-learning, decision, prompt-pattern, session-summary)
+- Tag whitelist: only ALLOWED_TAGS accepted (behavioral-pref, tool-learning, decision, prompt-pattern, session-summary, critique-learning, gemini-blind-spot)
 - Embedding-based dedup: cosine similarity >= 0.85 → update existing instead of inserting
 - Fallback: MD5 simhash when Ollama unavailable
 - Per-category budgets: auto-prune lowest-scoring when exceeded
@@ -32,6 +32,8 @@ All writes go through `hooks/lib/om_write.py`. No direct SQL inserts.
 | `decision` | 50 | pm_add_decision shadow |
 | `prompt-pattern` | 30 | Key-prompt logging |
 | `session-summary` | 20 | Stop hook (1/session) |
+| `critique-learning` | 30 | /critique skill (post-run) |
+| `gemini-blind-spot` | 20 | /critique skill (Gemini escalation) |
 
 ---
 

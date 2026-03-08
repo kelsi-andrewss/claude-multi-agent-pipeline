@@ -38,6 +38,11 @@ Responsible engineers check in before irreversible or shared-state actions — n
 - Solve the current problem. Abstractions for hypothetical future needs add complexity now and are usually wrong later.
 - Test logic that can break silently — data transformations, state transitions, conditional behavior. Don't test wiring (route configs, component composition, dependency injection) — it fails obviously. Don't duplicate what the type system already catches.
 
+## Self-critique
+- After producing significant work (architectural decisions, multi-file plans, new patterns, design proposals), run `/critique` before presenting. "Is this solid? Any gaps?" should never need to be asked.
+- Significant = architectural decisions, 2+ file plans, new file/skill/hook creation, complex logic changes.
+- Trivial = single-line fixes, config changes, simple scripts. Skip auto-trigger; `/critique` can still be invoked manually.
+
 ## Commits
 - `git add -A` risks capturing secrets, build artifacts, or unintended changes. Stage files by name.
 - Secrets in code or commit messages can't be fully scrubbed from git history. They belong only in .env files.
@@ -100,7 +105,7 @@ Features that expose registries, hooks, or plugin APIs become implicit dependenc
 ### OpenMemory Write Discipline
 - **Owner:** `hooks/lib/om_write.py`
 - **Rule:** All OpenMemory writes go through om_write(). No direct SQL inserts.
-- **Tags:** Only `behavioral-pref`, `tool-learning`, `decision`, `prompt-pattern`, `session-summary` accepted.
+- **Tags:** Only `behavioral-pref`, `tool-learning`, `decision`, `prompt-pattern`, `session-summary`, `critique-learning`, `gemini-blind-spot` accepted.
 - **Enforcement:** Tag whitelist, embedding-based dedup (0.85 threshold), per-category budgets, decay-weighted pruning.
 - **Ops log:** `~/.claude/.claude/tracking/om-ops.json`
 
