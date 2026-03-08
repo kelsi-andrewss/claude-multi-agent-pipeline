@@ -6,27 +6,21 @@ Extracted from ORCHESTRATION.md §18. Loaded on demand when logging friction or 
 
 ## Friction event format
 
-Append to `~/.claude/friction-log.md`:
+Friction events are a type of correction, captured via the correction pipeline:
+1. Claude logs to `corrections.md` during session
+2. Stop hook detects structural patterns in transcript → `correction_groups` table
+3. Auto-promoted when count >= 3
 
-```
-## [date] — [category] — [story-id or "session"]
-**Type**: automatic | judgment
-**Skill**: which skill was running (or "manual" / "main-session")
-**Expected**: what should have happened
-**Actual**: what did happen
-**Counterfactual**: what would have happened without this correction
-**Recurrence**: first-seen | recurring (ref prior entries)
-```
+No separate friction-log.md file.
 
 ---
 
 ## Pattern promotion
 
-When the same friction category recurs 3+ times for the same root cause:
-1. Store as tool-learning in OpenMemory (scoped appropriately)
-2. Append to `tool-learnings.md`
-3. Feeds model selection, plan critique, and coder prompts
-4. If pattern suggests a skill is needed, run the pre-creation gate (below).
+When the same correction theme recurs 3+ times (tracked in `correction_groups` table):
+1. Stop hook auto-promotes to behavioral-prefs.md + OpenMemory via om_write
+2. Feeds model selection, plan critique, and coder prompts
+3. If pattern suggests a skill is needed, run the pre-creation gate (below).
    If pattern occurs inside an existing skill, the skill may need redesign.
 
 ---
@@ -35,7 +29,7 @@ When the same friction category recurs 3+ times for the same root cause:
 
 Five questions. Gate is a judgment exercise — answers can be terse.
 
-1. **What friction pattern does this eliminate?** — Cite 3+ friction-log entries. No citations → hard stop.
+1. **What friction pattern does this eliminate?** — Cite 3+ correction_groups entries. No citations → hard stop.
 2. **What's the current workaround, and what breaks about it?** — If "nothing, fine but verbose" → overhead. Consider CLAUDE.md constraint, hook, or `pm_add_pattern` instead.
 3. **Could a simpler mechanism solve it?** — Evaluate: CLAUDE.md instruction → hook → `pm_add_pattern` → skill. Pick lightest.
 4. **What ongoing cost does this add?** — Cognitive, maintenance, complexity. One sentence each.
@@ -70,14 +64,15 @@ When /skill-health flags a high-friction skill (>40% rate, or new category after
 
 ## Memory integration
 
-- Friction events stored to OpenMemory at session end or when pattern promotion triggers
-- Query friction history during plan critique to avoid known pitfalls
-- /skill-health reads friction-log.md for trend analysis
+- Correction patterns stored to OpenMemory via om_write when auto-promoted (count >= 3)
+- Query correction history during plan critique to avoid known pitfalls
+- /skill-health reads `correction_groups` table and `tracking/*.json` for trend analysis
 
 ---
 
 ## What friction measurement answers
 
+These questions are answered by `correction_groups` data and /skill-health reading from `tracking/*.json`:
 - "Did skill X eliminate its target friction?" → compare before/after (skill-changelog dates)
 - "Is skill X creating new friction?" → new categories after its changelog date
 - "Clean execution?" → friction count = 0
