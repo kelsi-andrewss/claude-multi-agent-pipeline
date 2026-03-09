@@ -117,7 +117,7 @@ def upsert_correction(theme_text):
         if row:
             new_count = row[1] + 1
             dates = row[2] + "," + today if row[2] else today
-            new_status = 'pending_promotion' if new_count >= 3 else row[3]
+            new_status = row[3] if row[3] == 'promoted' else ('pending_promotion' if new_count >= 3 else row[3])
             conn.execute(
                 "UPDATE correction_groups SET count=?, correction_dates=?, status=? WHERE theme=?",
                 (new_count, dates, new_status, row[0])
@@ -415,8 +415,22 @@ for theme, count, dates in rows:
     pref_text = f"(auto-distilled) User corrected {count}x on: {theme[:200]} ({dates}). Review and refine next session."
 
     try:
-        with open(prefs_file, "a") as f:
-            f.write(f"\n- {pref_text}\n")
+        with open(prefs_file, "r") as f:
+            content = f.read()
+        theme_key = theme[:40].lower()
+        lines = content.split('\n')
+        replaced = False
+        for idx, line in enumerate(lines):
+            if '(auto-distilled)' in line and theme_key in line.lower():
+                lines[idx] = f"- {pref_text}"
+                replaced = True
+                break
+        if replaced:
+            with open(prefs_file, "w") as f:
+                f.write('\n'.join(lines))
+        else:
+            with open(prefs_file, "a") as f:
+                f.write(f"\n- {pref_text}\n")
     except Exception:
         pass
 
@@ -434,6 +448,23 @@ for theme, count, dates in rows:
         conn.commit()
     except Exception:
         pass
+
+# Cleanup: mark pending_promotion rows as promoted if already present in behavioral-prefs.md
+try:
+    with open(prefs_file, "r") as f:
+        prefs_content = f.read().lower()
+    remaining = conn.execute(
+        "SELECT theme FROM correction_groups WHERE status='pending_promotion'"
+    ).fetchall()
+    for (rtheme,) in remaining:
+        if '(auto-distilled)' in prefs_content and rtheme[:40].lower() in prefs_content:
+            conn.execute(
+                "UPDATE correction_groups SET status='promoted', promoted_at=? WHERE theme=?",
+                (today, rtheme)
+            )
+    conn.commit()
+except Exception:
+    pass
 
 conn.close()
 DISTILLEOF
