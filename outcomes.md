@@ -2,6 +2,22 @@
 
 Post-merge/rejection log for pattern recognition across sessions. Consulted on-demand, not loaded into every session.
 
+## 2026-03-09 -- story-580 -- Fix auto-distillation duplicate spam in stop hook
+**Intent**: Fix auto-distillation duplicate spam in stop hook
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: [sonnet] · 40912 tokens · 21 calls · 98s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-file fix, exact code provided in plan, coder executed surgically
+**What failed**: nothing
+
 ## 2026-03-08 -- story-570 -- Skill tracking chart integration tests
 **Intent**: Verify chart data values, sorting, timeline aggregation, and success rate edge cases
 **Result**: merged
