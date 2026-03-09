@@ -411,6 +411,14 @@ if not rows:
 
 sys.path.insert(0, project_root)
 
+# Read existing prefs file to check for duplicates
+existing_content = ""
+try:
+    with open(prefs_file) as f:
+        existing_content = f.read()
+except Exception:
+    pass
+
 for theme, count, dates in rows:
     pref_text = f"(auto-distilled) User corrected {count}x on: {theme[:200]} ({dates}). Review and refine next session."
 
