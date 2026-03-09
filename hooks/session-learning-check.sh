@@ -117,7 +117,13 @@ def upsert_correction(theme_text):
         if row:
             new_count = row[1] + 1
             dates = row[2] + "," + today if row[2] else today
-            new_status = 'pending_promotion' if new_count >= 3 else row[3]
+            # Don't flip promoted entries back to pending_promotion
+            if row[3] == 'promoted':
+                new_status = 'promoted'
+            elif new_count >= 3:
+                new_status = 'pending_promotion'
+            else:
+                new_status = row[3]
             conn.execute(
                 "UPDATE correction_groups SET count=?, correction_dates=?, status=? WHERE theme=?",
                 (new_count, dates, new_status, row[0])
@@ -411,14 +417,29 @@ if not rows:
 
 sys.path.insert(0, project_root)
 
+# Read existing prefs file to check for duplicates
+existing_content = ""
+try:
+    with open(prefs_file) as f:
+        existing_content = f.read()
+except Exception:
+    pass
+
 for theme, count, dates in rows:
     pref_text = f"(auto-distilled) User corrected {count}x on: {theme[:200]} ({dates}). Review and refine next session."
 
-    try:
-        with open(prefs_file, "a") as f:
-            f.write(f"\n- {pref_text}\n")
-    except Exception:
+    # Check if this theme is already in the file (by matching theme prefix)
+    theme_prefix = theme[:60]
+    if theme_prefix in existing_content:
+        # Already present — skip appending (count may differ but entry exists)
         pass
+    else:
+        try:
+            with open(prefs_file, "a") as f:
+                f.write(f"\n- {pref_text}\n")
+            existing_content += f"\n- {pref_text}\n"
+        except Exception:
+            pass
 
     try:
         from hooks.lib.om_write import om_write
