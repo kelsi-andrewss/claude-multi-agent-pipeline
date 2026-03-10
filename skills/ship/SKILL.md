@@ -18,6 +18,7 @@ User has requested: `/ship {{args}}`
 Parse `{{args}}` to determine the mode:
 
 **Flags:**
+- If `--quickfix` appears anywhere in args, set `quickfix_mode = true`. Strip from args. Triggers lightweight quickfix path (Step 0b) — skips Gemini, epics.db, and full pipeline.
 - If `--quick` appears anywhere in args, set `skip_validate = true` and `skip_verify = true`. Strip from args. Skips plan validation (analyze/argue), integrated review, and integration verify. Per-story testing always runs (it's a run-stories concern, not a ship concern).
 - If `--argue` appears anywhere in args, set `use_argue = true`. Strip from args. Uses adversarial debate instead of single-pass review for plan validation.
 
@@ -45,6 +46,63 @@ Parse `{{args}}` to determine the mode:
    - User says "y" or similar → continue. User says "presearch" → invoke `/presearch` with the same args. This is a warning, not a gate.
 
 4. **No args**: Ask the user: "Describe what to build (features or file path):" and stop.
+
+---
+
+## Step 0b: Quickfix dispatch
+
+**Run only when `quickfix_mode = true`. Skip Steps 1–6 entirely.**
+
+1. **Parse description**: Treat remaining args (after stripping `--quickfix`) as the description. Required — if empty, error: "Description required: `/ship --quickfix <description>`". Derive a slug: lowercase, hyphen-separated, max 5 words (e.g., `fix-canvas-zoom-reset`).
+
+2. **Validate quickfix criteria**: A quickfix is valid when ALL of:
+   - ≤3 write-target files mentioned or implied by the description
+   - No schema changes (no Firestore field additions, no DB migrations, no API contract changes)
+   - No AI tool changes (toolDeclarations, toolExecutors, system prompt)
+   - No protected file touches
+
+   If ANY criterion fails: warn the user ("Quickfix criteria not met: <reason>. Falling back to normal /ship flow.") and continue to Step 1 (normal pipeline).
+
+3. **Read target files**: Identify the 1–3 files the fix will touch. Read them to understand current state. If files don't exist yet, note that — they'll be created.
+
+4. **Write plan file**: Write `plans/<slug>.md` with this structure:
+   ```
+   # <description>
+
+   Story: (pending)
+   Agent: quick-fixer
+
+   ## Context
+
+   <one sentence: what this fixes and why>
+
+   ## What changes
+
+   | File | Change |
+   |---|---|
+   | <file> | <what changes> |
+
+   ## Tasks
+
+   1. <task 1>
+   2. <task 2>
+
+   ## Acceptance criteria
+
+   - <observable behavior>
+
+   ## Verification
+
+   - <how to verify>
+   ```
+
+5. **Create branch**: `git checkout dev && git checkout -b quickfix/<slug>`
+
+6. **Launch quick-fixer**: Launch a `quick-fixer` background agent (Sonnet — use Haiku only if all Haiku threshold criteria from §2 are met; pipeline files always use Sonnet) in a worktree on `quickfix/<slug>` with the plan file as input. Use the standard coder prompt from run-stories/SKILL.md Step 4.
+
+7. **On completion**: Run the merge procedure via the `/merge-worktree` pattern — diff gate, review, merge to dev.
+
+8. **Print**: `Quickfix shipped: quickfix/<slug> → dev`
 
 ---
 

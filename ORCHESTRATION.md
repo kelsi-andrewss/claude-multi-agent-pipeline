@@ -67,6 +67,8 @@ Pipeline files are excluded because errors compound — a bad edit affects every
 
 **Default for new work**: `/ship`. Fall back to full pipeline when iterating on production code, touching protected files, or changing schemas/APIs.
 
+`/ship --quickfix` for scoped fixes (1-3 files, no schema/AI) — lightweight path that skips Gemini and epics.db.
+
 ---
 
 ## 4. DB ACCESS RULES
@@ -133,10 +135,10 @@ Before `/clear`: write `session-handoff.md`, store summary to OpenMemory, run de
 - Never commit directly to main or dev.
 
 **Quickfix**: 1-3 files, none protected, no schema/AI. Max 2/session.
-- Create branch `quickfix/<slug>` from `dev`. Worktree + quick-fixer (Haiku) on that branch. Merge to `dev`.
+- Use `/ship --quickfix <description>`. /ship validates criteria, writes the plan, launches the coder on a `quickfix/<slug>` branch in a worktree, and merges to dev. No epics.db writes.
 - Never commit directly to main or dev.
 
-Both skip `/todo` and epics.db. Rejected → `/todo`.
+Hotfix is a direct edit (no coder-in-worktree). Quickfix uses the coder pipeline via /ship. Both skip `/todo` and epics.db. Rejected → `/todo`.
 
 ---
 
