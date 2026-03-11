@@ -106,6 +106,7 @@ def register(mcp):
         title: str,
         epic_id: str | None = None,
         write_files: list[str] | None = None,
+        test_files: list[str] | None = None,
         agent: str | None = None,
         model: str | None = None,
         depends_on: list[str] | None = None,
@@ -119,6 +120,7 @@ def register(mcp):
             title: Story title.
             epic_id: Epic to add the story to. Creates 'epic-backlog' if omitted.
             write_files: List of files this story will modify.
+            test_files: List of test files for parallel test agent execution.
             agent: Agent type ('quick-fixer', 'architect', 'manual').
             model: Model to use ('haiku', 'sonnet', 'opus').
             depends_on: List of story IDs this story depends on.
@@ -143,12 +145,13 @@ def register(mcp):
 
             story_id = _next_id(conn, "stories", "story-")
             conn.execute(
-                """INSERT INTO stories (id, epic_id, title, state, write_files, agent, model,
+                """INSERT INTO stories (id, epic_id, title, state, write_files, test_files, agent, model,
                    depends_on, needs_testing, needs_review)
-                   VALUES (?, ?, ?, 'draft', ?, ?, ?, '[]', ?, ?)""",
+                   VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, '[]', ?, ?)""",
                 (
                     story_id, target_epic, title,
                     json.dumps(write_files or []),
+                    json.dumps(test_files or []),
                     agent, model,
                     int(needs_testing), int(needs_review),
                 )
@@ -360,6 +363,7 @@ def register(mcp):
         agent: str | None = None,
         model: str | None = None,
         write_files: list[str] | None = None,
+        test_files: list[str] | None = None,
         branch: str | None = None,
         plan_file: str | None = None,
         move_to_epic: str | None = None,
@@ -377,6 +381,7 @@ def register(mcp):
             agent: New agent type.
             model: New model.
             write_files: New list of write files.
+            test_files: New list of test files for parallel test agent execution.
             branch: New branch name.
             plan_file: Path to the Claude-written plan file for this story.
             move_to_epic: Epic ID to move the story to.
@@ -427,6 +432,10 @@ def register(mcp):
             if write_files is not None:
                 updates.append("write_files = ?")
                 params.append(json.dumps(write_files))
+
+            if test_files is not None:
+                updates.append("test_files = ?")
+                params.append(json.dumps(test_files))
 
             if branch is not None:
                 updates.append("branch = ?")
