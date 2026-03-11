@@ -51,6 +51,7 @@ def startup_migrate(db_path: Path | None = None) -> None:
         _ensure_epic_columns(conn)
         _ensure_order_idx_column(conn)
         _ensure_read_files_column(conn)
+        _ensure_test_files_column(conn)
         conn.execute("DELETE FROM pending_proposals WHERE created_at < datetime('now', '-24 hours')")
         row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         current = row[0] or 0
@@ -170,7 +171,7 @@ def _validate_transition(
 def _story_to_dict(row: sqlite3.Row) -> dict:
     """Convert a story Row to a dict, parsing JSON fields."""
     d = dict(row)
-    for field in ("write_files", "read_files"):
+    for field in ("write_files", "read_files", "test_files"):
         val = d.get(field)
         if val and isinstance(val, str):
             try:
@@ -285,6 +286,18 @@ def _ensure_read_files_column(conn: sqlite3.Connection) -> None:
     """Lazily add read_files to stories table if it doesn't exist yet."""
     try:
         conn.execute("ALTER TABLE stories ADD COLUMN read_files TEXT DEFAULT '[]'")
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        if "duplicate column" in str(e).lower():
+            pass
+        else:
+            raise
+
+
+def _ensure_test_files_column(conn: sqlite3.Connection) -> None:
+    """Lazily add test_files to stories table if it doesn't exist yet."""
+    try:
+        conn.execute("ALTER TABLE stories ADD COLUMN test_files TEXT DEFAULT '[]'")
         conn.commit()
     except sqlite3.OperationalError as e:
         if "duplicate column" in str(e).lower():
@@ -408,11 +421,12 @@ def _apply_plan_to_story(conn, sid: str, plan_data: dict) -> dict:
     for task_title in plan_data.get("tasks", []):
         _add_task_to_story(conn, sid, task_title)
     conn.execute(
-        "UPDATE stories SET agent = ?, write_files = ?, read_files = ?, state = 'ready' WHERE id = ?",
+        "UPDATE stories SET agent = ?, write_files = ?, read_files = ?, test_files = ?, state = 'ready' WHERE id = ?",
         (
             plan_data.get("agent"),
             json.dumps(plan_data.get("write_files", [])),
             json.dumps(plan_data.get("read_files", [])),
+            json.dumps(plan_data.get("test_files", [])),
             sid,
         )
     )

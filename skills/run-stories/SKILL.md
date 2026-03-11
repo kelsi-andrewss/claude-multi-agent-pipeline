@@ -108,21 +108,38 @@ If ANY story uses a bare filename (no symbol), it conflicts with all other stori
 
 ---
 
-## Step 2c: Post-bootstrap build verification
+## Step 2c: Build verification (reference)
 
-**This step ONLY runs when a bootstrap story was detected in Step 2a-post AND that story's batch has completed and merged.** If no bootstrap story, skip entirely — zero overhead.
+This block defines the reusable build verification logic referenced by both the bootstrap gate and Step 4.1 (batch verification). It is not executed directly — it is invoked by those steps.
 
-After the bootstrap story's batch (Group 0) completes and merges into the dev branch, before launching Group 1:
+### Project-type detection
+
+Detect the project type by checking for build system files in the project root:
+
+| File | Project type | Build command | Lint command |
+|---|---|---|---|
+| `package.json` | Node/TS | `npm install && npm run build` (or `npx tsc --noEmit` if no `build` script in package.json) | `npm run lint` (only if `lint` script exists in package.json) |
+| `pubspec.yaml` | Flutter | `flutter pub get && flutter analyze` | (included in analyze) |
+| `pyproject.toml` | Python | `pip install -e . 2>&1 \| tail -5` | — |
+| `Cargo.toml` | Rust | `cargo check && cargo clippy --quiet 2>&1` | (included in clippy) |
+| `go.mod` | Go | `go build ./... && go vet ./...` | (included in vet) |
+
+### Failure semantics
+
+- Non-zero exit code on build/typecheck command = **FAIL** (blocks downstream).
+- Lint warnings with zero exit code = **PASS with warnings** (log warning count, do not block).
+- No recognized build system file found = **SKIP** verification. Log: "No recognized build system — skipping batch verification."
+
+### Bootstrap gate (existing behavior, unchanged)
+
+After the bootstrap batch (Group 0) completes and merges into the dev branch, before launching Group 1:
 
 1. Checkout the dev branch (post-bootstrap-merge).
-2. Detect project type from the worktree and run the appropriate build command:
-   - `package.json` → `npm install && npm run build` (or `npx tsc --noEmit` if no build script)
-   - `pubspec.yaml` → `flutter pub get && flutter analyze`
-   - `pyproject.toml` → `pip install -e . 2>&1 | tail -5`
-   - `Cargo.toml` → `cargo check`
-   - `go.mod` → `go build ./...`
-3. If build succeeds → continue to Group 1 (launch feature stories).
-4. If build fails → report the error, mark all remaining stories as BLOCKED with reason "Bootstrap build verification failed: <error>", stop execution.
+2. Run build verification using the commands above.
+3. If PASS → continue to Group 1 (launch feature stories).
+4. If FAIL → report the error, mark all remaining stories as BLOCKED with reason "Bootstrap build verification failed: <error>", stop execution.
+
+**This gate ONLY fires when a bootstrap story was detected in Step 2a-post AND that story's batch has completed and merged.** If no bootstrap story, skip entirely — zero overhead.
 
 ---
 
@@ -142,7 +159,9 @@ git fetch origin dev 2>/dev/null || { git branch dev main && git push -u origin 
 
 ## Step 4: Execute groups in order
 
-Process each dependency group sequentially. Within each group, process conflict batches:
+Process each dependency group sequentially. Within each group, process conflict batches.
+
+After each batch's stories complete and merge via Step 5c, run **Step 4.1 Batch Verification** before launching the next batch. If verification fails, skip all remaining batches.
 
 ### For each parallel batch — launch all stories simultaneously
 
@@ -152,7 +171,10 @@ Compute for each story:
 - `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars, then append `-<NNN>` where NNN is the numeric part of the story ID (e.g., story-352 → `-352`)
 - `epic-slug`: the `epic_slug` from the `pm_dev_branch` detail file in Step 3
 - `story-branch`: `<epic-slug>--<story-slug>`
-- `worktree-path`: `<project-root>/.claude/worktrees/story/<story-slug>`
+- `has-test-files`: true if the story's `test_files` list is non-empty
+- `worktree-path`:
+  - If `has-test-files`: `<project-root>/.claude/worktrees/story/<story-slug>--code` (coder) and `<project-root>/.claude/worktrees/story/<story-slug>--test` (test agent)
+  - If NOT `has-test-files`: `<project-root>/.claude/worktrees/story/<story-slug>` (unchanged, backward compatible)
 - `dev-branch`: from the epic mapping computed in step 3
 - `agent-approach`: based on the `agent` field:
   - `quick-fixer` → "Make surgical, minimal changes. No refactoring beyond what the plan specifies."
@@ -258,6 +280,78 @@ Gemini is a research tool for the orchestrator — not available to coders.
    - Failure: "BLOCKED: <clear reason why the story could not be completed>"
 ```
 
+**When `has-test-files` is true**, additionally modify the coder prompt and launch a parallel test agent:
+
+**Coder prompt addition** (append to the coder prompt above, before the Steps section):
+```
+## Test file prohibition
+You are the CODER. Do NOT create or modify test files. Test files for this story: <test_files list>. Leave them to the test agent.
+```
+
+**Test agent** — launched simultaneously with the coder as a second `general-purpose` background agent (model: Sonnet):
+
+```
+You are the TEST AGENT for story <story_id>: "<title>"
+
+Plan file: <plan_file>
+Dev branch: <dev-branch>
+Story branch: <story-branch>--test
+Write files scope: <test_files list>
+Read-only context files (prefix with worktree path): <read-only context paths, or "none">
+Project root: <project-root>
+
+WORKTREE: <worktree-path for --test>
+All reads and writes MUST use paths under this directory.
+Before doing anything else, run: git -C <test-worktree-path> branch --show-current
+Confirm it prints <story-branch>--test. If not, STOP and report branch mismatch.
+Do NOT edit files outside this worktree.
+
+## Tool constraints
+You are the test agent. Write all tests yourself.
+Do NOT call any mcp__gemini__* tools.
+Do NOT call any pm_* tools.
+
+## Instructions
+
+Write tests from the plan's acceptance criteria and function signatures ONLY. You must:
+- Read the plan file for acceptance criteria, function signatures, and interface contracts
+- Reference read-only context files for type definitions and interfaces
+- Do NOT read or reference any source implementation files
+- Write ONLY to these test files: <test_files list>
+- Do NOT run the tests — they will be run against the real implementation in the merge gate
+
+## Steps
+
+1. Create the test worktree from the dev branch (NOT the story branch — you must not see the coder's changes):
+   ```bash
+   cd <project-root>
+   git fetch origin <dev-branch>
+   git show-ref --verify --quiet "refs/heads/<story-branch>--test" || git branch "<story-branch>--test" <dev-branch>
+   git worktree list | grep -q '<test-worktree-path>' || git worktree add <test-worktree-path> "<story-branch>--test"
+   ```
+
+2. Read the plan file. Extract acceptance criteria and function signatures.
+
+3. Write test files based solely on the plan's spec. Do not look at implementation code.
+
+4. Stage and commit:
+   ```bash
+   git -C <test-worktree-path> add <test_files>
+   git -C <test-worktree-path> commit -m "<story_id>: add spec tests"
+   ```
+
+5. Push:
+   ```bash
+   git -C <test-worktree-path> push -u origin <story-branch>--test
+   ```
+
+6. Return exactly one of:
+   - "DONE: <story-branch>--test pushed. Commit: <short-hash>. Files changed: <list>. Notes: <any>"
+   - "BLOCKED: <reason>"
+```
+
+**When `has-test-files` is false**, skip test agent launch entirely. The coder runs solo with the standard worktree path (no `--code` suffix). This preserves the existing flow for stories without test files.
+
 ### For sequential batches (conflict serialization)
 
 After the previous batch completes, before launching the next story:
@@ -275,6 +369,27 @@ After the previous batch completes, before launching the next story:
    Skip that story (mark BLOCKED) and continue.
 
 2. Launch the story agent as described above.
+
+---
+
+## Step 4.1: Batch Verification
+
+After each batch's stories are merged into dev via Step 5c, verify the dev branch still builds before launching the next batch. This step uses the build verification logic defined in Step 2c.
+
+### When to run
+
+- Run after each non-final batch merges into dev. (The final batch is covered by merge-worktree's Step 2.5 — no double-verification.)
+- **Single-batch runs**: When all stories land in a single batch (no conflicts, no multi-group dependencies beyond bootstrap), skip inter-wave verification entirely. Log: "Single batch — skipping inter-wave verification (merge gate covers)."
+- **Bootstrap batch**: The bootstrap gate in Step 2c already handles post-bootstrap verification. Step 4.1 handles all subsequent non-bootstrap batches. No double-verification on the bootstrap batch.
+
+### Procedure
+
+1. Checkout the dev branch (post-merge state).
+2. Run build verification using the project-type detection and commands from Step 2c.
+3. Results:
+   - **PASS**: Log `"Batch N verification: PASS"`. Continue to the next batch.
+   - **PASS with lint warnings**: Log `"Batch N verification: PASS (warnings: <count>)"`. Continue to the next batch. Include warning summary in Step 6 report.
+   - **FAIL**: Log `"Batch N verification: FAIL — <error output (last 30 lines)>"`. Mark ALL stories in subsequent batches as BLOCKED with reason `"Blocked: batch N verification failed"`. Do NOT block stories in the current batch (they already merged successfully). Stop executing further batches.
 
 ---
 
@@ -314,7 +429,96 @@ Compare against the story's write_files. If unexpected files changed, warn but c
 
 ### Step 5b: Per-story testing
 
-For each DONE story that passes the diff gate:
+#### Stories WITH `test_files` (merge gate)
+
+For each DONE story that has `test_files` and both the coder and test agent returned DONE:
+
+1. **Create a merge-candidate worktree** from the story branch:
+   ```bash
+   MERGE_CANDIDATE="<project-root>/.claude/worktrees/merge-candidate/<story-slug>"
+   git worktree add "$MERGE_CANDIDATE" <story-branch>
+   ```
+
+2. **Cherry-pick the test agent's commit(s)** into the merge-candidate worktree:
+   ```bash
+   # Get the test agent's commit hash(es) from the --test branch
+   TEST_COMMITS=$(git -C "$MERGE_CANDIDATE" log --oneline origin/<story-branch>--test --not origin/<dev-branch> --reverse --format=%H)
+   git -C "$MERGE_CANDIDATE" cherry-pick $TEST_COMMITS
+   ```
+   If cherry-pick conflicts, this is a file overlap between coder and test agent — attribute to **test agent** (wrote to files outside test_files scope). Log friction: `category: retry, type: automatic, skill: run-stories, detail: "cherry-pick conflict — test agent wrote outside test_files scope"`. Skip to test agent retry (step 4).
+
+3. **Run the test suite** in the merge-candidate worktree. Use the project's test runner (detect from `package.json` scripts, `pytest.ini`, `_test.go`, etc.). Run only the test files from `test_files`, not the full suite:
+   ```bash
+   cd "$MERGE_CANDIDATE" && <test-command> <test_files>
+   ```
+   Capture exit code and full output.
+
+4. **Failure attribution** — classify test output and retry (max 1 retry per agent, max 2 total):
+
+   | Signal | Attribution | Action |
+   |--------|------------|--------|
+   | Test **compile/import error** | **Test agent** — wrong interface from plan | Log friction `category: retry, type: automatic, skill: run-stories`. Re-launch test agent (see below). Max 1 retry. |
+   | Test **logic failure** (assertion failed, wrong value, timeout) | **Coder** — implementation doesn't match spec | Log friction `category: retry, type: automatic, skill: run-stories`. Re-launch coder (see below). Max 1 retry. |
+   | **Mixed** (some compile, some logic) | Prioritize compile errors first | Fix compile errors (test agent retry), then re-run. If logic failures remain, retry coder. |
+   | **Ambiguous** (runtime error that could be either) | **Coder** — default attribution | Same as logic failure path. Coder owns runtime behavior. |
+
+   **Detection heuristic** — classify from test runner exit code + output:
+   - **Compile/import error**: output contains `Cannot find module`, `is not a function`, `has no exported member`, `ImportError`, `ModuleNotFoundError`, `undefined is not`, `TypeError:`, `SyntaxError:`, or other type/parse errors
+   - **Logic failure**: output contains `AssertionError`, `Expected .* to equal`, `expected .* but got`, `FAIL` with assertion details, `TimeoutError`, `timed out`
+   - If output matches neither pattern clearly, default to **coder** attribution (logic failure)
+
+   **Test agent retry** (compile/import error):
+   Re-launch test agent with error output + actual exports from coder's source files as read-only context:
+   ```
+   Your tests have compile/import errors when run against the real implementation.
+   Fix test imports and types to match the actual interface.
+
+   Error output:
+   <test runner output>
+
+   Actual exports from coder's source files (read-only — match your imports to these):
+   <relevant export signatures from coder's files in the merge-candidate>
+   ```
+   Test agent pushes fix to `<story-branch>--test`. Re-run merge-candidate validation from step 1.
+
+   **Coder retry** (logic failure):
+   Before cleaning up the merge-candidate, read the failing test files. Re-launch coder with:
+   ```
+   Your implementation failed spec-derived tests. The tests were written independently from
+   your code, based on the acceptance criteria in the plan.
+
+   Failing tests:
+   <test runner output>
+
+   Test file (read-only — do not modify):
+   <test file contents>
+
+   Fix your implementation to pass these tests. The tests define correct behavior.
+   ```
+   Coder pushes fix commit to `<story-branch>`. Re-run merge-candidate validation from step 1.
+
+   **After retry**: if second attempt also fails, mark story BLOCKED with the failure output. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
+
+5. **On pass** — before cleanup, merge test commits into the code worktree and push:
+   ```bash
+   # The merge-candidate has coder code + cherry-picked test commits, all validated.
+   # Pull the test files into the code worktree so the story branch includes both.
+   git -C <code-worktree> fetch origin <story-branch>--test
+   git -C <code-worktree> checkout origin/<story-branch>--test -- <test_files>
+   git -C <code-worktree> add <test_files>
+   git -C <code-worktree> commit -m "<story_id>: add spec tests (validated)"
+   git -C <code-worktree> push origin <story-branch>
+   ```
+   Story proceeds to merge (Step 5c).
+
+6. **Clean up** the merge-candidate worktree (always — on both pass and fail):
+   ```bash
+   git worktree remove --force "$MERGE_CANDIDATE"
+   ```
+
+#### Stories WITHOUT `test_files` (existing behavior)
+
+For each DONE story that passes the diff gate and has no `test_files`:
 
 1. Check if test infrastructure exists in the project (look for test directories, test configs, `jest.config`, `pytest.ini`, `_test.go` files, etc.). If none exists, skip testing for this story.
 2. Launch unit-tester agent (background, **Haiku**) in the worktree. The unit-tester writes tests from the plan file's **acceptance criteria**, not from the implementation.
@@ -338,10 +542,14 @@ Print a final summary:
 ```
 Run complete.  Dev branch: dev
 
-story-001  batch 0   my-feature--fix-auth-flow      DONE    abc1234   tests: pass
-story-003  batch 0   my-feature--update-dashboard   DONE    def5678   tests: skipped (no infra)
-story-002  batch 1   my-feature--refactor-handlers  DONE    ghi9012   tests: pass  (conflicted with story-001 on src/handlers/foo.js)
-story-005  batch 0   my-feature--add-search         BLOCKED plan file references missing utility
+story-001  batch 0   my-feature--fix-auth-flow      DONE    abc1234   tests: pass    verify: pass
+story-003  batch 0   my-feature--update-dashboard   DONE    def5678   tests: skip    verify: pass
+story-002  batch 1   my-feature--refactor-handlers  DONE    ghi9012   tests: pass    verify: pass
+story-005  batch 0   my-feature--add-search         BLOCKED                          verify: pass
+
+Batch verification:
+  batch 0: PASS
+  batch 1: PASS
 
 Skipped (validation):
   story-006: state is 'done' — already complete
@@ -353,7 +561,21 @@ Blocked during execution:
   story-005: plan file references missing utility function `buildSearchIndex`
 ```
 
+**Example with batch verification failure:**
+
+```
+story-001  batch 0   my-feature--fix-auth         DONE      abc1234  tests: pass  verify: pass
+story-003  batch 0   my-feature--update-dash       DONE      def5678  tests: skip  verify: pass
+story-002  batch 1   my-feature--refactor-hdl      BLOCKED                         verify: batch 0 failed
+
+Batch verification:
+  batch 0: FAIL — src/index.ts(42): Cannot find module './newService'
+  batch 1: BLOCKED (batch 0 failed)
+```
+
 The `batch` column shows the parallel batch each story ran in (batch 0 = first parallel wave; batch 1 = ran after batch 0 due to conflict; `deferred` = cross-epic dependency not yet merged).
+
+The `verify` column shows the batch verification result for each story's batch. Stories in batches that were blocked by a prior verification failure show `verify: batch N failed`.
 
 If all stories complete successfully, print: "All stories executed successfully."
 

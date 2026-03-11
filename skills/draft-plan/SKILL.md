@@ -24,7 +24,7 @@ Before calling Gemini, check each story for fast-path eligibility:
 
 Fast-path stories: skip Gemini entirely. Write their plan files directly in Step 5 using DB metadata only.
 All other stories: call Gemini as usual. Do NOT explore the codebase before Gemini returns its output.
-Gemini is the researcher. You are the critic. Exploration happens only during your post-Gemini critique. Read `refs/orch-critique-checklist.md` for the full 8-point checklist before writing each plan file.
+Gemini is the researcher. You are the critic. Exploration happens only during your post-Gemini critique. Read `refs/orch-critique-checklist.md` for the full 10-point checklist before writing each plan file.
 
 ---
 
@@ -61,6 +61,15 @@ Classify each token in `{{args}}`:
 3. Split into `fast_path` and `gemini_path` lists.
 4. `fast_path` stories skip directly to Step 5.
 
+**Gather past failure context:**
+Before launching the planner agent, read `~/.claude/outcomes.md`. Extract the last 10 outcome entries where "What failed" is not "nothing". Build a `PAST_FAILURES` block with format:
+```
+PAST_FAILURES:
+  story-NNN (agent, model): <what failed>
+  story-NNN (agent, model): <what failed>
+```
+Include this block in the planner agent prompt (Step 2 agent call below) so Gemini has context about recurring failure modes.
+
 **For file paths** (`.md`):
 - Read the file and search for `story-\d+`.
 - If a story ID is found, add it to the story list and include in `gemini_path`.
@@ -73,6 +82,8 @@ Agent(subagent_type="planner", prompt="""
 MODE: draft-plan
 STORY_IDS: [<gemini_path story IDs>]
 EPIC_IDS: [<explicit epic IDs from Step 1>]
+
+<PAST_FAILURES block if any failures were extracted, omit section if none>
 """)
 ```
 
@@ -129,10 +140,15 @@ Files: <write_files>
 - <task 1 description>
 - <task 2 description>
 
+## Verification criteria
+- <one testable statement per task, derived from task description>
+
 ## Verification
 - Confirm each task is implemented correctly
 - No changes outside write scope
 ```
+
+No `## Contract` section for fast-path stories — they are small, single-agent, no test agent involvement.
 
 **For Gemini-planned stories:** Launch one `general-purpose` background agent per story with `run_in_background: true`. Use this prompt template:
 
@@ -145,17 +161,26 @@ Write files: <write_files list>
 Read files: <read_files list>
 Output file: plans/<name>.md
 
+## Predicted Preferences
+<For each story, before launching the agent, call pm_predict_preference(domain=<domain>) where domain
+is inferred from write_files: "hooks" for hook files, "tracking" for tracking files, "skills" for
+skill files, "refs" for refs files, etc. If predictions are returned, include them here:>
+  - <domain>: <preference text> (confidence: <score>)
+<If no predictions returned, omit this section entirely.>
+
 ## Critique Checklist
 <full checklist content from refs/orch-critique-checklist.md>
 
 ## Instructions
 
 1. Read the story's write_files to understand what exists today.
-2. Read files referenced by tasks but not in write_files — these become read-only context.
+2. Read files referenced by tasks but not in write_files — these become read-only context. Identify all new or modified public interfaces from write_files.
 3. Apply the critique checklist against the Gemini-planned tasks:
    - If SIGNIFICANT issues found (missing files, scope creep, convention violations):
      Return: "NEED_DECISION: <issue>\nOption A: <fix>\nOption B: <fix>"
    - If MINOR gaps (edge cases, existing utilities): incorporate silently.
+3.5. Extract function/class signatures for every new or modified public interface found in step 2. Write the `## Contract` section with signatures in the format: `functionName(param: Type, param2: Type) -> ReturnType` — one-line purpose. Include import paths for shared interfaces that the test agent needs.
+3.6. Convert Gemini tasks into testable acceptance criteria (given/when/then or equivalent). Each criterion should map to at least one task. If the story has `test_files`, each criterion must reference the specific test file that will verify it. Write the `## Acceptance criteria` section.
 4. Write the plan file to plans/<name>.md with this structure:
 
    ## Context
@@ -163,6 +188,18 @@ Output file: plans/<name>.md
 
    ## What changes
    <bulleted list of specific changes, one per task>
+
+   ## Contract
+   <for each new/modified public function or class>
+   - `functionName(param: Type, param2: Type) -> ReturnType` — one-line purpose
+   - `ClassName` — purpose
+     - `method(param: Type) -> ReturnType`
+   <import paths for shared interfaces that test agent needs>
+
+   ## Acceptance criteria
+   - Given <precondition>, when <action>, then <expected outcome>
+   - Given <precondition>, when <action>, then <expected outcome>
+   <each criterion references the test file that will verify it, if test_files exist>
 
    ## Verification
    <how to verify the implementation is correct>
@@ -181,6 +218,16 @@ After all plan files are written (both fast-path and agent-written), run the cri
 2. Mandatory even for fast-path stories.
 3. Store learnings per `/critique` Step 5 (tool-learning tag, blind spots if Gemini caught NMIP'd items).
 4. Do NOT append `## Self-critique` sections to plan files — note findings in the Step 6 report instead.
+
+**Contract gate** (Gemini-planned stories only, skip for fast-path):
+
+After self-critique passes and before Gemini escalation, run this structural validation:
+
+- If `test_files` exist on the story AND `## Contract` section is missing or empty: reject. Return to plan-writer agent with: "Plan rejected: missing ## Contract section. Story has test_files — test agent needs function signatures to write tests. Extract signatures from write_files and add ## Contract."
+- If `## Acceptance criteria` section is missing or contains fewer criteria than tasks: reject. Return with: "Plan rejected: missing or insufficient ## Acceptance criteria. Each task needs at least one testable criterion."
+- Stories without `test_files`: contract section is recommended but not gating. Acceptance criteria still required (minimum 1 per story).
+
+This is a structural check — presence and count, not quality.
 
 ### Step 5d: Collect results and update DB
 

@@ -86,6 +86,27 @@ User has requested: `/merge-worktree {{args}}`
 
 > **Note:** If `branch` is null in the DB, compute the story branch from the worktree list — this is normal for stories created via `/todo` before a worktree was set up.
 
+### Step 1.5: Commit verification (test_files stories only)
+
+If `story_id` is non-null, call `pm_get_story(story_id)` and check the `test_files` field.
+
+If `test_files` is non-empty:
+
+1. List commits on the story branch not on dev:
+   ```bash
+   git -C <worktree-path> log --oneline dev..<story-branch>
+   ```
+2. Check if any commits touch test files:
+   ```bash
+   git -C <worktree-path> log --oneline --diff-filter=A -- <test_files_glob>
+   ```
+   If no commits touch test files, emit a warning (non-blocking):
+   > "Warning: story has test_files but no test file commits found on branch. The test agent may have determined no tests were needed."
+
+This is informational — the hard gate is the test execution in Step 2.5.
+
+If `test_files` is empty/null or `story_id` is null, skip this step.
+
 ---
 
 ## Step 2: Determine the dev branch
@@ -134,6 +155,38 @@ Run project tests in the story worktree before merging. This catches regressions
    - Display the failure output.
    - Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging, or re-run with `--skip-tests` to bypass."
    - Do NOT proceed to merge.
+
+### Step 2.5b: Test validation gate (test_files stories only)
+
+This gate prevents merging a story that bypassed run-stories validation (e.g., manual `/merge-worktree` invocation). It runs after the smoke test.
+
+1. Check if the story has `test_files` (from `pm_get_story` data retrieved in Step 1, or call it now if not already cached).
+
+2. If `test_files` is empty, null, or `story_id` is null — **skip this step entirely**. Existing smoke test behavior is sufficient. Stories without `test_files`, bootstrap stories, and stories from before this feature all merge exactly as before.
+
+3. If `test_files` is non-empty:
+
+   a. Verify the story branch contains commits touching test files:
+      ```bash
+      git -C <worktree-path> log --oneline --diff-filter=A -- <test_files_glob>
+      ```
+      If no commits touch test files, **warn but do not block**:
+      > "Warning: story has test_files but no test file commits found on branch."
+
+   b. Run tests targeting the test_files in the worktree:
+      ```bash
+      cd <worktree-path> && <test-command> <test_files>
+      ```
+
+   c. If tests pass:
+      - Set `test_result = "pass (spec tests)"` (overrides the smoke test result)
+      - Continue to Step 3.
+
+   d. If tests fail:
+      - Set `test_result = "FAIL (spec tests)"`
+      - Display the failure output.
+      - Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging."
+      - Do NOT proceed to merge.
 
 ---
 
