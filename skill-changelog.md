@@ -104,3 +104,47 @@ these dates to compare friction rates before and after skill changes.
 - 2026-03-08 modified /presearch — Deep technical research that produces a structured briefing for /ship. Investigates APIs, frameworks, dependencies, and architecture before committing to stories. Use when the user says \"/presearch <topic>\", \"/presearch path/to/requirements.md\", \"/presearch presearch/existing-briefing.md\", or \"/presearch --deep <topic>\".
 - 2026-03-08 modified /presearch — Deep technical research that produces a structured briefing for /ship. Investigates APIs, frameworks, dependencies, and architecture before committing to stories. Use when the user says \"/presearch <topic>\", \"/presearch path/to/requirements.md\", \"/presearch presearch/existing-briefing.md\", or \"/presearch --deep <topic>\".
 - 2026-03-08 modified /presearch — Deep technical research that produces a structured briefing for /ship. Investigates APIs, frameworks, dependencies, and architecture before committing to stories. Use when the user says \"/presearch <topic>\", \"/presearch path/to/requirements.md\", \"/presearch presearch/existing-briefing.md\", or \"/presearch --deep <topic>\".
+- 2026-03-09 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-09 modified /ship — One-shot pipeline: idea to running coders in a single command. Creates epic, stories, tasks, plan files, and launches execution. Use when the user says \"/ship <title> <features>\", \"/ship path/to/prd.md\", \"/ship plans/existing-plan.md\", or \"/ship epic-NNN\".
+- 2026-03-10 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-10 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-10 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-10 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-10 modified /roadmap — Bird's-eye roadmap view with milestone progress, at-risk detection, and quick ac
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-11 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-11 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-11 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-11 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-11 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-11 modified /draft-plan — Run Gemini planning on a story/epic, then immediately convert the result into Cl
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-11 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-11 created /clarify — updated
+- 2026-03-11 created /env-preflight — updated
+- 2026-03-11 created /quickfix — updated
+- 2026-03-11 created /plan-stories — updated
+- 2026-03-11 created /clarify — updated
+- 2026-03-11 created /research — updated
+- 2026-03-11 modified /critique — Self-critique loop: iteratively improve whatever Claude just produced — plans, c
+- 2026-03-11 created /verify — updated
+- 2026-03-11 created /briefing — updated
+- 2026-03-11 modified /briefing — Gemini synthesis + Claude critique + scope check + decision recording. Reads res
+- 2026-03-11 created /draft-plans — updated
+- 2026-03-11 modified /presearch — Thin orchestrator: routes /clarify -> /research -> /briefing, with scope-based /quickfix shortcuts after each stage. Produces a structured briefing (presearch/<slug>.md) for /ship. Use when the user says \"/presearch <topic>\", \"/presearch path/to/requirements.md\", \"/presearch presearch/existing-briefing.md\", or \"/presearch --deep <topic>\".
+- 2026-03-11 modified /ship — Thin orchestrator: routes user intent to child skills (/quickfix, /plan-stories, /draft-plans, /critique, /env-preflight, /run-stories, /verify) in sequence. Parses args, detects mode, and dispatches — never performs planning, critique, review, build, or test logic directly.
+- 2026-03-11 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-11 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
+- 2026-03-11 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-11 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba

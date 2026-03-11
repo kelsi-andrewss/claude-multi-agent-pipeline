@@ -150,19 +150,21 @@ PLAN_SYSTEM_INSTRUCTION = (
 # ---------------------------------------------------------------------------
 DECISION_STATUSES = {"active", "superseded", "reversed"}
 SCOPE_TYPES = {"file", "pattern", "tech"}
-PATTERN_CATEGORIES = {"react", "firebase", "css", "konva", "architecture", "general"}
 PATTERN_SEVERITIES = {"must", "should", "prefer"}
 PATTERN_STATUSES = {"active", "deprecated"}
 PITFALLS_DIR = Path.home() / ".claude" / "refs"
-PITFALLS_CATEGORY_MAP = {
-    "pitfalls-react.md": "react",
-    "pitfalls-firebase.md": "firebase",
-    "pitfalls-css.md": "css",
-    "pitfalls-konva.md": "konva",
-    "pitfalls-python-mcp.md": "python-mcp",
-    "pitfalls-skill-markdown.md": "skill-markdown",
-    "pitfalls-claude-md.md": "claude-md",
-}
+
+
+def _discover_pitfalls() -> dict[str, str]:
+    """Auto-discover pitfall files by globbing refs/pitfalls-*.md."""
+    mapping: dict[str, str] = {}
+    for path in sorted(PITFALLS_DIR.glob("pitfalls-*.md")):
+        category = path.stem.removeprefix("pitfalls-")
+        mapping[path.name] = category
+    return mapping
+
+
+PITFALLS_CATEGORY_MAP = _discover_pitfalls()
 
 # ---------------------------------------------------------------------------
 # Roadmap constants

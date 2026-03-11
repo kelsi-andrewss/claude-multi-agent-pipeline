@@ -2,6 +2,198 @@
 
 Post-merge/rejection log for pattern recognition across sessions. Consulted on-demand, not loaded into every session.
 
+## 2026-03-11 -- story-653 -- Update ORCHESTRATION.md §15 with phase-based delegation table
+**Intent**: Replace §15 MCP context management with phase-based delegation model
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 25442 tokens · 15 calls · 74s
+**Skills used**: run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Fast-path plan with exact task descriptions gave coder clear scope
+**What failed**: nothing
+
+## 2026-03-11 -- story-651 -- Merge-worktree phase delegation
+**Intent**: Bundle git merges, cleanup, DB updates, outcome logging into one subagent per batch
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 36872 tokens · 16 calls · 91s
+**Skills used**: run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-file skill edit, plan was precise about insertion point and content
+**What failed**: nothing
+
+## 2026-03-11 -- story-652 -- Critique phase delegation
+**Intent**: Bundle plan file reads, pm_critique, pm_add_decision into one subagent
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 54419 tokens · 23 calls · 137s
+**Skills used**: run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Read-only context list in plan gave coder the reference patterns it needed
+**What failed**: nothing
+
+## 2026-03-11 -- story-646 -- Refactor presearch/SKILL.md into thin orchestrator
+**Intent**: Replace monolithic presearch with thin orchestrator invoking /clarify → /research → /briefing
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 45721 tokens · 18 calls · 88s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean single-file refactor. Coder reduced 318 lines to 118 lines. No escalation needed.
+**What failed**: nothing
+
+## 2026-03-11 -- story-647 -- Refactor ship/SKILL.md into thin orchestrator
+**Intent**: Replace monolithic ship with thin orchestrator invoking child skills via Skill tool
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 67415 tokens · 22 calls · 165s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean refactor, 399 lines to 189 lines. All modes and flags preserved. No escalation.
+**What failed**: nothing
+
+## 2026-03-11 -- story-630 -- Compliance pipeline: prefs → hooks promotion
+**Intent**: Auto-generate compliance hooks from high-frequency behavioral corrections
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.1h
+**Coder effort**: sonnet · 56540 tokens · 31 calls · 203s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 3
+**Complexity**: medium
+**Memory attributed**: none
+**What worked**: Clean execution, plan was precise enough for direct implementation
+**What failed**: nothing
+
+## 2026-03-11 -- story-631 -- Close dead memory loops
+**Intent**: Wire outcomes.md into planning, activate decision_preferences, elevate OpenMemory snapshot
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.1h
+**Coder effort**: sonnet · 67669 tokens · 27 calls · 195s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 2
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Plan-writer caught friction.json was live (not dead as presearch claimed), avoided breakage
+**What failed**: nothing
+
+## 2026-03-11 -- story-632 -- Deterministic backpressure per wave
+**Intent**: Hard build+lint+typecheck gate after each execution wave
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.1h
+**Coder effort**: sonnet · 45784 tokens · 20 calls · 129s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 1
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean execution, single-file change layered cleanly on existing SKILL.md
+**What failed**: nothing
+
+## 2026-03-11 -- story-633 -- Test-first parallel execution
+**Intent**: Dual coder+test agent launch, test_files DB column, merge gate
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.4h
+**Coder effort**: sonnet · 75074 tokens · 41 calls · 1479s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 4
+**Complexity**: medium
+**Memory attributed**: none
+**What worked**: Plan was self-contained enough that missing presearch file didn't matter
+**What failed**: nothing
+
+## 2026-03-11 -- story-634 -- Merge gate with test validation
+**Intent**: Failure attribution, retry routing, test validation in merge-worktree
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.1h
+**Coder effort**: sonnet · 55199 tokens · 25 calls · 226s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 2
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Built cleanly on story-633's Step 5b skeleton, extended with full attribution logic
+**What failed**: nothing
+
+## 2026-03-11 -- story-635 -- Plan-as-contract enforcement
+**Intent**: Add contract sections and critique gates to plan files for test-first isolation
+**Result**: merged
+**Agent**: architect
+**Model**: sonnet
+**Cycle time**: 0.1h
+**Coder effort**: sonnet · 35087 tokens · 22 calls · 211s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 2
+**Complexity**: small
+**Memory attributed**: none
+**What worked**: Clean merge despite shared draft-plan SKILL.md with story-631 (different sections)
+**What failed**: nothing
+
+## 2026-03-09 -- story-594 -- /ship --quickfix mode
+**Intent**: Add --quickfix flag to /ship that triggers lightweight path skipping Gemini and epics.db
+**Result**: merged
+**Agent**: quick-fixer
+**Model**: sonnet
+**Cycle time**: 0.0h
+**Coder effort**: sonnet · 35878 tokens · 22 calls · 111s
+**Skills used**: ship, run-stories, merge-worktree
+**Friction events**: 0 (clean)
+**Tests**: skipped (no infra)
+**File count**: 2
+**Complexity**: small
+**Memory attributed**: pipeline redesign pattern (precise plan structure)
+**What worked**: Clean single-pass execution. Well-specified plan with exact file targets enabled coder to execute without decisions.
+**What failed**: nothing
+
 ## 2026-03-09 -- story-580 -- Fix auto-distillation duplicate spam in stop hook
 **Intent**: Fix auto-distillation duplicate spam in stop hook
 **Result**: merged

@@ -1,5 +1,15 @@
 # Corrections Log
 
+## 2026-03-11 — but we just fixed compliance hook. why would we delete it? if the hook is
+**Context**: Planning permanent fix for false-positive correction detection. Proposed deleting the legitimate compliance hook (compliance-2026-03-04-why-didn-t-u-use-ship-skill-omfg.sh) as part of cleanup. That hook enforces a real preference. The problem is upstream — the detection pipeline feeding garbage in — not the hooks generated from legitimate corrections.
+**User said**: but we just fixed compliance hook. why would we delete it? if the hook is the issue, we need to fix the hook. not remove it
+**Turn**: ~3
+
+## 2026-03-09 — we want all variants tf you doing bro
+**Context**: Claude dismissed image generation as "zero scoring upside" and defended the presearch cut decision instead of deferring to user's ambition level
+**User said**: "we want all variants tf you doing bro. let's presearch everything we're missing /presearch"
+**Turn**: ~6
+
 ## 2026-03-08 — use ship omfg bro. why are you so fucking inconsistent again
 **Context**: Hook blocked direct edit to test file; reached for quick-fixer instead of /ship pipeline
 **User said**: use ship omfg bro. why are you so fucking inconsistent again

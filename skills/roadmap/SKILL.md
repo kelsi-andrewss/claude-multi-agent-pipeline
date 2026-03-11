@@ -113,6 +113,10 @@ Use 10-char progress bars.
 
 ## health
 
+**MCP Delegation (ORCHESTRATION §15):** This mode makes 2+ MCP calls and formats verbose output. Delegate to a foreground `general-purpose` subagent that calls `pm_wip()` and `pm_roadmap()`, formats the combined view, and returns only the formatted text.
+
+If delegating, the subagent executes steps 1-2 below and returns the formatted output. The main session prints it verbatim.
+
 1. Call `pm_wip()` and `pm_roadmap()` in parallel.
 2. Display a combined view:
 
