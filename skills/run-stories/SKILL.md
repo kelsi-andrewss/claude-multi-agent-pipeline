@@ -171,7 +171,10 @@ Compute for each story:
 - `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars, then append `-<NNN>` where NNN is the numeric part of the story ID (e.g., story-352 → `-352`)
 - `epic-slug`: the `epic_slug` from the `pm_dev_branch` detail file in Step 3
 - `story-branch`: `<epic-slug>--<story-slug>`
-- `worktree-path`: `<project-root>/.claude/worktrees/story/<story-slug>`
+- `has-test-files`: true if the story's `test_files` list is non-empty
+- `worktree-path`:
+  - If `has-test-files`: `<project-root>/.claude/worktrees/story/<story-slug>--code` (coder) and `<project-root>/.claude/worktrees/story/<story-slug>--test` (test agent)
+  - If NOT `has-test-files`: `<project-root>/.claude/worktrees/story/<story-slug>` (unchanged, backward compatible)
 - `dev-branch`: from the epic mapping computed in step 3
 - `agent-approach`: based on the `agent` field:
   - `quick-fixer` → "Make surgical, minimal changes. No refactoring beyond what the plan specifies."
@@ -277,6 +280,78 @@ Gemini is a research tool for the orchestrator — not available to coders.
    - Failure: "BLOCKED: <clear reason why the story could not be completed>"
 ```
 
+**When `has-test-files` is true**, additionally modify the coder prompt and launch a parallel test agent:
+
+**Coder prompt addition** (append to the coder prompt above, before the Steps section):
+```
+## Test file prohibition
+You are the CODER. Do NOT create or modify test files. Test files for this story: <test_files list>. Leave them to the test agent.
+```
+
+**Test agent** — launched simultaneously with the coder as a second `general-purpose` background agent (model: Sonnet):
+
+```
+You are the TEST AGENT for story <story_id>: "<title>"
+
+Plan file: <plan_file>
+Dev branch: <dev-branch>
+Story branch: <story-branch>--test
+Write files scope: <test_files list>
+Read-only context files (prefix with worktree path): <read-only context paths, or "none">
+Project root: <project-root>
+
+WORKTREE: <worktree-path for --test>
+All reads and writes MUST use paths under this directory.
+Before doing anything else, run: git -C <test-worktree-path> branch --show-current
+Confirm it prints <story-branch>--test. If not, STOP and report branch mismatch.
+Do NOT edit files outside this worktree.
+
+## Tool constraints
+You are the test agent. Write all tests yourself.
+Do NOT call any mcp__gemini__* tools.
+Do NOT call any pm_* tools.
+
+## Instructions
+
+Write tests from the plan's acceptance criteria and function signatures ONLY. You must:
+- Read the plan file for acceptance criteria, function signatures, and interface contracts
+- Reference read-only context files for type definitions and interfaces
+- Do NOT read or reference any source implementation files
+- Write ONLY to these test files: <test_files list>
+- Do NOT run the tests — they will be run against the real implementation in the merge gate
+
+## Steps
+
+1. Create the test worktree from the dev branch (NOT the story branch — you must not see the coder's changes):
+   ```bash
+   cd <project-root>
+   git fetch origin <dev-branch>
+   git show-ref --verify --quiet "refs/heads/<story-branch>--test" || git branch "<story-branch>--test" <dev-branch>
+   git worktree list | grep -q '<test-worktree-path>' || git worktree add <test-worktree-path> "<story-branch>--test"
+   ```
+
+2. Read the plan file. Extract acceptance criteria and function signatures.
+
+3. Write test files based solely on the plan's spec. Do not look at implementation code.
+
+4. Stage and commit:
+   ```bash
+   git -C <test-worktree-path> add <test_files>
+   git -C <test-worktree-path> commit -m "<story_id>: add spec tests"
+   ```
+
+5. Push:
+   ```bash
+   git -C <test-worktree-path> push -u origin <story-branch>--test
+   ```
+
+6. Return exactly one of:
+   - "DONE: <story-branch>--test pushed. Commit: <short-hash>. Files changed: <list>. Notes: <any>"
+   - "BLOCKED: <reason>"
+```
+
+**When `has-test-files` is false**, skip test agent launch entirely. The coder runs solo with the standard worktree path (no `--code` suffix). This preserves the existing flow for stories without test files.
+
 ### For sequential batches (conflict serialization)
 
 After the previous batch completes, before launching the next story:
@@ -354,7 +429,33 @@ Compare against the story's write_files. If unexpected files changed, warn but c
 
 ### Step 5b: Per-story testing
 
-For each DONE story that passes the diff gate:
+#### Stories WITH `test_files` (merge gate)
+
+For each DONE story that has `test_files` and both the coder and test agent returned DONE:
+
+1. **Combine code + test worktrees** in the coder's worktree:
+   ```bash
+   git -C <code-worktree> fetch origin <story-branch>--test
+   git -C <code-worktree> checkout origin/<story-branch>--test -- <test_files>
+   git -C <code-worktree> add <test_files>
+   git -C <code-worktree> commit -m "<story_id>: add spec tests"
+   ```
+
+2. **Run the test suite** in the code worktree. Use the project's test runner (detect from `package.json` scripts, `pytest.ini`, `_test.go`, etc.). Run only the test files from `test_files`, not the full suite.
+
+3. **Failure attribution** (up to 2 re-delegation rounds per story):
+   - **Test compile/import error** (test fails to parse or import missing modules) → re-delegate to the test agent with error output: "Interface mismatch: fix test imports/types. Error: <error output>". The test agent runs in its own worktree, pushes the fix, and the merge gate re-runs from step 1.
+   - **Test logic failure** (test compiles but assertions fail) → re-delegate to the coder with the test file content + failure output: "Tests written from spec fail against your implementation — fix the implementation. Test file: <content>. Failures: <output>". The coder fixes in its worktree, pushes, and the merge gate re-runs from step 1.
+   - After 2 re-delegation rounds with no resolution → mark story BLOCKED with reason "Merge gate failed after 2 re-delegation rounds: <last error>".
+
+4. **All tests pass** → story proceeds to merge (Step 5c). Push the combined branch:
+   ```bash
+   git -C <code-worktree> push origin <story-branch>
+   ```
+
+#### Stories WITHOUT `test_files` (existing behavior)
+
+For each DONE story that passes the diff gate and has no `test_files`:
 
 1. Check if test infrastructure exists in the project (look for test directories, test configs, `jest.config`, `pytest.ini`, `_test.go` files, etc.). If none exists, skip testing for this story.
 2. Launch unit-tester agent (background, **Haiku**) in the worktree. The unit-tester writes tests from the plan file's **acceptance criteria**, not from the implementation.

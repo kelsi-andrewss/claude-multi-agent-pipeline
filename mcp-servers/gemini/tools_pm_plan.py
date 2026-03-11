@@ -426,6 +426,9 @@ def register(mcp):
             story_ids: List of story IDs to check for conflicts.
         """
         with _db_op(readonly=True) as conn:
+            # test_files intentionally excluded from conflict detection: two stories
+            # can write tests in parallel without conflicting. The merge gate (Step 5b)
+            # handles test-implementation integration after both agents finish.
             stories_data = {}
             stories_read_data = {}
             for sid in story_ids:
