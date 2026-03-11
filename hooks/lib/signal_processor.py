@@ -101,9 +101,12 @@ POSITIVE_INTENT = re.compile(
 )
 
 EXTERNAL_CONTENT = re.compile(
-    r'\[\d{1,2}:\d{2}\s*[AP]M\]|'
-    r'This session is being continued|'
-    r'^(~~~|```)',
+    r'^\w[\w\s]{0,30}\s+\[\d{1,2}:\d{2}\s*[AP]M\]|'  # Slack: "Username  [9:52 PM]"
+    r'\[\d{1,2}:\d{2}\s*[AP]M\]|'                       # Bare timestamp: "[9:52 PM]"
+    r'This session is being continued|'                   # Exact continuation
+    r'session.*continued from|'                           # Variant continuations
+    r'continued from previous|'                           # Variant continuations
+    r'^(~~~|```)',                                         # Code fence starts
     re.MULTILINE
 )
 
@@ -174,6 +177,29 @@ def extract_corrections(turns):
         prev_assistant_had_tool_use = False
 
     return corrections
+
+
+def extract_corrections_from_transcript(transcript_path):
+    """Load transcript file, parse turns, extract corrections.
+
+    Combines parse_transcript_turns() and extract_corrections() into a single
+    file-path-in, corrections-out call. All filtering (SYSTEM_MSG, POSITIVE_INTENT,
+    EXTERNAL_CONTENT) is applied via extract_corrections().
+
+    Args:
+        transcript_path: Path to JSONL transcript file.
+
+    Returns:
+        List of correction dicts: [{"turn_idx": int, "content": str, "weight": float}]
+        Returns empty list on file errors or when no corrections found.
+    """
+    try:
+        turns = parse_transcript_turns(transcript_path)
+    except (OSError, IOError):
+        return []
+    if not turns:
+        return []
+    return extract_corrections(turns)
 
 
 def text_overlap(text_a, text_b):
