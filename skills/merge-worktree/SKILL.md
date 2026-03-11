@@ -33,6 +33,85 @@ User has requested: `/merge-worktree {{args}}`
 
 ---
 
+## Batch Mode (Subagent Delegation)
+
+When the caller has **2+ stories** to merge (e.g., run-stories Step 5c with multiple validated stories), launch ONE foreground `general-purpose` subagent instead of executing merge-worktree inline for each story.
+
+### When to use batch mode
+
+- **Use**: run-stories Step 5c with 2+ validated stories, /ship with multiple stories completing simultaneously
+- **Do NOT use**: single `/merge-worktree story-NNN` invocation, `/quickfix` merge step (always single-story)
+
+### Subagent prompt construction
+
+Build a prompt containing:
+
+1. The full text of Steps 1 through 5.5 below (the single-story merge procedure)
+2. The batch story list with pre-resolved data for each story:
+   - `story_id`, `title`, `epic_id`
+   - `story-branch` (already computed by run-stories)
+   - `worktree-path` (already known from coder agent)
+   - `dev-branch`: `dev`
+   - `test_result` from run-stories Step 5b (pass, skip, or pass (spec tests))
+3. ToolSearch instructions: `select:mcp__gemini__pm_update_story,mcp__gemini__pm_update_epic,mcp__gemini__pm_get_story`
+4. The serialization constraint: stories MUST merge sequentially (one `git merge` at a time into dev) to prevent stale-push race conditions. Order by story ID ascending.
+5. The return format (see below)
+
+### Diff gate (per story, inside subagent)
+
+Before merging each story, the subagent runs the diff gate:
+
+```bash
+git -C <worktree-path> diff --name-only <dev-branch>
+```
+
+Compare against the story's `write_files`. If unexpected files appear:
+- Log the discrepancy in the return summary
+- Continue with the merge (non-blocking, same as current behavior)
+
+### Subagent execution loop
+
+For each story in the batch (sequential):
+
+1. **Diff gate** — as above
+2. **Step 2**: set `dev-branch` = `dev`, verify with `git fetch origin dev`
+3. **Step 2.5**: skip smoke test — run-stories already validated in Step 5b. Use the passed-in `test_result`.
+4. **Step 3**: merge story branch into dev (`git merge --no-ff`, push)
+5. **Step 4**: clean up worktree and branches
+6. **Step 5**: update story state via `pm_update_story`, check epic auto-close via `pm_update_epic`
+7. **Step 5.5**: log outcome to `~/.claude/outcomes.md`
+
+If any story hits a merge conflict:
+- Record it as `blocked` with the conflict details
+- Skip to the next story (do NOT abort the batch)
+- The blocked story's worktree is preserved for manual resolution
+
+### Required return format
+
+```
+MERGE_SUMMARY:
+  merged: [story-NNN, story-MMM, ...]
+  blocked: [story-PPP (conflict: file.ts)] | none
+  commit_hashes: {story-NNN: abc1234, story-MMM: def5678}
+  epic_closures: [epic-NNN] | none
+  warnings: ["story-NNN: unexpected files changed: foo.ts"] | none
+  test_results: {story-NNN: "pass", story-MMM: "skip"}
+  outcomes_logged: [story-NNN, story-MMM]
+```
+
+### What the main session does after
+
+1. Parse the `MERGE_SUMMARY` structured response
+2. Use `merged`, `blocked`, `commit_hashes` to populate the Step 6 report
+3. No further MCP calls needed — the subagent already updated DB state and logged outcomes
+4. If any stories are `blocked`, include them in the run-stories blocked section
+
+### Context savings
+
+A 5-story batch that previously produced ~30 tool call responses in main context now produces 1 structured summary (~15 lines). The subagent's internal git output, MCP responses, and outcome logging are invisible to the main session.
+
+---
+
 ## Output policy
 - Do not emit any text between tool calls. Run all tools silently.
 - The only output is the final report (Step 6).
@@ -269,6 +348,8 @@ If any cleanup command fails, note the failure in the report but do not stop —
 > **Serialization note**: When `/run-stories` calls `/merge-worktree` for multiple DONE
 > stories in the same epic, it must call them **sequentially** — wait for each merge to
 > complete before starting the next. This prevents stale-push race conditions on the dev branch.
+>
+> **Batch mode**: When invoked via batch mode (above), the subagent handles serialization internally. The caller does not need to manage merge ordering.
 
 If `story_id` is non-null:
 
