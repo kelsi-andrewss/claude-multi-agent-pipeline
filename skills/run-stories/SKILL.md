@@ -433,24 +433,87 @@ Compare against the story's write_files. If unexpected files changed, warn but c
 
 For each DONE story that has `test_files` and both the coder and test agent returned DONE:
 
-1. **Combine code + test worktrees** in the coder's worktree:
+1. **Create a merge-candidate worktree** from the story branch:
    ```bash
+   MERGE_CANDIDATE="<project-root>/.claude/worktrees/merge-candidate/<story-slug>"
+   git worktree add "$MERGE_CANDIDATE" <story-branch>
+   ```
+
+2. **Cherry-pick the test agent's commit(s)** into the merge-candidate worktree:
+   ```bash
+   # Get the test agent's commit hash(es) from the --test branch
+   TEST_COMMITS=$(git -C "$MERGE_CANDIDATE" log --oneline origin/<story-branch>--test --not origin/<dev-branch> --reverse --format=%H)
+   git -C "$MERGE_CANDIDATE" cherry-pick $TEST_COMMITS
+   ```
+   If cherry-pick conflicts, this is a file overlap between coder and test agent — attribute to **test agent** (wrote to files outside test_files scope). Log friction: `category: retry, type: automatic, skill: run-stories, detail: "cherry-pick conflict — test agent wrote outside test_files scope"`. Skip to test agent retry (step 4).
+
+3. **Run the test suite** in the merge-candidate worktree. Use the project's test runner (detect from `package.json` scripts, `pytest.ini`, `_test.go`, etc.). Run only the test files from `test_files`, not the full suite:
+   ```bash
+   cd "$MERGE_CANDIDATE" && <test-command> <test_files>
+   ```
+   Capture exit code and full output.
+
+4. **Failure attribution** — classify test output and retry (max 1 retry per agent, max 2 total):
+
+   | Signal | Attribution | Action |
+   |--------|------------|--------|
+   | Test **compile/import error** | **Test agent** — wrong interface from plan | Log friction `category: retry, type: automatic, skill: run-stories`. Re-launch test agent (see below). Max 1 retry. |
+   | Test **logic failure** (assertion failed, wrong value, timeout) | **Coder** — implementation doesn't match spec | Log friction `category: retry, type: automatic, skill: run-stories`. Re-launch coder (see below). Max 1 retry. |
+   | **Mixed** (some compile, some logic) | Prioritize compile errors first | Fix compile errors (test agent retry), then re-run. If logic failures remain, retry coder. |
+   | **Ambiguous** (runtime error that could be either) | **Coder** — default attribution | Same as logic failure path. Coder owns runtime behavior. |
+
+   **Detection heuristic** — classify from test runner exit code + output:
+   - **Compile/import error**: output contains `Cannot find module`, `is not a function`, `has no exported member`, `ImportError`, `ModuleNotFoundError`, `undefined is not`, `TypeError:`, `SyntaxError:`, or other type/parse errors
+   - **Logic failure**: output contains `AssertionError`, `Expected .* to equal`, `expected .* but got`, `FAIL` with assertion details, `TimeoutError`, `timed out`
+   - If output matches neither pattern clearly, default to **coder** attribution (logic failure)
+
+   **Test agent retry** (compile/import error):
+   Re-launch test agent with error output + actual exports from coder's source files as read-only context:
+   ```
+   Your tests have compile/import errors when run against the real implementation.
+   Fix test imports and types to match the actual interface.
+
+   Error output:
+   <test runner output>
+
+   Actual exports from coder's source files (read-only — match your imports to these):
+   <relevant export signatures from coder's files in the merge-candidate>
+   ```
+   Test agent pushes fix to `<story-branch>--test`. Re-run merge-candidate validation from step 1.
+
+   **Coder retry** (logic failure):
+   Before cleaning up the merge-candidate, read the failing test files. Re-launch coder with:
+   ```
+   Your implementation failed spec-derived tests. The tests were written independently from
+   your code, based on the acceptance criteria in the plan.
+
+   Failing tests:
+   <test runner output>
+
+   Test file (read-only — do not modify):
+   <test file contents>
+
+   Fix your implementation to pass these tests. The tests define correct behavior.
+   ```
+   Coder pushes fix commit to `<story-branch>`. Re-run merge-candidate validation from step 1.
+
+   **After retry**: if second attempt also fails, mark story BLOCKED with the failure output. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
+
+5. **On pass** — before cleanup, merge test commits into the code worktree and push:
+   ```bash
+   # The merge-candidate has coder code + cherry-picked test commits, all validated.
+   # Pull the test files into the code worktree so the story branch includes both.
    git -C <code-worktree> fetch origin <story-branch>--test
    git -C <code-worktree> checkout origin/<story-branch>--test -- <test_files>
    git -C <code-worktree> add <test_files>
-   git -C <code-worktree> commit -m "<story_id>: add spec tests"
-   ```
-
-2. **Run the test suite** in the code worktree. Use the project's test runner (detect from `package.json` scripts, `pytest.ini`, `_test.go`, etc.). Run only the test files from `test_files`, not the full suite.
-
-3. **Failure attribution** (up to 2 re-delegation rounds per story):
-   - **Test compile/import error** (test fails to parse or import missing modules) → re-delegate to the test agent with error output: "Interface mismatch: fix test imports/types. Error: <error output>". The test agent runs in its own worktree, pushes the fix, and the merge gate re-runs from step 1.
-   - **Test logic failure** (test compiles but assertions fail) → re-delegate to the coder with the test file content + failure output: "Tests written from spec fail against your implementation — fix the implementation. Test file: <content>. Failures: <output>". The coder fixes in its worktree, pushes, and the merge gate re-runs from step 1.
-   - After 2 re-delegation rounds with no resolution → mark story BLOCKED with reason "Merge gate failed after 2 re-delegation rounds: <last error>".
-
-4. **All tests pass** → story proceeds to merge (Step 5c). Push the combined branch:
-   ```bash
+   git -C <code-worktree> commit -m "<story_id>: add spec tests (validated)"
    git -C <code-worktree> push origin <story-branch>
+   ```
+   Story proceeds to merge (Step 5c).
+
+6. **Clean up** the merge-candidate worktree (always — on both pass and fail):
+   ```bash
+   git worktree remove --force "$MERGE_CANDIDATE"
    ```
 
 #### Stories WITHOUT `test_files` (existing behavior)
