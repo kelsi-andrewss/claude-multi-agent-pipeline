@@ -478,6 +478,48 @@ conn.close()
 DISTILLEOF
 fi
 
+# ============================================================
+# Section 6b: Compliance hook generation for newly promoted prefs
+# ============================================================
+if [[ -f "$DB_FILE" ]]; then
+python3 - "$DB_FILE" "$HOME/.claude" <<'HOOKGENEOF'
+import json, os, sqlite3, sys
+
+db_file = sys.argv[1]
+project_root = sys.argv[2]
+
+try:
+    conn = sqlite3.connect(db_file, timeout=5)
+    rows = conn.execute(
+        "SELECT theme FROM correction_groups WHERE status='promoted' AND promoted_at IS NOT NULL"
+    ).fetchall()
+    conn.close()
+except Exception:
+    sys.exit(0)
+
+if not rows:
+    sys.exit(0)
+
+sys.path.insert(0, project_root)
+try:
+    from hooks.lib.hook_generator import generate_hook
+except ImportError:
+    sys.exit(0)
+
+for (theme,) in rows:
+    try:
+        result = generate_hook(theme, project_root=project_root)
+        if result is None:
+            print(f"Hook eval: not hookable: {theme[:80]}", file=sys.stderr)
+        elif result.get("skipped"):
+            pass
+        else:
+            print(f"Hook generated: {result['path']}", file=sys.stderr)
+    except Exception as e:
+        print(f"Hook generation failed for {theme[:80]}: {e}", file=sys.stderr)
+HOOKGENEOF
+fi
+
 # Cleanup
 SESSION_START_FILE="/tmp/session-start-${SESSION_ID}"
 rm -f "$SESSION_START_FILE"
