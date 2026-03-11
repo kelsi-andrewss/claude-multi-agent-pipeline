@@ -108,21 +108,38 @@ If ANY story uses a bare filename (no symbol), it conflicts with all other stori
 
 ---
 
-## Step 2c: Post-bootstrap build verification
+## Step 2c: Build verification (reference)
 
-**This step ONLY runs when a bootstrap story was detected in Step 2a-post AND that story's batch has completed and merged.** If no bootstrap story, skip entirely — zero overhead.
+This block defines the reusable build verification logic referenced by both the bootstrap gate and Step 4.1 (batch verification). It is not executed directly — it is invoked by those steps.
 
-After the bootstrap story's batch (Group 0) completes and merges into the dev branch, before launching Group 1:
+### Project-type detection
+
+Detect the project type by checking for build system files in the project root:
+
+| File | Project type | Build command | Lint command |
+|---|---|---|---|
+| `package.json` | Node/TS | `npm install && npm run build` (or `npx tsc --noEmit` if no `build` script in package.json) | `npm run lint` (only if `lint` script exists in package.json) |
+| `pubspec.yaml` | Flutter | `flutter pub get && flutter analyze` | (included in analyze) |
+| `pyproject.toml` | Python | `pip install -e . 2>&1 \| tail -5` | — |
+| `Cargo.toml` | Rust | `cargo check && cargo clippy --quiet 2>&1` | (included in clippy) |
+| `go.mod` | Go | `go build ./... && go vet ./...` | (included in vet) |
+
+### Failure semantics
+
+- Non-zero exit code on build/typecheck command = **FAIL** (blocks downstream).
+- Lint warnings with zero exit code = **PASS with warnings** (log warning count, do not block).
+- No recognized build system file found = **SKIP** verification. Log: "No recognized build system — skipping batch verification."
+
+### Bootstrap gate (existing behavior, unchanged)
+
+After the bootstrap batch (Group 0) completes and merges into the dev branch, before launching Group 1:
 
 1. Checkout the dev branch (post-bootstrap-merge).
-2. Detect project type from the worktree and run the appropriate build command:
-   - `package.json` → `npm install && npm run build` (or `npx tsc --noEmit` if no build script)
-   - `pubspec.yaml` → `flutter pub get && flutter analyze`
-   - `pyproject.toml` → `pip install -e . 2>&1 | tail -5`
-   - `Cargo.toml` → `cargo check`
-   - `go.mod` → `go build ./...`
-3. If build succeeds → continue to Group 1 (launch feature stories).
-4. If build fails → report the error, mark all remaining stories as BLOCKED with reason "Bootstrap build verification failed: <error>", stop execution.
+2. Run build verification using the commands above.
+3. If PASS → continue to Group 1 (launch feature stories).
+4. If FAIL → report the error, mark all remaining stories as BLOCKED with reason "Bootstrap build verification failed: <error>", stop execution.
+
+**This gate ONLY fires when a bootstrap story was detected in Step 2a-post AND that story's batch has completed and merged.** If no bootstrap story, skip entirely — zero overhead.
 
 ---
 
@@ -142,7 +159,9 @@ git fetch origin dev 2>/dev/null || { git branch dev main && git push -u origin 
 
 ## Step 4: Execute groups in order
 
-Process each dependency group sequentially. Within each group, process conflict batches:
+Process each dependency group sequentially. Within each group, process conflict batches.
+
+After each batch's stories complete and merge via Step 5c, run **Step 4.1 Batch Verification** before launching the next batch. If verification fails, skip all remaining batches.
 
 ### For each parallel batch — launch all stories simultaneously
 
@@ -278,6 +297,27 @@ After the previous batch completes, before launching the next story:
 
 ---
 
+## Step 4.1: Batch Verification
+
+After each batch's stories are merged into dev via Step 5c, verify the dev branch still builds before launching the next batch. This step uses the build verification logic defined in Step 2c.
+
+### When to run
+
+- Run after each non-final batch merges into dev. (The final batch is covered by merge-worktree's Step 2.5 — no double-verification.)
+- **Single-batch runs**: When all stories land in a single batch (no conflicts, no multi-group dependencies beyond bootstrap), skip inter-wave verification entirely. Log: "Single batch — skipping inter-wave verification (merge gate covers)."
+- **Bootstrap batch**: The bootstrap gate in Step 2c already handles post-bootstrap verification. Step 4.1 handles all subsequent non-bootstrap batches. No double-verification on the bootstrap batch.
+
+### Procedure
+
+1. Checkout the dev branch (post-merge state).
+2. Run build verification using the project-type detection and commands from Step 2c.
+3. Results:
+   - **PASS**: Log `"Batch N verification: PASS"`. Continue to the next batch.
+   - **PASS with lint warnings**: Log `"Batch N verification: PASS (warnings: <count>)"`. Continue to the next batch. Include warning summary in Step 6 report.
+   - **FAIL**: Log `"Batch N verification: FAIL — <error output (last 30 lines)>"`. Mark ALL stories in subsequent batches as BLOCKED with reason `"Blocked: batch N verification failed"`. Do NOT block stories in the current batch (they already merged successfully). Stop executing further batches.
+
+---
+
 ## Step 5: Collect results and validate
 
 Wait for all background agents to complete.
@@ -338,10 +378,14 @@ Print a final summary:
 ```
 Run complete.  Dev branch: dev
 
-story-001  batch 0   my-feature--fix-auth-flow      DONE    abc1234   tests: pass
-story-003  batch 0   my-feature--update-dashboard   DONE    def5678   tests: skipped (no infra)
-story-002  batch 1   my-feature--refactor-handlers  DONE    ghi9012   tests: pass  (conflicted with story-001 on src/handlers/foo.js)
-story-005  batch 0   my-feature--add-search         BLOCKED plan file references missing utility
+story-001  batch 0   my-feature--fix-auth-flow      DONE    abc1234   tests: pass    verify: pass
+story-003  batch 0   my-feature--update-dashboard   DONE    def5678   tests: skip    verify: pass
+story-002  batch 1   my-feature--refactor-handlers  DONE    ghi9012   tests: pass    verify: pass
+story-005  batch 0   my-feature--add-search         BLOCKED                          verify: pass
+
+Batch verification:
+  batch 0: PASS
+  batch 1: PASS
 
 Skipped (validation):
   story-006: state is 'done' — already complete
@@ -353,7 +397,21 @@ Blocked during execution:
   story-005: plan file references missing utility function `buildSearchIndex`
 ```
 
+**Example with batch verification failure:**
+
+```
+story-001  batch 0   my-feature--fix-auth         DONE      abc1234  tests: pass  verify: pass
+story-003  batch 0   my-feature--update-dash       DONE      def5678  tests: skip  verify: pass
+story-002  batch 1   my-feature--refactor-hdl      BLOCKED                         verify: batch 0 failed
+
+Batch verification:
+  batch 0: FAIL — src/index.ts(42): Cannot find module './newService'
+  batch 1: BLOCKED (batch 0 failed)
+```
+
 The `batch` column shows the parallel batch each story ran in (batch 0 = first parallel wave; batch 1 = ran after batch 0 due to conflict; `deferred` = cross-epic dependency not yet merged).
+
+The `verify` column shows the batch verification result for each story's batch. Stories in batches that were blocked by a prior verification failure show `verify: batch N failed`.
 
 If all stories complete successfully, print: "All stories executed successfully."
 
