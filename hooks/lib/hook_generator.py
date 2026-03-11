@@ -122,9 +122,9 @@ def _generate_bash_pretooluse(theme, classification):
             pattern_str = "|".join(dangerous[:3])
             condition_check = f'  if echo "$COMMAND" | grep -qEi "{pattern_str}"; then'
         else:
-            condition_check = '  if true; then'
+            return None
     else:
-        condition_check = '  if true; then'
+        return None
 
     return f"""#!/bin/bash
 # Auto-generated compliance hook. Source: correction_groups theme "{theme[:200]}". Mode: warn-only.
@@ -197,6 +197,12 @@ def generate_hook(theme, project_root=None):
     else:
         script = _generate_bash_pretooluse(theme, classification)
 
+    if script is None:
+        matcher = classification.get("matcher", "unknown")
+        not_hookable = {"hookable": False, "reason": f"cannot derive non-vacuous condition for matcher: {matcher}"}
+        _log_hookability(theme, not_hookable, project_root)
+        return None
+
     with open(hook_path, "w") as f:
         f.write(script)
     os.chmod(hook_path, 0o755)
@@ -213,6 +219,11 @@ def generate_hook(theme, project_root=None):
     }
 
 
+def _resolve_hook_path(command):
+    """Expand ~ and resolve a hook command path to an absolute filesystem path."""
+    return os.path.expanduser(command)
+
+
 def _update_settings(settings_path, hook_path, hook_type, classification):
     try:
         with open(settings_path) as f:
@@ -222,6 +233,11 @@ def _update_settings(settings_path, hook_path, hook_type, classification):
 
     hook_rel = hook_path.replace(os.path.expanduser("~"), "~")
     hook_command = hook_rel
+
+    # Task 3: Verify hook file exists before registering
+    resolved_path = _resolve_hook_path(hook_command)
+    if not os.path.exists(resolved_path):
+        return
 
     perm_entry = f"Bash({hook_rel}*)"
     permissions = settings.setdefault("permissions", {})
@@ -257,6 +273,14 @@ def _update_settings(settings_path, hook_path, hook_type, classification):
         else:
             new_matcher = {"matcher": matcher_name, "hooks": [hook_entry]}
             event_matchers.append(new_matcher)
+
+    # Task 4: Reconcile — prune dead hook paths for this matcher
+    for m in event_matchers:
+        if m.get("matcher", "") == matcher_name or (hook_type == "Stop" and "matcher" not in m):
+            live_hooks = [h for h in m.get("hooks", []) if os.path.exists(_resolve_hook_path(h.get("command", "")))]
+            m["hooks"] = live_hooks
+    # Remove matcher entries with no remaining hooks
+    hooks[hook_type] = [m for m in event_matchers if m.get("hooks")]
 
     tmp_path = settings_path + ".tmp"
     with open(tmp_path, "w") as f:
@@ -400,6 +424,47 @@ def _run_tests():
     assert "exit 0" in content and "exit 2" not in content
     passed += 1
     print("PASS: Test 12 - Stop hook generated correctly")
+
+    # Test 13: Skill matcher with no detect_pattern returns None (not vacuous)
+    result = generate_hook("use /ship for all new work", project_root=test_dir)
+    assert result is None, f"Test 13 failed: expected None for skill matcher without detect_pattern, got {result}"
+    passed += 1
+    print("PASS: Test 13 - Skill matcher with no detect_pattern returns None")
+
+    # Test 14: Non-hookable result shape is consistent (dict with hookable: False from classify)
+    result = classify_hookability("own positions, retract later if wrong")
+    assert isinstance(result, dict), f"Test 14 failed: not a dict"
+    assert result.get("hookable") is False, f"Test 14 failed: hookable not False"
+    assert "reason" in result, f"Test 14 failed: missing reason"
+    passed += 1
+    print("PASS: Test 14 - Non-hookable result has consistent shape")
+
+    # Test 15: _update_settings() does not register hooks for non-existent files
+    settings_test2 = os.path.join(test_dir, "settings2.json")
+    with open(settings_test2, "w") as f:
+        json.dump({"permissions": {"allow": []}, "hooks": {"PreToolUse": []}}, f)
+    fake_hook_path = os.path.join(test_dir, "hooks", "compliance", "does-not-exist.sh")
+    _update_settings(settings_test2, fake_hook_path, "PreToolUse", {"matcher": "Bash"})
+    with open(settings_test2) as f:
+        s = json.load(f)
+    # Should not have registered the non-existent hook
+    pre_tool_entries = s["hooks"]["PreToolUse"]
+    for m in pre_tool_entries:
+        for h in m.get("hooks", []):
+            assert h.get("command") != fake_hook_path.replace(os.path.expanduser("~"), "~"), \
+                f"Test 15 failed: registered non-existent hook"
+    passed += 1
+    print("PASS: Test 15 - _update_settings() skips non-existent hook files")
+
+    # Test 16: No generated hook contains 'if true; then'
+    compliance_files = [f for f in os.listdir(compliance_test) if f.endswith(".sh")] if os.path.exists(compliance_test) else []
+    for fname in compliance_files:
+        fpath = os.path.join(compliance_test, fname)
+        with open(fpath) as f:
+            content = f.read()
+        assert "if true; then" not in content, f"Test 16 failed: {fname} contains 'if true; then'"
+    passed += 1
+    print("PASS: Test 16 - No generated hooks contain vacuous 'if true; then'")
 
     shutil.rmtree(test_dir)
     print(f"\n{passed} passed, {failed} failed")
