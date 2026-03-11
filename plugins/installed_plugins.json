@@ -4,10 +4,10 @@
     "ralph-loop@claude-plugins-official": [
       {
         "scope": "user",
-        "installPath": "/Users/kelsiandrews/.claude/plugins/cache/claude-plugins-official/ralph-loop/205b6e0b3036",
-        "version": "205b6e0b3036",
+        "installPath": "/Users/kelsiandrews/.claude/plugins/cache/claude-plugins-official/ralph-loop/bd041495bd2a",
+        "version": "bd041495bd2a",
         "installedAt": "2026-02-20T00:40:56.368Z",
-        "lastUpdated": "2026-03-04T03:21:47.732Z",
+        "lastUpdated": "2026-03-11T17:21:16.902Z",
         "gitCommitSha": "8deab8460a9d4df5a01315ef722a5ca6b061c074"
       }
     ]

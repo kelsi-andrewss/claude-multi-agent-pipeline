@@ -20,7 +20,7 @@ branch=$(git branch --show-current 2>/dev/null || true)
 hook_profile="standard"
 if [[ -f /tmp/claude-hook-profile ]]; then
   hook_profile=$(cat /tmp/claude-hook-profile 2>/dev/null)
-elif [[ -n "$CLAUDE_HOOK_PROFILE" ]]; then
+elif [[ -n "${CLAUDE_HOOK_PROFILE:-}" ]]; then
   hook_profile="$CLAUDE_HOOK_PROFILE"
 fi
 
