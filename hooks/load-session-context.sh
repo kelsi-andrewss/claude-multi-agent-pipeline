@@ -40,6 +40,72 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
     cat "$HOME/.claude/session-handoff.md"
     echo ""
   fi
+
+  # Compact OpenMemory query — top 5 behavioral prefs + top 5 tool learnings
+  OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
+  if [[ -f "$OM_DB" ]]; then
+  python3 - "$OM_DB" <<'OMCOMPACTEOF'
+import os, subprocess, sys, time
+
+om_db = sys.argv[1]
+now = time.time()
+DEFAULT_DECAY = 0.05
+
+# Prune expired entries
+try:
+    project_root = os.path.expanduser("~/.claude")
+    sys.path.insert(0, project_root)
+    from hooks.lib.om_write import prune_expired
+    pruned = prune_expired()
+    if pruned > 0:
+        print(f"  (pruned {pruned} expired OpenMemory entries)")
+except Exception:
+    pass
+
+DECAY_SCORE = (
+    f"feedback_score * EXP(-COALESCE(decay_lambda, {DEFAULT_DECAY}) "
+    f"* (({int(now)} - COALESCE(last_seen_at, created_at)) / 86400.0))"
+)
+
+def om_query(sql):
+    try:
+        r = subprocess.run(
+            ["sqlite3", "-separator", "\t", om_db, sql],
+            capture_output=True, text=True, timeout=5
+        )
+        return [line.split("\t") for line in r.stdout.strip().splitlines() if line.strip()]
+    except Exception:
+        return []
+
+def trunc(s, n=150):
+    return s[:n] + "..." if len(s) > n else s
+
+prefs = om_query(
+    f"SELECT content FROM memories "
+    f"WHERE tags LIKE '%behavioral-pref%' AND tags NOT LIKE '%bootstrap%' "
+    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
+)
+learnings = om_query(
+    f"SELECT content FROM memories "
+    f"WHERE tags LIKE '%tool-learning%' AND tags NOT LIKE '%bootstrap%' "
+    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
+)
+
+if prefs or learnings:
+    print("")
+    print("=== MEMORY SNAPSHOT (mandatory context) ===")
+    if prefs:
+        print("  Behavioral prefs:")
+        for row in prefs:
+            print(f"    - {trunc(row[0])}")
+    if learnings:
+        print("  Tool learnings:")
+        for row in learnings:
+            print(f"    - {trunc(row[0])}")
+    print("=== END MEMORY SNAPSHOT ===")
+OMCOMPACTEOF
+  fi
+
   echo "=== MANDATORY TOOL CALL REQUIREMENT ==="
   echo "Before answering ANY question about workflow, pipeline, or how you would handle a task,"
   echo "you MUST use the Read tool to read these files — do NOT answer from memory or loaded context alone:"
@@ -62,9 +128,6 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
 
   # Session-start timestamp for debrief freshness check
   echo "$(date +%s)" > "/tmp/session-start-${SESSION_ID}"
-
-  # OpenMemory DB path (used by compact OM query below)
-  OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
 
   # Snapshot behavioral file mtimes for session-learning-check Stop hook
   if stat -f %m / >/dev/null 2>&1; then
@@ -274,70 +337,6 @@ if triggered:
     print("  Review and distill before starting work.")
     print("")
 PYEOF
-
-  # Compact OpenMemory query — top 5 behavioral prefs + top 5 tool learnings
-  if [[ -f "$OM_DB" ]]; then
-  python3 - "$OM_DB" <<'OMCOMPACTEOF'
-import os, subprocess, sys, time
-
-om_db = sys.argv[1]
-now = time.time()
-DEFAULT_DECAY = 0.05
-
-# Prune expired entries
-try:
-    project_root = os.path.expanduser("~/.claude")
-    sys.path.insert(0, project_root)
-    from hooks.lib.om_write import prune_expired
-    pruned = prune_expired()
-    if pruned > 0:
-        print(f"  (pruned {pruned} expired OpenMemory entries)")
-except Exception:
-    pass
-
-DECAY_SCORE = (
-    f"feedback_score * EXP(-COALESCE(decay_lambda, {DEFAULT_DECAY}) "
-    f"* (({int(now)} - COALESCE(last_seen_at, created_at)) / 86400.0))"
-)
-
-def om_query(sql):
-    try:
-        r = subprocess.run(
-            ["sqlite3", "-separator", "\t", om_db, sql],
-            capture_output=True, text=True, timeout=5
-        )
-        return [line.split("\t") for line in r.stdout.strip().splitlines() if line.strip()]
-    except Exception:
-        return []
-
-def trunc(s, n=150):
-    return s[:n] + "..." if len(s) > n else s
-
-prefs = om_query(
-    f"SELECT content FROM memories "
-    f"WHERE tags LIKE '%behavioral-pref%' AND tags NOT LIKE '%bootstrap%' "
-    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
-)
-learnings = om_query(
-    f"SELECT content FROM memories "
-    f"WHERE tags LIKE '%tool-learning%' AND tags NOT LIKE '%bootstrap%' "
-    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
-)
-
-if prefs or learnings:
-    print("")
-    print("=== MEMORY SNAPSHOT ===")
-    if prefs:
-        print("  Behavioral prefs:")
-        for row in prefs:
-            print(f"    - {trunc(row[0])}")
-    if learnings:
-        print("  Tool learnings:")
-        for row in learnings:
-            print(f"    - {trunc(row[0])}")
-    print("=== END MEMORY SNAPSHOT ===")
-OMCOMPACTEOF
-  fi
 
   # Auto-distillation check — flag recently auto-distilled entries for review
   if [[ -f "$HOME/.claude/behavioral-prefs.md" ]] && grep -q "(auto-distilled)" "$HOME/.claude/behavioral-prefs.md" 2>/dev/null; then
