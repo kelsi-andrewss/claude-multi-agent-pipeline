@@ -38,12 +38,3 @@ silently overwriting.
 
 ## PostToolUse loops (6x corrections, 2026-03-08)
 - Don't get stuck in PostToolUse processing loops. If a tool returns, move on.
-
-- (auto-distilled) User corrected 4x on: This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
-
-Summary:
-1. Primary Request and Intent:
-   The  (2026-03-11,2026-03-11,2026-03-11,2026-03-11). Review and refine next session.
-
-- (auto-distilled) User corrected 3x on: Kelsi Andrews  [9:52 PM]
-hey reuben! i have a really interesting system i'm trying to build and you seem super knowledgable. i'm trying to fabricate persistent memory for self learning along with skil (2026-03-11,2026-03-11,2026-03-11). Review and refine next session.
