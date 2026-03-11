@@ -198,6 +198,8 @@ IMPERATIVE_STARTS = re.compile(
 )
 
 def is_frustration(msg):
+    if len(msg) > 200:
+        return False
     if msg.rstrip().endswith("!!") or msg.rstrip().endswith("??"):
         return True
     caps_words = [w for w in msg.split() if w.isupper() and len(w) > 1]
@@ -216,6 +218,19 @@ SYSTEM_MSG = re.compile(
     re.IGNORECASE
 )
 
+POSITIVE_INTENT = re.compile(
+    r"^(let'?s |looks good|ship it|continue|approved|woo+|yes[,.\s!]|yeah|okay|lgtm|"
+    r"go ahead|do it|hell yeah|let'?s go|nice|perfect|awesome|sounds good|love it|great|cool)",
+    re.IGNORECASE
+)
+
+EXTERNAL_CONTENT = re.compile(
+    r'\[\d{1,2}:\d{2}\s*[AP]M\]|'
+    r'This session is being continued|'
+    r'^(~~~|```)',
+    re.MULTILINE
+)
+
 prev_assistant_had_tool_use = False
 for i, turn in enumerate(turns):
     if turn["role"] == "assistant":
@@ -228,11 +243,17 @@ for i, turn in enumerate(turns):
     if SYSTEM_MSG.search(msg):
         prev_assistant_had_tool_use = False
         continue
+    if POSITIVE_INTENT.match(msg):
+        prev_assistant_had_tool_use = False
+        continue
+    if EXTERNAL_CONTENT.search(msg):
+        prev_assistant_had_tool_use = False
+        continue
 
     matched = False
     if len(msg) < 150 and prev_assistant_had_tool_use and IMPERATIVE_STARTS.match(msg):
         matched = True
-    if not matched and is_frustration(msg):
+    if not matched and prev_assistant_had_tool_use and is_frustration(msg):
         matched = True
     if not matched and META_PATTERN.search(msg):
         matched = True
