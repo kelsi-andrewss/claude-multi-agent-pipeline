@@ -30,6 +30,7 @@ def parse_transcript_turns(transcript_path):
     for entry in lines:
         role = entry.get("type", "")
         content_text = ""
+        has_tool_use = False
 
         if role == "user":
             msg = entry.get("message", "")
@@ -58,13 +59,17 @@ def parse_transcript_turns(transcript_path):
                         p.get("text", "") for p in c
                         if isinstance(p, dict) and p.get("type") == "text"
                     )
+                    has_tool_use = any(
+                        isinstance(p, dict) and p.get("type") == "tool_use"
+                        for p in c
+                    )
                 elif isinstance(c, str):
                     content_text = c
         else:
             continue
 
         if content_text:
-            turns.append({"role": role, "content": content_text.strip(), "turn_idx": len(turns)})
+            turns.append({"role": role, "content": content_text.strip(), "turn_idx": len(turns), "has_tool_use": has_tool_use})
 
     return turns
 
@@ -89,8 +94,23 @@ SYSTEM_MSG = re.compile(
     re.IGNORECASE
 )
 
+POSITIVE_INTENT = re.compile(
+    r"^(let'?s |looks good|ship it|continue|approved|woo+|yes[,.\s!]|yeah|okay|lgtm|"
+    r"go ahead|do it|hell yeah|let'?s go|nice|perfect|awesome|sounds good|love it|great|cool)",
+    re.IGNORECASE
+)
+
+EXTERNAL_CONTENT = re.compile(
+    r'\[\d{1,2}:\d{2}\s*[AP]M\]|'
+    r'This session is being continued|'
+    r'^(~~~|```)',
+    re.MULTILINE
+)
+
 
 def is_frustration(msg):
+    if len(msg) > 200:
+        return False
     if msg.rstrip().endswith("!!") or msg.rstrip().endswith("??"):
         return True
     caps_words = [w for w in msg.split() if w.isupper() and len(w) > 1]
@@ -105,20 +125,31 @@ def extract_corrections(turns):
     """
     corrections = []
     seen_themes = {}
+    prev_assistant_had_tool_use = False
 
     for i, turn in enumerate(turns):
+        if turn["role"] == "assistant":
+            prev_assistant_had_tool_use = turn.get("has_tool_use", False)
+            continue
         if turn["role"] != "user":
             continue
 
         msg = turn["content"]
         if SYSTEM_MSG.search(msg):
+            prev_assistant_had_tool_use = False
+            continue
+        if POSITIVE_INTENT.match(msg):
+            prev_assistant_had_tool_use = False
+            continue
+        if EXTERNAL_CONTENT.search(msg):
+            prev_assistant_had_tool_use = False
             continue
 
         matched = False
 
-        if len(msg) < 150 and IMPERATIVE_STARTS.match(msg):
+        if len(msg) < 150 and prev_assistant_had_tool_use and IMPERATIVE_STARTS.match(msg):
             matched = True
-        if not matched and is_frustration(msg):
+        if not matched and prev_assistant_had_tool_use and is_frustration(msg):
             matched = True
         if not matched and META_PATTERN.search(msg):
             matched = True
@@ -139,6 +170,8 @@ def extract_corrections(turns):
                 "content": msg[:300],
                 "weight": weight,
             })
+
+        prev_assistant_had_tool_use = False
 
     return corrections
 
