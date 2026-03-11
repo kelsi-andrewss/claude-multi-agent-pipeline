@@ -87,17 +87,21 @@ db_file = sys.argv[5] if len(sys.argv) > 5 else ""
 corrections_file = os.path.join(project_root, "corrections.md")
 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-# Ensure correction_groups table exists
+# Ensure correction_groups table exists (use signal_processor's schema)
 if db_file and os.path.isfile(db_file):
     try:
         conn = sqlite3.connect(db_file, timeout=5)
         conn.execute("""CREATE TABLE IF NOT EXISTS correction_groups (
-            theme TEXT PRIMARY KEY,
-            status TEXT DEFAULT 'accumulating',
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            theme TEXT NOT NULL,
+            status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted')),
             count INTEGER DEFAULT 1,
-            correction_dates TEXT,
-            promoted_at TEXT
-        )""")
+            correction_dates TEXT DEFAULT '[]',
+            embedding BLOB,
+            promoted_at TEXT,
+            created_at INTEGER,
+            updated_at INTEGER)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)")
         conn.commit()
     except Exception:
         conn = None
@@ -110,159 +114,38 @@ def upsert_correction(theme_text):
     theme_key = theme_text[:80].strip().lower()
     try:
         row = conn.execute(
-            "SELECT theme, count, correction_dates, status FROM correction_groups "
+            "SELECT id, count, correction_dates, status FROM correction_groups "
             "WHERE LOWER(SUBSTR(theme, 1, 40)) = LOWER(SUBSTR(?, 1, 40))",
             (theme_key,)
         ).fetchone()
         if row:
             new_count = row[1] + 1
-            dates = row[2] + "," + today if row[2] else today
+            old_dates = json.loads(row[2]) if row[2] else []
+            old_dates.append(today)
             new_status = row[3] if row[3] == 'promoted' else ('pending_promotion' if new_count >= 3 else row[3])
             conn.execute(
-                "UPDATE correction_groups SET count=?, correction_dates=?, status=? WHERE theme=?",
-                (new_count, dates, new_status, row[0])
+                "UPDATE correction_groups SET count=?, correction_dates=?, status=? WHERE id=?",
+                (new_count, json.dumps(old_dates), new_status, row[0])
             )
         else:
             conn.execute(
-                "INSERT INTO correction_groups (theme, status, count, correction_dates) VALUES (?, 'accumulating', 1, ?)",
-                (theme_text[:300], today)
+                "INSERT INTO correction_groups (theme, status, count, correction_dates, created_at, updated_at) "
+                "VALUES (?, 'accumulating', 1, ?, ?, ?)",
+                (theme_text[:300], json.dumps([today]), int(datetime.now().timestamp()), int(datetime.now().timestamp()))
             )
         conn.commit()
     except Exception:
         pass
 
-# Parse transcript
-lines = []
-try:
-    with open(transcript_path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    lines.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-except Exception:
-    lines = []
+# Use centralized detection from signal_processor
+sys.path.insert(0, project_root)
+from hooks.lib.signal_processor import extract_corrections_from_transcript
 
-turns = []
-for entry in lines:
-    role = entry.get("type", "")
-    content_text = ""
-    has_tool_use = False
+corrections = extract_corrections_from_transcript(transcript_path)
+for correction in corrections:
+    upsert_correction(correction["content"])
 
-    if role == "user":
-        msg = entry.get("message", "")
-        if isinstance(msg, str):
-            content_text = msg
-        elif isinstance(msg, dict):
-            c = msg.get("content", "")
-            if isinstance(c, list):
-                content_text = " ".join(
-                    p.get("text", "") for p in c
-                    if isinstance(p, dict) and p.get("type") == "text"
-                )
-            elif isinstance(c, str):
-                content_text = c
-        elif isinstance(msg, list):
-            content_text = " ".join(
-                p.get("text", "") for p in msg
-                if isinstance(p, dict) and p.get("type") == "text"
-            )
-    elif role == "assistant":
-        msg = entry.get("message", {})
-        if isinstance(msg, dict):
-            c = msg.get("content", [])
-            if isinstance(c, list):
-                content_text = " ".join(
-                    p.get("text", "") for p in c
-                    if isinstance(p, dict) and p.get("type") == "text"
-                )
-                has_tool_use = any(
-                    isinstance(p, dict) and p.get("type") == "tool_use"
-                    for p in c
-                )
-            elif isinstance(c, str):
-                content_text = c
-    else:
-        continue
-
-    if content_text:
-        turns.append({"role": role, "content": content_text.strip(), "has_tool_use": has_tool_use})
-
-IMPERATIVE_STARTS = re.compile(
-    r'^(use |stop |don\'t |do not |just |why didn\'t |why don\'t |why aren\'t |'
-    r'make |run |try |ship |log |fix |check |read |write |call |add |remove |'
-    r'never |always )',
-    re.IGNORECASE
-)
-
-def is_frustration(msg):
-    if len(msg) > 200:
-        return False
-    if msg.rstrip().endswith("!!") or msg.rstrip().endswith("??"):
-        return True
-    caps_words = [w for w in msg.split() if w.isupper() and len(w) > 1]
-    return len(caps_words) >= 2
-
-META_PATTERN = re.compile(
-    r"you'?ve been |you'?re not |you keep |you should |you always |you never ",
-    re.IGNORECASE
-)
-
-SYSTEM_MSG = re.compile(
-    r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
-    r'^Base directory for this skill|'
-    r'^Implement the following plan:|'
-    r'^<skill-',
-    re.IGNORECASE
-)
-
-POSITIVE_INTENT = re.compile(
-    r"^(let'?s |looks good|ship it|continue|approved|woo+|yes[,.\s!]|yeah|okay|lgtm|"
-    r"go ahead|do it|hell yeah|let'?s go|nice|perfect|awesome|sounds good|love it|great|cool)",
-    re.IGNORECASE
-)
-
-EXTERNAL_CONTENT = re.compile(
-    r'\[\d{1,2}:\d{2}\s*[AP]M\]|'
-    r'This session is being continued|'
-    r'^(~~~|```)',
-    re.MULTILINE
-)
-
-prev_assistant_had_tool_use = False
-for i, turn in enumerate(turns):
-    if turn["role"] == "assistant":
-        prev_assistant_had_tool_use = turn["has_tool_use"]
-        continue
-    if turn["role"] != "user":
-        continue
-
-    msg = turn["content"]
-    if SYSTEM_MSG.search(msg):
-        prev_assistant_had_tool_use = False
-        continue
-    if POSITIVE_INTENT.match(msg):
-        prev_assistant_had_tool_use = False
-        continue
-    if EXTERNAL_CONTENT.search(msg):
-        prev_assistant_had_tool_use = False
-        continue
-
-    matched = False
-    if len(msg) < 150 and prev_assistant_had_tool_use and IMPERATIVE_STARTS.match(msg):
-        matched = True
-    if not matched and prev_assistant_had_tool_use and is_frustration(msg):
-        matched = True
-    if not matched and META_PATTERN.search(msg):
-        matched = True
-
-    if matched:
-        upsert_correction(msg[:300])
-    prev_assistant_had_tool_use = False
-
-# Manual correction detection from corrections.md
+# Manual correction detection from corrections.md (new entries added this session)
 try:
     corrections_mtime_start_val = int(corrections_mtime_start)
 except (ValueError, TypeError):
