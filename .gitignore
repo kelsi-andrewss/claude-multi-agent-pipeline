@@ -13,6 +13,7 @@
 
 # Temp/test files
 tracking/test.*
+.ship-manifest.json
 
 # Runtime / private data
 history.jsonl

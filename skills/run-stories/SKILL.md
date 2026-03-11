@@ -26,7 +26,59 @@ User has requested: `/run-stories {{args}}`
 
 ---
 
-## Step 1: Resolve story list
+## MCP Delegation (ORCHESTRATION §15)
+
+Steps 1–3 and the enrichment portion of Step 4 (pitfalls, learnings, gitignore checks) involve 10+ MCP calls whose verbose JSON responses consume main-session context. **Delegate them to a single foreground `general-purpose` subagent.**
+
+**How to delegate:**
+
+1. Construct a subagent prompt containing:
+   - The full text of Steps 1, 2 (all sub-steps), and 3 below
+   - The enrichment instructions (pitfalls, learnings, read-only context, gitignore — copied from Step 4's "Enrichment reference" section)
+   - The resolved `{{args}}` value and project root path
+   - ToolSearch instructions: `select:mcp__gemini__pm_get_story,mcp__gemini__pm_view,mcp__gemini__pm_list_stories,mcp__gemini__pm_check_conflicts,mcp__gemini__pm_dev_branch,mcp__gemini__pm_list_patterns` and `select:mcp__openmemory__openmemory_query`
+2. Append the return format below to the prompt
+3. Launch: `Agent(subagent_type="general-purpose", prompt=<constructed>)` — **foreground**, not background
+4. Parse the structured response
+5. If NEEDS_PLANNING stories are returned: handle auto-planning in the main session (call `pm_plan_story` + launch plan-writing agents), then call `pm_get_story` inline for each newly-planned story to fill in plan_file
+
+**Required return format:**
+
+```
+EXECUTION_PLAN:
+  bootstrap: story-NNN | none
+  dev_branch: dev
+  groups:
+    - batch: 0, parallel: [story-NNN, story-MMM], sequential: []
+    - batch: 1, parallel: [], sequential: [story-PPP after story-NNN (conflict: file.ts)]
+
+STORIES:
+  story-NNN:
+    title: ...
+    agent: quick-fixer
+    plan_file: /abs/path/plan.md
+    write_files: [file1.ts, file2.ts]
+    story_branch: epic-slug--story-slug-NNN
+    worktree_path: /abs/path/.claude/worktrees/story/story-slug-NNN
+    epic_slug: epic-slug
+    pitfalls: |
+      <formatted pm_list_patterns output, or "none">
+    learnings: |
+      <formatted openmemory_query output, or "none">
+    read_only_context: [path1, path2] | []
+    gitignore_warnings: [warning] | []
+
+NEEDS_PLANNING: [story-XXX] | none
+SKIPPED: story-AAA (reason) | none
+DEFERRED: story-CCC depends on story-DDD | none
+WARNINGS: text | none
+```
+
+After parsing, proceed to Step 2c (if bootstrap detected) then Step 4 (coder launch).
+
+---
+
+## Step 1: Resolve story list (subagent-scoped)
 
 Parse each token in `{{args}}`:
 
@@ -51,7 +103,7 @@ Deduplicate by story ID. If the list is empty after validation, stop and report 
 
 ---
 
-## Step 2: Determine execution groups
+## Step 2: Determine execution groups (subagent-scoped)
 
 Build an execution plan from two analyses:
 
@@ -143,7 +195,7 @@ After the bootstrap batch (Group 0) completes and merges into the dev branch, be
 
 ---
 
-## Step 3: Ensure dev branch exists
+## Step 3: Ensure dev branch exists (subagent-scoped)
 
 For each unique epic referenced by the stories being run:
 
@@ -183,17 +235,21 @@ Compute for each story:
 
 **Model-specific warnings:** When the story's agent is `quick-fixer` (Haiku-tier), append to agent-approach: "CRITICAL: PRESERVE existing patterns. When extending or expanding code (regexes, arrays, switch cases, config objects), ADD new entries — never replace the existing block wholesale. Read the target section first, then insert your additions alongside what's already there."
 
-**Before constructing each coder's prompt**, perform per-story enrichment:
+**Per-story data** was gathered by the resolution subagent. Use the `pitfalls`, `learnings`, `read_only_context`, and `gitignore_warnings` fields from the STORIES data returned in the MCP Delegation step. Do **not** make additional MCP calls for this information. If a story has gitignore warnings for ALL write targets, skip it as BLOCKED.
 
-**Pitfalls:** Extract file extensions from write_files (from the detail file), map to categories (`jsx`/`tsx`/`js` → `react`, `css`/`scss` → `css`, `dart` → `flutter`, Firestore ops → `firebase`, `py` in `mcp-servers/` → `python-mcp`, `md` in `skills/` → `skill-markdown`, `md` in `CLAUDE.md`/`ORCHESTRATION.md` → `claude-md`), call `pm_list_patterns(categories=[...])`. Include results in the prompt.
+**Protected files:** Read `<project-root>/.claude/protected-files.md` if it exists (single file read — acceptable inline).
 
-**Read-only context:** Read the story's plan file, extract paths from the `## Read-only context` section (if present). Prefix paths with the worktree path.
+### Enrichment reference (for resolution subagent prompt)
 
-**Protected files:** Check if `<project-root>/.claude/protected-files.md` exists. If so, read it and include the list in the prompt.
-
-**Learnings:** Call `openmemory_query(query="<tech-stack-keywords> <write-target-filenames>", user_id="global", n=5)`. Filter to procedural/semantic sectors. Include non-empty results in the coder prompt as a `## Learnings` section after `## Pitfalls`. Tech-stack keywords: derive from file extensions and framework indicators in the plan (e.g., "react hooks", "python mcp", "firebase firestore"). If no results, omit the section.
-
-**Gitignore check:** Run `git -C <project-root> check-ignore <write_files>` (space-separated). If any file is gitignored, remove it from the write scope and add a warning to the coder prompt: "WARNING: <file> is gitignored — do not create or modify it. Achieve the story's goal without this file, or report NEED_DECISION." If ALL write targets are gitignored, skip the story and report as BLOCKED.
+> The following instructions are included in the skill for reference and must be passed verbatim to the resolution subagent as part of its prompt:
+>
+> **Pitfalls:** Read `<project-root>/refs/pattern-categories.json`. Use `extension_map` to map write_file extensions to categories, and `path_overrides` to override by path prefix. Deduplicate categories, then call `pm_list_patterns(category=<cat>)` for each. Format results as bullet points.
+>
+> **Learnings:** Call `openmemory_query(query="<tech-stack-keywords> <write-target-filenames>", user_id="global", n=5)`. Filter to procedural/semantic sectors. Format non-empty results as bullet points. Tech-stack keywords: derive from file extensions and framework indicators in the plan (e.g., "react hooks", "python mcp", "firebase firestore").
+>
+> **Read-only context:** Read each story's plan file, extract paths from the `## Read-only context` section (if present). Return as a list of absolute paths.
+>
+> **Gitignore check:** Run `git -C <project-root> check-ignore <write_files>` (space-separated). Return any gitignored files as warnings.
 
 Each background agent receives this prompt (fill all placeholders before launching):
 

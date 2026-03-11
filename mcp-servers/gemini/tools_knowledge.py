@@ -14,7 +14,6 @@ from urllib.request import Request, urlopen
 
 from constants import (
     DECISION_STATUSES,
-    PATTERN_CATEGORIES,
     PATTERN_SEVERITIES,
     PATTERN_STATUSES,
     PITFALLS_CATEGORY_MAP,
@@ -282,12 +281,12 @@ def register(mcp):
         Args:
             title: Short name for the pattern.
             description: Full description of the pattern or pitfall.
-            category: One of: react, firebase, css, konva, architecture, general.
+            category: Any tech/domain string (e.g. react, flutter, python, go, architecture, general).
+                      New categories are created on first use. Add a refs/pitfalls-<category>.md file
+                      for auto-import on server startup.
             severity: One of: must, should, prefer (default: must).
             source: Where this pattern came from (e.g. filename, story ID).
         """
-        if category not in PATTERN_CATEGORIES:
-            return f"Invalid category '{category}'. Valid: {sorted(PATTERN_CATEGORIES)}"
         if severity not in PATTERN_SEVERITIES:
             return f"Invalid severity '{severity}'. Valid: {sorted(PATTERN_SEVERITIES)}"
         with _db_op() as conn:
@@ -316,7 +315,8 @@ def register(mcp):
         """List patterns/pitfalls, optionally filtered by category, severity, or status.
 
         Args:
-            category: Filter by category (react, firebase, css, konva, architecture, general).
+            category: Filter by category string (e.g. react, flutter, python, go).
+                      Any string is accepted — returns empty list if no patterns exist for it.
             severity: Filter by severity (must, should, prefer).
             status: Filter by status (default: 'active'). Set to None/empty for all.
         """
@@ -325,8 +325,6 @@ def register(mcp):
             params: list[str] = []
 
             if category:
-                if category not in PATTERN_CATEGORIES:
-                    return f"Invalid category '{category}'. Valid: {sorted(PATTERN_CATEGORIES)}"
                 conditions.append("category = ?")
                 params.append(category)
             if severity:

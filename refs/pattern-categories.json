@@ -1,0 +1,24 @@
+{
+  "extension_map": {
+    "jsx": "react",
+    "tsx": "react",
+    "js": "react",
+    "css": "css",
+    "scss": "css",
+    "dart": "flutter",
+    "py": "python",
+    "go": "go",
+    "rs": "rust",
+    "swift": "swift",
+    "kt": "kotlin",
+    "java": "java",
+    "rb": "ruby",
+    "sh": "shell"
+  },
+  "path_overrides": {
+    "mcp-servers/": "python-mcp",
+    "skills/": "skill-markdown",
+    "CLAUDE.md": "claude-md",
+    "ORCHESTRATION.md": "claude-md"
+  }
+}
