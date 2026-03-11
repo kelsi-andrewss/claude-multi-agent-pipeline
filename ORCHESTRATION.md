@@ -175,3 +175,37 @@ Friction = deviations from the expected path. Captured as corrections → correc
 Auto-promotion: when a correction theme reaches count >= 3, stop hook auto-promotes to behavioral-prefs.md + OpenMemory. No manual gate.
 
 Full reference: `refs/orch-friction.md`.
+
+---
+
+## 15. DELEGATION
+
+Delegate by phase — each pipeline phase that doesn't require user decisions should be one subagent. The unit of delegation is a complete phase, not individual MCP calls.
+
+### Phase-based delegation table
+
+| Phase | What it does | Delegation | Agent type |
+|---|---|---|---|
+| **Resolution** | Plan file → coder in worktree → committed code | 1 subagent per story via `run-stories` | Coder (`quick-fixer` / `architect`) |
+| **Critique** | Plan reads + `pm_critique` + `pm_add_decision` | 1 subagent per plan | Reviewer |
+| **Merge** | Diff gates + git merges + cleanup + DB updates + outcome logging | 1 subagent per batch via `merge-worktree` | Git-ops |
+
+### Keep inline (main session)
+
+- Single state transitions (`pm_update_story`)
+- `ToolSearch` calls
+- User-facing decisions and confirmations
+- `NEED_DECISION` routing — main session picks the option and resumes the coder
+- Final reports and session summaries
+
+### Exceptions
+
+These never leave the main session regardless of MCP call count:
+
+- **User-facing decisions**: anything requiring user confirmation or choice stays inline.
+- **NEED_DECISION routing**: the main session resolves the decision, then resumes or relaunches the coder.
+- **Final reports**: session summaries, outcome reports, and debrief output are composed by the main session.
+
+### Subagent return contract
+
+Every delegated subagent returns exactly one of: `DONE: <summary>`, `NEED_DECISION: <question>`, or `BLOCKED: <reason>`. The main session never parses intermediate output — only the terminal status line.
