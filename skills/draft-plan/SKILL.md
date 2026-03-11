@@ -61,6 +61,15 @@ Classify each token in `{{args}}`:
 3. Split into `fast_path` and `gemini_path` lists.
 4. `fast_path` stories skip directly to Step 5.
 
+**Gather past failure context:**
+Before launching the planner agent, read `~/.claude/outcomes.md`. Extract the last 10 outcome entries where "What failed" is not "nothing". Build a `PAST_FAILURES` block with format:
+```
+PAST_FAILURES:
+  story-NNN (agent, model): <what failed>
+  story-NNN (agent, model): <what failed>
+```
+Include this block in the planner agent prompt (Step 2 agent call below) so Gemini has context about recurring failure modes.
+
 **For file paths** (`.md`):
 - Read the file and search for `story-\d+`.
 - If a story ID is found, add it to the story list and include in `gemini_path`.
@@ -73,6 +82,8 @@ Agent(subagent_type="planner", prompt="""
 MODE: draft-plan
 STORY_IDS: [<gemini_path story IDs>]
 EPIC_IDS: [<explicit epic IDs from Step 1>]
+
+<PAST_FAILURES block if any failures were extracted, omit section if none>
 """)
 ```
 
@@ -144,6 +155,13 @@ Tasks: <task list from pm_get_story>
 Write files: <write_files list>
 Read files: <read_files list>
 Output file: plans/<name>.md
+
+## Predicted Preferences
+<For each story, before launching the agent, call pm_predict_preference(domain=<domain>) where domain
+is inferred from write_files: "hooks" for hook files, "tracking" for tracking files, "skills" for
+skill files, "refs" for refs files, etc. If predictions are returned, include them here:>
+  - <domain>: <preference text> (confidence: <score>)
+<If no predictions returned, omit this section entirely.>
 
 ## Critique Checklist
 <full checklist content from refs/orch-critique-checklist.md>
