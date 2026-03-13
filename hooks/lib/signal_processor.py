@@ -304,7 +304,9 @@ def _ensure_correction_groups_table(cursor):
         "embedding BLOB, "
         "promoted_at TEXT, "
         "created_at INTEGER, "
-        "updated_at INTEGER)"
+        "updated_at INTEGER, "
+        "source TEXT DEFAULT 'auto', "
+        "text TEXT DEFAULT '')"
     )
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)"
@@ -452,8 +454,8 @@ def _process_correction_groups(db_path, project_root):
             )
         else:
             cursor.execute(
-                "INSERT INTO correction_groups (theme, count, correction_dates, embedding, status, created_at, updated_at) "
-                "VALUES (?, 1, ?, ?, 'accumulating', ?, ?)",
+                "INSERT INTO correction_groups (theme, count, correction_dates, embedding, source, status, created_at, updated_at) "
+                "VALUES (?, 1, ?, ?, 'auto', 'accumulating', ?, ?)",
                 (entry["header"], json.dumps([entry["date"]]), _embedding_to_blob(vec), now, now),
             )
 

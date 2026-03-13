@@ -100,7 +100,9 @@ if db_file and os.path.isfile(db_file):
             embedding BLOB,
             promoted_at TEXT,
             created_at INTEGER,
-            updated_at INTEGER)""")
+            updated_at INTEGER,
+            source TEXT DEFAULT 'auto',
+            text TEXT DEFAULT '')""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)")
         conn.commit()
     except Exception:
@@ -129,8 +131,8 @@ def upsert_correction(theme_text):
             )
         else:
             conn.execute(
-                "INSERT INTO correction_groups (theme, status, count, correction_dates, created_at, updated_at) "
-                "VALUES (?, 'accumulating', 1, ?, ?, ?)",
+                "INSERT INTO correction_groups (theme, status, count, correction_dates, source, created_at, updated_at) "
+                "VALUES (?, 'accumulating', 1, ?, 'auto', ?, ?)",
                 (theme_text[:300], json.dumps([today]), int(datetime.now().timestamp()), int(datetime.now().timestamp()))
             )
         conn.commit()
@@ -354,8 +356,8 @@ for theme, count, dates in rows:
 
     try:
         conn.execute(
-            "UPDATE correction_groups SET status='promoted', promoted_at=? WHERE theme=?",
-            (today, theme)
+            "UPDATE correction_groups SET status='promoted', promoted_at=?, text=? WHERE theme=?",
+            (today, pref_text, theme)
         )
         conn.commit()
     except Exception:
