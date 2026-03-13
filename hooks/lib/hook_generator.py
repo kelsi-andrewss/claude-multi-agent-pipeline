@@ -8,7 +8,7 @@ Usage:
     hook_generator.py <theme> [--project-root <path>]
     hook_generator.py --test
 """
-import json, os, re, sys, tempfile
+import json, os, re, sqlite3, sys, tempfile
 
 COMPLIANCE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compliance")
 SETTINGS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "settings.json")
@@ -168,7 +168,7 @@ exit 0
 """
 
 
-def generate_hook(theme, project_root=None):
+def generate_hook(theme, project_root=None, db_file=None):
     if project_root:
         compliance_dir = os.path.join(project_root, "hooks", "compliance")
         settings_path = os.path.join(project_root, "settings.json")
@@ -186,6 +186,11 @@ def generate_hook(theme, project_root=None):
 
     if os.path.exists(hook_path):
         return {"path": hook_path, "skipped": True, "reason": "hook already exists"}
+
+    if _was_previously_generated(hook_path, settings_path):
+        if db_file:
+            _dismiss_correction(theme, db_file)
+        return {"path": hook_path, "skipped": True, "reason": "hook was deleted by user — dismissed"}
 
     os.makedirs(compliance_dir, exist_ok=True)
 
@@ -287,6 +292,37 @@ def _update_settings(settings_path, hook_path, hook_type, classification):
         json.dump(settings, f, indent=2)
         f.write("\n")
     os.rename(tmp_path, settings_path)
+
+
+def _was_previously_generated(hook_path, settings_path):
+    """Check if a hook path appears in settings.json (indicating prior generation)."""
+    try:
+        with open(settings_path) as f:
+            settings = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+    hook_rel = hook_path.replace(os.path.expanduser("~"), "~")
+    for event_type in settings.get("hooks", {}).values():
+        if isinstance(event_type, list):
+            for matcher in event_type:
+                for h in matcher.get("hooks", []):
+                    if h.get("command") == hook_rel:
+                        return True
+    return False
+
+
+def _dismiss_correction(theme, db_file):
+    """Mark a correction_group as dismissed."""
+    try:
+        conn = sqlite3.connect(db_file, timeout=5)
+        conn.execute(
+            "UPDATE correction_groups SET status='dismissed' WHERE theme=?",
+            (theme,)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 def _log_hookability(theme, classification, project_root=None):
