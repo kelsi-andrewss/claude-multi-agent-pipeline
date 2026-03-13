@@ -49,11 +49,11 @@ All writes go through `hooks/lib/om_write.py`. No direct SQL inserts.
 
 ## Auto-distillation
 
-Stop hook flow:
-1. Detect corrections in transcript (imperative redirect, frustration, meta-comment patterns)
-2. Write to `correction_groups` table (theme, count, dates)
-3. When count >= 3: auto-promote → correction_groups DB (status='promoted') + OpenMemory via om_write
-4. Prefixed with "(auto-distilled)" for optional refinement at session start
+Two write paths into `correction_groups` table:
+- **Auto**: Stop hook detects corrections in transcript (semantic embedding against prototypes) → upserts to correction_groups
+- **Manual**: Claude runs `scripts/log-correction.sh "<description>"` → inserts/increments in correction_groups
+
+Promotion: when any group reaches count >= 3, auto-promoted to correction_groups DB (status='promoted') + OpenMemory via om_write. Prefixed with "(auto-distilled)" for optional refinement at session start.
 
 ---
 

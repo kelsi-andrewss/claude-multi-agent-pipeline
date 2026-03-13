@@ -121,7 +121,7 @@ Procedures: merge-worktree/SKILL.md. After coder: NEED_DECISION → pick, resume
 
 **Safe to `/clear` when ALL true**: no background agent running, no agent result needed, between stories.
 
-**Survives `/clear`**: git branches, worktrees, epics.db, plan files, corrections.md.
+**Survives `/clear`**: git branches, worktrees, epics.db (incl. correction_groups), plan files.
 **Lost**: in-session memory, coder task status.
 
 Before `/clear`: write `session-handoff.md`, store summary to OpenMemory, run debrief. Recovery details: `refs/orch-context-mgmt.md`.
@@ -158,9 +158,11 @@ One-shot pipeline: QUEUE→PLAN→DRAFT→RUN→MERGE. Default for new projects,
 
 Two layers: **eager** (CLAUDE.md, ORCHESTRATION.md, rendered-prefs.md — loaded at session start) and **lazy** (OpenMemory — queried on demand via compact session-start query).
 
-All writes go through `hooks/lib/om_write.py`. Tag taxonomy: `behavioral-pref`, `tool-learning`, `decision`, `prompt-pattern`, `session-summary`. Adding a new tag requires updating om_write.py ALLOWED_TAGS, BUDGETS, CLAUDE.md integration surfaces, and refs/orch-memory.md.
+Three persistence surfaces: `correction_groups` table (manual via `log-correction.sh` + auto via stop hook), `rendered-prefs.md` (generated sidecar), OpenMemory (semantic store with per-category budgets).
 
-Auto-distillation: stop hook promotes correction patterns (count >= 3) to correction_groups DB + OpenMemory. No manual distillation step.
+All OpenMemory writes go through `hooks/lib/om_write.py`. Tag taxonomy: `behavioral-pref`, `tool-learning`, `decision`, `prompt-pattern`, `session-summary`. Adding a new tag requires updating om_write.py ALLOWED_TAGS, BUDGETS, CLAUDE.md integration surfaces, and refs/orch-memory.md.
+
+Auto-distillation: stop hook promotes correction patterns (count >= 3) to correction_groups DB + OpenMemory. Manual corrections logged via `scripts/log-correction.sh` go to the same table.
 
 Anti-bloat: per-category budgets, embedding-based dedup (0.85), decay-weighted pruning at session start.
 
@@ -170,9 +172,9 @@ Full reference: `refs/orch-memory.md`.
 
 ## 14. FRICTION TRACKING
 
-Friction = deviations from the expected path. Captured as corrections → correction_groups table (epics.db). Two detection methods: structural (stop hook pattern matching on transcript) and manual (Claude appends to corrections.md).
+Friction = deviations from the expected path. Captured as corrections → correction_groups table (epics.db). Two detection methods: structural (stop hook pattern matching on transcript) and manual (Claude runs `scripts/log-correction.sh`).
 
-Auto-promotion: when a correction theme reaches count >= 3, stop hook auto-promotes to correction_groups DB + OpenMemory. No manual gate.
+Auto-promotion: when a correction theme reaches count >= 3, auto-promoted to correction_groups DB + OpenMemory. No manual gate.
 
 Full reference: `refs/orch-friction.md`.
 
