@@ -30,9 +30,31 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
   echo "--- ~/.claude/ORCHESTRATION.md ---"
   cat "$HOME/.claude/ORCHESTRATION.md"
   echo ""
+  # Migrate correction_groups schema: add text/source columns if missing
+  DB_FILE_PREFS="$HOME/.claude/.claude/epics.db"
+  if [[ -f "$DB_FILE_PREFS" ]]; then
+  python3 - "$DB_FILE_PREFS" <<'MIGRATEEOF'
+import sqlite3, sys
+db_path = sys.argv[1]
+conn = sqlite3.connect(db_path, timeout=5)
+for col, default in [("text", "''"), ("source", "'auto'")]:
+    try:
+        conn.execute(f"ALTER TABLE correction_groups ADD COLUMN {col} TEXT DEFAULT {default}")
+    except sqlite3.OperationalError:
+        pass
+conn.execute("CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)")
+conn.execute(
+    "UPDATE correction_groups "
+    "SET text = 'User corrected ' || count || 'x on: ' || substr(theme, 1, 200) "
+    "WHERE status = 'promoted' AND (text IS NULL OR text = '')"
+)
+conn.commit()
+conn.close()
+MIGRATEEOF
+  fi
+
   # Render behavioral preferences from DB to sidecar file
   RENDERED_PREFS="$HOME/.claude/.claude/rendered-prefs.md"
-  DB_FILE_PREFS="$HOME/.claude/.claude/epics.db"
   if [[ -f "$DB_FILE_PREFS" ]]; then
   python3 - "$DB_FILE_PREFS" "$RENDERED_PREFS" <<'RENDERPREFSEOF'
 import subprocess, sys

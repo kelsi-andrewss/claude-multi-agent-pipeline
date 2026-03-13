@@ -7,9 +7,9 @@ Reads the session transcript, identifies corrections, matches them against
 decision_preferences from the current session or last 24 hours, and updates
 signal_score/signal_count accordingly.
 """
-import hashlib, json, math, os, re, sqlite3, struct, sys, time, uuid
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+import json, os, re, sqlite3, sys, time
+
+from hooks.lib.embedding_utils import get_embedding, cosine_similarity, embedding_to_blob, blob_to_embedding
 
 
 def parse_transcript_turns(transcript_path):
@@ -254,8 +254,6 @@ def find_decision_mention_turns(decisions, turns):
                 break
 
 
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
-OLLAMA_MODEL = "nomic-embed-text"
 SIMILARITY_THRESHOLD = 0.85
 PROMOTION_THRESHOLD = 3
 
@@ -276,17 +274,6 @@ MAX_EMBEDDING_CALLS_PER_SESSION = 5
 _prototype_embeddings = None
 
 
-def _get_embedding(text):
-    payload = json.dumps({"model": OLLAMA_MODEL, "prompt": text}).encode()
-    req = Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
-    try:
-        with urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-        return data.get("embedding")
-    except (URLError, OSError, json.JSONDecodeError, KeyError):
-        return None
-
-
 def _get_prototype_embeddings():
     """Lazy-load and cache prototype embeddings. Returns None if Ollama unavailable."""
     global _prototype_embeddings
@@ -294,7 +281,7 @@ def _get_prototype_embeddings():
         return _prototype_embeddings
     embeddings = []
     for proto in CORRECTION_PROTOTYPES:
-        vec = _get_embedding(proto)
+        vec = get_embedding(proto)
         if vec is None:
             return None
         embeddings.append(vec)
@@ -308,20 +295,11 @@ def is_correction(msg, prototype_embeddings):
     Computes cosine similarity against each prototype embedding and returns
     True if max similarity >= PROTOTYPE_THRESHOLD.
     """
-    msg_vec = _get_embedding(msg)
+    msg_vec = get_embedding(msg)
     if msg_vec is None:
         return False
-    similarities = [_cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
+    similarities = [cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
     return max(similarities) >= PROTOTYPE_THRESHOLD
-
-
-def _embedding_to_blob(vec):
-    return struct.pack(f"<{len(vec)}f", *vec)
-
-
-def _blob_to_embedding(blob):
-    n = len(blob) // 4
-    return list(struct.unpack(f"<{n}f", blob))
 
 
 def _ensure_correction_groups_table(cursor):
@@ -395,23 +373,14 @@ def _parse_corrections(project_root):
     return entries
 
 
-def _cosine_similarity(vec_a, vec_b):
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
 def _find_matching_group(cursor, embedding, threshold):
     cursor.execute("SELECT id, embedding FROM correction_groups WHERE embedding IS NOT NULL")
     rows = cursor.fetchall()
     best_id = None
     best_sim = threshold
     for row in rows:
-        stored_vec = _blob_to_embedding(row[1])
-        sim = _cosine_similarity(embedding, stored_vec)
+        stored_vec = blob_to_embedding(row[1])
+        sim = cosine_similarity(embedding, stored_vec)
         if sim > best_sim:
             best_sim = sim
             best_id = row[0]
@@ -436,15 +405,15 @@ def _check_promoted(theme_text, project_root):
     if not rows:
         return False
 
-    theme_vec = _get_embedding(theme_text)
+    theme_vec = get_embedding(theme_text)
     if theme_vec is None:
         return False
 
     for (existing_theme,) in rows:
-        existing_vec = _get_embedding(existing_theme)
+        existing_vec = get_embedding(existing_theme)
         if existing_vec is None:
             continue
-        if _cosine_similarity(theme_vec, existing_vec) > 0.8:
+        if cosine_similarity(theme_vec, existing_vec) > 0.8:
             return True
 
     return False
@@ -455,7 +424,7 @@ def _process_correction_groups(db_path, project_root):
     if not entries:
         return
 
-    first_vec = _get_embedding(entries[0]["body"])
+    first_vec = get_embedding(entries[0]["body"])
     if first_vec is None:
         print("Correction grouping: Ollama unavailable, skipping", file=sys.stderr)
         return
@@ -469,7 +438,7 @@ def _process_correction_groups(db_path, project_root):
         if idx == 0:
             vec = first_vec
         else:
-            vec = _get_embedding(entry["body"])
+            vec = get_embedding(entry["body"])
             if vec is None:
                 continue
 
@@ -480,20 +449,20 @@ def _process_correction_groups(db_path, project_root):
             row = cursor.fetchone()
             old_count = row[0]
             old_dates = json.loads(row[1]) if row[1] else []
-            old_vec = _blob_to_embedding(row[2])
+            old_vec = blob_to_embedding(row[2])
 
             new_count = old_count + 1
             old_dates.append(entry["date"])
             avg_vec = [(a * old_count + b) / new_count for a, b in zip(old_vec, vec)]
             cursor.execute(
                 "UPDATE correction_groups SET count = ?, correction_dates = ?, embedding = ?, updated_at = ? WHERE id = ?",
-                (new_count, json.dumps(old_dates), _embedding_to_blob(avg_vec), now, match_id),
+                (new_count, json.dumps(old_dates), embedding_to_blob(avg_vec), now, match_id),
             )
         else:
             cursor.execute(
                 "INSERT INTO correction_groups (theme, count, correction_dates, embedding, source, status, created_at, updated_at) "
                 "VALUES (?, 1, ?, ?, 'auto', 'accumulating', ?, ?)",
-                (entry["header"], json.dumps([entry["date"]]), _embedding_to_blob(vec), now, now),
+                (entry["header"], json.dumps([entry["date"]]), embedding_to_blob(vec), now, now),
             )
 
     cursor.execute(
