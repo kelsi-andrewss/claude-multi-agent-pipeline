@@ -48,8 +48,6 @@ if [[ -f "$SNAPSHOT" ]]; then
 
   CURRENT_CORRECTIONS=$(mtime "$HOME/.claude/corrections.md")
   CURRENT_OUTCOMES=$(mtime "$HOME/.claude/outcomes.md")
-  CURRENT_BEHAVPREFS=$(mtime "$HOME/.claude/behavioral-prefs.md")
-
   [[ "$CURRENT_CORRECTIONS" != "${CORRECTIONS_MTIME:-0}" ]] && CORRECTIONS_CHANGED=true
   [[ "$CURRENT_OUTCOMES" != "${OUTCOMES_MTIME:-0}" ]] && OUTCOMES_CHANGED=true
 
@@ -211,7 +209,6 @@ from datetime import datetime
 
 db_file = sys.argv[1]
 project_root = sys.argv[2]
-prefs_file = os.path.join(project_root, "behavioral-prefs.md")
 today = datetime.now().strftime("%Y-%m-%d")
 
 try:
@@ -228,34 +225,15 @@ if not rows:
 
 sys.path.insert(0, project_root)
 
-# Read existing prefs file to check for duplicates
-existing_content = ""
-try:
-    with open(prefs_file) as f:
-        existing_content = f.read()
-except Exception:
-    pass
-
 for theme, count, dates in rows:
-    pref_text = f"(auto-distilled) User corrected {count}x on: {theme[:200]} ({dates}). Review and refine next session."
+    pref_text = f"User corrected {count}x on: {theme[:200]} ({dates})"
 
     try:
-        with open(prefs_file, "r") as f:
-            content = f.read()
-        theme_key = theme[:40].lower()
-        lines = content.split('\n')
-        replaced = False
-        for idx, line in enumerate(lines):
-            if '(auto-distilled)' in line and theme_key in line.lower():
-                lines[idx] = f"- {pref_text}"
-                replaced = True
-                break
-        if replaced:
-            with open(prefs_file, "w") as f:
-                f.write('\n'.join(lines))
-        else:
-            with open(prefs_file, "a") as f:
-                f.write(f"\n- {pref_text}\n")
+        conn.execute(
+            "UPDATE correction_groups SET status='promoted', text=?, promoted_at=? WHERE theme=?",
+            (pref_text, today, theme)
+        )
+        conn.commit()
     except Exception:
         pass
 
@@ -264,32 +242,6 @@ for theme, count, dates in rows:
         om_write(content=pref_text, tags=["behavioral-pref"], user_id="proj:dotclaude")
     except Exception:
         pass
-
-    try:
-        conn.execute(
-            "UPDATE correction_groups SET status='promoted', promoted_at=?, text=? WHERE theme=?",
-            (today, pref_text, theme)
-        )
-        conn.commit()
-    except Exception:
-        pass
-
-# Cleanup: mark pending_promotion rows as promoted if already present in behavioral-prefs.md
-try:
-    with open(prefs_file, "r") as f:
-        prefs_content = f.read().lower()
-    remaining = conn.execute(
-        "SELECT theme FROM correction_groups WHERE status='pending_promotion'"
-    ).fetchall()
-    for (rtheme,) in remaining:
-        if '(auto-distilled)' in prefs_content and rtheme[:40].lower() in prefs_content:
-            conn.execute(
-                "UPDATE correction_groups SET status='promoted', promoted_at=? WHERE theme=?",
-                (today, rtheme)
-            )
-    conn.commit()
-except Exception:
-    pass
 
 conn.close()
 DISTILLEOF

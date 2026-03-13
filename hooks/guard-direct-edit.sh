@@ -46,7 +46,6 @@ if [[ "$FILE_PATH" == "$HOME/.claude/"* ]]; then
       # Behavioral/logging files the main session writes
       "$HOME/.claude/corrections.md"|\
       "$HOME/.claude/outcomes.md"|\
-      "$HOME/.claude/behavioral-prefs.md"|\
       "$HOME/.claude/session-handoff.md"|\
       "$HOME/.claude/tool-learnings.md"|\
       "$HOME/.claude/todos.md"|\

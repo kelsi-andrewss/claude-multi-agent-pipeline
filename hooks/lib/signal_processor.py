@@ -419,26 +419,32 @@ def _find_matching_group(cursor, embedding, threshold):
 
 
 def _check_promoted(theme_text, project_root):
-    prefs_path = os.path.join(project_root, "behavioral-prefs.md")
-    if not os.path.isfile(prefs_path):
+    """Check if theme is already promoted in correction_groups DB."""
+    db_path = os.path.join(project_root, ".claude", "epics.db")
+    if not os.path.isfile(db_path):
         return False
 
-    with open(prefs_path) as f:
-        text = f.read()
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        rows = conn.execute(
+            "SELECT theme FROM correction_groups WHERE status='promoted'"
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return False
 
-    pref_lines = [line.strip()[2:] for line in text.split('\n') if line.strip().startswith('- ')]
-    if not pref_lines:
+    if not rows:
         return False
 
     theme_vec = _get_embedding(theme_text)
     if theme_vec is None:
         return False
 
-    for pref_line in pref_lines:
-        pref_vec = _get_embedding(pref_line)
-        if pref_vec is None:
+    for (existing_theme,) in rows:
+        existing_vec = _get_embedding(existing_theme)
+        if existing_vec is None:
             continue
-        if _cosine_similarity(theme_vec, pref_vec) > 0.8:
+        if _cosine_similarity(theme_vec, existing_vec) > 0.8:
             return True
 
     return False

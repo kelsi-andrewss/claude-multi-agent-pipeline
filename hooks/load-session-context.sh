@@ -329,7 +329,7 @@ if pending:
         theme, status, count, dates = r[0], r[1], r[2], r[3]
         promoted_at = r[4] if len(r) > 4 else ""
         print(f'    [{count}x] "{theme}" (evidence: {dates})')
-    print("  Process pending promotions: use /prefs add or update the text column in correction_groups")
+    print("  Process pending promotions: use /prefs to review and promote")
 if accumulating:
     print("  Accumulating:")
     for r in accumulating:

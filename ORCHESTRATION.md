@@ -45,7 +45,7 @@ Before defaulting, query OpenMemory for tool learnings about the model + file ty
 - Exact code provided or pure deletion
 - No regex construction or expansion
 - No complex conditional logic
-- Target file is not a pipeline file (ORCHESTRATION.md, skills/, hooks/, settings.json, CLAUDE.md, behavioral-prefs.md)
+- Target file is not a pipeline file (ORCHESTRATION.md, skills/, hooks/, settings.json, CLAUDE.md)
 
 Pipeline files are excluded because errors compound — a bad edit affects every future story, not just the current one.
 
@@ -156,11 +156,11 @@ One-shot pipeline: QUEUE→PLAN→DRAFT→RUN→MERGE. Default for new projects,
 
 ## 13. MEMORY
 
-Two layers: **eager** (CLAUDE.md, ORCHESTRATION.md, behavioral-prefs.md — loaded at session start) and **lazy** (OpenMemory — queried on demand via compact session-start query).
+Two layers: **eager** (CLAUDE.md, ORCHESTRATION.md, rendered-prefs.md — loaded at session start) and **lazy** (OpenMemory — queried on demand via compact session-start query).
 
 All writes go through `hooks/lib/om_write.py`. Tag taxonomy: `behavioral-pref`, `tool-learning`, `decision`, `prompt-pattern`, `session-summary`. Adding a new tag requires updating om_write.py ALLOWED_TAGS, BUDGETS, CLAUDE.md integration surfaces, and refs/orch-memory.md.
 
-Auto-distillation: stop hook promotes correction patterns (count >= 3) to behavioral-prefs.md + OpenMemory. No manual distillation step.
+Auto-distillation: stop hook promotes correction patterns (count >= 3) to correction_groups DB + OpenMemory. No manual distillation step.
 
 Anti-bloat: per-category budgets, embedding-based dedup (0.85), decay-weighted pruning at session start.
 
@@ -172,7 +172,7 @@ Full reference: `refs/orch-memory.md`.
 
 Friction = deviations from the expected path. Captured as corrections → correction_groups table (epics.db). Two detection methods: structural (stop hook pattern matching on transcript) and manual (Claude appends to corrections.md).
 
-Auto-promotion: when a correction theme reaches count >= 3, stop hook auto-promotes to behavioral-prefs.md + OpenMemory. No manual gate.
+Auto-promotion: when a correction theme reaches count >= 3, stop hook auto-promotes to correction_groups DB + OpenMemory. No manual gate.
 
 Full reference: `refs/orch-friction.md`.
 

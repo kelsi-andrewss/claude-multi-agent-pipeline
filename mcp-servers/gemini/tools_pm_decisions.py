@@ -180,7 +180,7 @@ def register(mcp):
                 "confidence": 0,
                 "reason": "insufficient data",
                 "evidence_count": len(rows),
-                "fallback": "check behavioral-prefs.md",
+                "fallback": "check correction_groups table or /prefs list",
             })
 
         now = time.time()
@@ -213,7 +213,7 @@ def register(mcp):
                 "confidence": 0,
                 "reason": "no weighted signal found",
                 "evidence_count": len(rows),
-                "fallback": "check behavioral-prefs.md",
+                "fallback": "check correction_groups table or /prefs list",
             })
 
         sorted_paths = sorted(path_weights.items(), key=lambda x: x[1], reverse=True)
@@ -243,7 +243,7 @@ def register(mcp):
         """Surface preference patterns from accumulated decision signal data.
 
         Aggregates signal scores across decisions to identify strong preferences
-        suitable for promotion to behavioral-prefs.md.
+        suitable for promotion to correction_groups DB.
 
         Args:
             decision_type: Filter by category (routing, scope, communication, architecture). Omit for all types.
