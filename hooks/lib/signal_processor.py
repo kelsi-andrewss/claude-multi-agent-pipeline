@@ -74,18 +74,6 @@ def parse_transcript_turns(transcript_path):
     return turns
 
 
-IMPERATIVE_STARTS = re.compile(
-    r'^(use |stop |don\'t |do not |just |why didn\'t |why don\'t |why aren\'t |'
-    r'make |run |try |ship |log |fix |check |read |write |call |add |remove |'
-    r'never |always )',
-    re.IGNORECASE
-)
-
-META_PATTERN = re.compile(
-    r"you'?ve been |you'?re not |you keep |you should |you always |you never ",
-    re.IGNORECASE
-)
-
 SYSTEM_MSG = re.compile(
     r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
     r'^Base directory for this skill|'
@@ -100,35 +88,40 @@ POSITIVE_INTENT = re.compile(
     re.IGNORECASE
 )
 
-EXTERNAL_CONTENT = re.compile(
-    r'^\w[\w\s]{0,30}\s+\[\d{1,2}:\d{2}\s*[AP]M\]|'  # Slack: "Username  [9:52 PM]"
-    r'\[\d{1,2}:\d{2}\s*[AP]M\]|'                       # Bare timestamp: "[9:52 PM]"
-    r'This session is being continued|'                   # Exact continuation
-    r'session.*continued from|'                           # Variant continuations
-    r'continued from previous|'                           # Variant continuations
-    r'^(~~~|```)',                                         # Code fence starts
-    re.MULTILINE
-)
-
-
-def is_frustration(msg):
-    if len(msg) > 200:
-        return False
-    if msg.rstrip().endswith("!!") or msg.rstrip().endswith("??"):
+def is_structural_content(msg):
+    """Pre-filter: returns True if message is structural/pasted content that should
+    be rejected before embedding. Catches code fences, long messages, markdown
+    headers, timestamps, and URL-heavy pastes."""
+    if len(msg) > 300:
         return True
-    caps_words = [w for w in msg.split() if w.isupper() and len(w) > 1]
-    return len(caps_words) >= 2
+    if "```" in msg or "~~~" in msg:
+        return True
+    if msg.count("\n") > 3:
+        return True
+    if re.search(r"^#{1,6}\s", msg, re.MULTILINE):
+        return True
+    if re.search(r"\[\d{1,2}:\d{2}\s*[AP]M\]", msg):
+        return True
+    if len(re.findall(r"https?://", msg)) >= 3:
+        return True
+    return False
 
 
 def extract_corrections(turns):
-    """Extract user corrections with intensity weights.
+    """Extract user corrections using structural pre-filter + semantic delta.
 
     Returns list of dicts: {turn_idx, content, weight}
-    Weight: 1.0 normal, 2.0 frustration, 3.0 repeated (same correction theme twice+)
+    Weight: 1.0 normal, 3.0 repeated (same correction theme twice+).
+    Returns empty list if Ollama is unavailable (no regex fallback).
     """
+    prototype_embs = _get_prototype_embeddings()
+    if prototype_embs is None:
+        return []
+
     corrections = []
     seen_themes = {}
     prev_assistant_had_tool_use = False
+    embedding_calls = 0
 
     for i, turn in enumerate(turns):
         if turn["role"] == "assistant":
@@ -144,25 +137,19 @@ def extract_corrections(turns):
         if POSITIVE_INTENT.match(msg):
             prev_assistant_had_tool_use = False
             continue
-        if EXTERNAL_CONTENT.search(msg):
+        if is_structural_content(msg):
             prev_assistant_had_tool_use = False
             continue
 
-        matched = False
-
-        if len(msg) < 150 and prev_assistant_had_tool_use and IMPERATIVE_STARTS.match(msg):
-            matched = True
-        if not matched and prev_assistant_had_tool_use and is_frustration(msg):
-            matched = True
-        if not matched and META_PATTERN.search(msg):
-            matched = True
+        if embedding_calls < MAX_EMBEDDING_CALLS_PER_SESSION:
+            embedding_calls += 1
+            matched = is_correction(msg, prototype_embs)
+        else:
+            matched = False
 
         if matched:
             theme_key = msg[:30].lower().strip()
             weight = 1.0
-
-            if is_frustration(msg):
-                weight = 2.0
 
             if theme_key in seen_themes:
                 weight = 3.0
@@ -184,7 +171,7 @@ def extract_corrections_from_transcript(transcript_path):
 
     Combines parse_transcript_turns() and extract_corrections() into a single
     file-path-in, corrections-out call. All filtering (SYSTEM_MSG, POSITIVE_INTENT,
-    EXTERNAL_CONTENT) is applied via extract_corrections().
+    structural pre-filter) is applied via extract_corrections().
 
     Args:
         transcript_path: Path to JSONL transcript file.
@@ -272,6 +259,22 @@ OLLAMA_MODEL = "nomic-embed-text"
 SIMILARITY_THRESHOLD = 0.85
 PROMOTION_THRESHOLD = 3
 
+CORRECTION_PROTOTYPES = [
+    "stop doing that, I told you not to",
+    "why did you ignore my instruction",
+    "use the ship skill instead",
+    "you keep making the same mistake",
+    "that's wrong, do it this way instead",
+    "why aren't you using worktrees",
+    "I already told you to log that",
+    "don't narrate what you're about to do",
+    "why did you skip the pipeline",
+    "you're not listening to me",
+]
+PROTOTYPE_THRESHOLD = 0.55
+MAX_EMBEDDING_CALLS_PER_SESSION = 5
+_prototype_embeddings = None
+
 
 def _get_embedding(text):
     payload = json.dumps({"model": OLLAMA_MODEL, "prompt": text}).encode()
@@ -282,6 +285,34 @@ def _get_embedding(text):
         return data.get("embedding")
     except (URLError, OSError, json.JSONDecodeError, KeyError):
         return None
+
+
+def _get_prototype_embeddings():
+    """Lazy-load and cache prototype embeddings. Returns None if Ollama unavailable."""
+    global _prototype_embeddings
+    if _prototype_embeddings is not None:
+        return _prototype_embeddings
+    embeddings = []
+    for proto in CORRECTION_PROTOTYPES:
+        vec = _get_embedding(proto)
+        if vec is None:
+            return None
+        embeddings.append(vec)
+    _prototype_embeddings = embeddings
+    return _prototype_embeddings
+
+
+def is_correction(msg, prototype_embeddings):
+    """Returns True if msg is semantically similar to a correction prototype.
+
+    Computes cosine similarity against each prototype embedding and returns
+    True if max similarity >= PROTOTYPE_THRESHOLD.
+    """
+    msg_vec = _get_embedding(msg)
+    if msg_vec is None:
+        return False
+    similarities = [_cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
+    return max(similarities) >= PROTOTYPE_THRESHOLD
 
 
 def _embedding_to_blob(vec):
