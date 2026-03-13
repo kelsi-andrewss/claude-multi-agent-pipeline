@@ -189,10 +189,8 @@ OMCOMPACTEOF
   fi
   SNAPSHOT="/tmp/session-mtimes-${SESSION_ID}"
   OUTCOMES_MTIME=$(_mtime "$HOME/.claude/outcomes.md")
-  CORRECTIONS_MTIME=$(_mtime "$HOME/.claude/corrections.md")
   cat > "$SNAPSHOT" <<SNAP
 OUTCOMES_MTIME=$OUTCOMES_MTIME
-CORRECTIONS_MTIME=$CORRECTIONS_MTIME
 SNAP
 
   # Session agenda + stale detection (single Python block)
