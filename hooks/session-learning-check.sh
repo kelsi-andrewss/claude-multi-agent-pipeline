@@ -395,7 +395,7 @@ project_root = sys.argv[2]
 try:
     conn = sqlite3.connect(db_file, timeout=5)
     rows = conn.execute(
-        "SELECT theme FROM correction_groups WHERE status='promoted' AND promoted_at IS NOT NULL"
+        "SELECT theme FROM correction_groups WHERE status='promoted' AND date(promoted_at) = date('now', 'localtime')"
     ).fetchall()
     conn.close()
 except Exception:
