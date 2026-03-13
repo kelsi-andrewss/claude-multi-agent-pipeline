@@ -87,7 +87,7 @@ Dispatch two background agents using the Agent tool with `run_in_background=true
 
 ### Gemini agent
 
-Launch: `Agent("gemini", <prompt below>, run_in_background=true)`
+Launch: `Agent(subagent_type="gemini-researcher", prompt=<prompt below>, run_in_background=true)`
 
 The Gemini agent prompt must be self-contained. Construct it as follows:
 
@@ -96,8 +96,7 @@ You are a technical researcher doing broad discovery on a topic. Your job is to 
 as many relevant facts as possible across official docs, blog posts, StackOverflow,
 GitHub issues, and release notes.
 
-TOOLS: First, run: ToolSearch: select:mcp__gemini__gemini_chat
-Use gemini_chat for all research. It has native Google Search grounding built in —
+TOOLS: Use gemini_chat for all research. It has native Google Search grounding built in —
 you do NOT need separate search tools.
 
 TOPIC: <topic text>
@@ -152,7 +151,7 @@ or any interactive tools.
 
 ### Claude agent
 
-Launch: `Agent("claude", <prompt below>, run_in_background=true)`
+Launch: `Agent(subagent_type="claude-researcher", prompt=<prompt below>, run_in_background=true)`
 
 The Claude agent prompt must be self-contained. Construct it as follows:
 
@@ -161,8 +160,7 @@ You are a technical researcher doing deep extraction from web sources. Your job 
 find authoritative sources and extract precise, specific facts — API shapes, version
 numbers, configuration requirements, exact error messages, code examples.
 
-TOOLS: First, run: ToolSearch: select:WebSearch,WebFetch
-Use WebSearch to find sources, then WebFetch to extract content from the best results.
+TOOLS: Use WebSearch to find sources, then WebFetch to extract content from the best results.
 
 IMPORTANT — WebFetch needs targeted prompts. Do NOT use generic prompts like "summarize
 this page". Instead, ask specific questions per fetch:
