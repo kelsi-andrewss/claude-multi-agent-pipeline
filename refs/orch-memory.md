@@ -5,7 +5,7 @@
 ## Architecture
 
 Two layers:
-1. **Eager** — CLAUDE.md, ORCHESTRATION.md, behavioral-prefs.md. Loaded every session.
+1. **Eager** — CLAUDE.md, ORCHESTRATION.md, rendered-prefs.md (generated from DB). Loaded every session.
 2. **Lazy** — OpenMemory queries at session start (top 5 per tag) and on demand.
 
 All writes go through `hooks/lib/om_write.py`. No direct SQL inserts.
@@ -52,7 +52,7 @@ All writes go through `hooks/lib/om_write.py`. No direct SQL inserts.
 Stop hook flow:
 1. Detect corrections in transcript (imperative redirect, frustration, meta-comment patterns)
 2. Write to `correction_groups` table (theme, count, dates)
-3. When count >= 3: auto-promote → behavioral-prefs.md + OpenMemory via om_write
+3. When count >= 3: auto-promote → correction_groups DB (status='promoted') + OpenMemory via om_write
 4. Prefixed with "(auto-distilled)" for optional refinement at session start
 
 ---

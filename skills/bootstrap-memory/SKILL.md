@@ -34,11 +34,12 @@ Incremental seeding of OpenMemory with project knowledge. Safe to re-run — che
    - Otherwise: `openmemory_store(content="<learning_text>", tags=["tool-learning"], user_id="global", metadata={"sector": "procedural", "simhash": "<simhash>"})`
    - Count stored entries as `learning_count`
 
-5. **Shadow behavioral prefs.** Read `~/.claude/behavioral-prefs.md`. For each `- ` prefixed line under `##` headings (skip the metadata comment and blank lines):
-   - Extract the preference text (strip leading `- `)
-   - Compute `simhash = md5(pref_text)[:16]`
-   - Call `openmemory_query(query=<pref_text>, k=3, user_id="proj:dotclaude")` — apply same dedup logic
-   - Otherwise: `openmemory_store(content="<pref_text>", tags=["behavioral-pref"], user_id="proj:dotclaude", metadata={"sector": "procedural", "simhash": "<simhash>"})`
+5. **Shadow behavioral prefs.** Query correction_groups DB for promoted/manual entries:
+   - Run: `sqlite3 ~/.claude/.claude/epics.db "SELECT text FROM correction_groups WHERE status IN ('promoted') OR source='manual' AND text != '' ORDER BY updated_at DESC;"`
+   - For each non-empty result:
+     - Compute `simhash = md5(text)[:16]`
+     - Call `openmemory_query(query=<text>, k=3, user_id="proj:dotclaude")` — apply same dedup logic
+     - Otherwise: `openmemory_store(content="<text>", tags=["behavioral-pref"], user_id="proj:dotclaude", metadata={"sector": "procedural", "simhash": "<simhash>"})`
    - Count stored entries as `pref_count`
 
 6. **Report.** Print: "Bootstrapped N memories (P prompt patterns, D decisions, L tool learnings, B behavioral prefs). Skipped J duplicates."
