@@ -94,7 +94,7 @@ if db_file and os.path.isfile(db_file):
         conn.execute("""CREATE TABLE IF NOT EXISTS correction_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             theme TEXT NOT NULL,
-            status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted')),
+            status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')),
             count INTEGER DEFAULT 1,
             correction_dates TEXT DEFAULT '[]',
             embedding BLOB,
@@ -122,7 +122,7 @@ def upsert_correction(theme_text):
             new_count = row[1] + 1
             old_dates = json.loads(row[2]) if row[2] else []
             old_dates.append(today)
-            new_status = row[3] if row[3] == 'promoted' else ('pending_promotion' if new_count >= 3 else row[3])
+            new_status = row[3] if row[3] in ('promoted', 'dismissed') else ('pending_promotion' if new_count >= 3 else row[3])
             conn.execute(
                 "UPDATE correction_groups SET count=?, correction_dates=?, status=? WHERE id=?",
                 (new_count, json.dumps(old_dates), new_status, row[0])
@@ -397,6 +397,27 @@ project_root = sys.argv[2]
 
 try:
     conn = sqlite3.connect(db_file, timeout=5)
+    schema_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='correction_groups'"
+    ).fetchone()
+    if schema_sql and "'dismissed'" not in schema_sql[0]:
+        conn.executescript("""
+            ALTER TABLE correction_groups RENAME TO correction_groups_old;
+            CREATE TABLE correction_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                theme TEXT NOT NULL,
+                status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')),
+                count INTEGER DEFAULT 1,
+                correction_dates TEXT DEFAULT '[]',
+                embedding BLOB,
+                promoted_at TEXT,
+                created_at INTEGER,
+                updated_at INTEGER
+            );
+            INSERT INTO correction_groups SELECT * FROM correction_groups_old;
+            DROP TABLE correction_groups_old;
+            CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status);
+        """)
     rows = conn.execute(
         "SELECT theme FROM correction_groups WHERE status='promoted' AND date(promoted_at) = date('now', 'localtime')"
     ).fetchall()
@@ -415,7 +436,7 @@ except ImportError:
 
 for (theme,) in rows:
     try:
-        result = generate_hook(theme, project_root=project_root)
+        result = generate_hook(theme, project_root=project_root, db_file=db_file)
         if result is None:
             print(f"Hook eval: not hookable: {theme[:80]}", file=sys.stderr)
         elif result.get("skipped"):

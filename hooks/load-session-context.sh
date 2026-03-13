@@ -373,6 +373,7 @@ if not tables:
 rows = query_db(
     "SELECT theme, status, count, correction_dates, promoted_at "
     "FROM correction_groups "
+    "WHERE status != 'dismissed' "
     "ORDER BY CASE status WHEN 'pending_promotion' THEN 0 WHEN 'accumulating' THEN 1 WHEN 'promoted' THEN 2 END, count DESC;"
 )
 if not rows:

@@ -298,7 +298,7 @@ def _ensure_correction_groups_table(cursor):
         "CREATE TABLE IF NOT EXISTS correction_groups ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, "
         "theme TEXT NOT NULL, "
-        "status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted')), "
+        "status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')), "
         "count INTEGER DEFAULT 1, "
         "correction_dates TEXT DEFAULT '[]', "
         "embedding BLOB, "
