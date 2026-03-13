@@ -167,7 +167,7 @@ SUMMARYEOF
 # Section 5: Tool learning sync via om_write
 # ============================================================
 python3 - "$HOME/.claude" <<'LEARNEOF'
-import os, sys
+import hashlib, os, sqlite3, sys
 
 project_root = sys.argv[1]
 learnings_file = os.path.join(project_root, "tool-learnings.md")
@@ -190,11 +190,27 @@ for line in content.splitlines():
 if not entries:
     sys.exit(0)
 
+om_db = os.path.expanduser("~/.claude/.claude/openmemory.sqlite")
+existing_hashes = set()
+if os.path.isfile(om_db):
+    try:
+        conn = sqlite3.connect(om_db, timeout=5)
+        rows = conn.execute(
+            "SELECT simhash FROM memories WHERE tags LIKE '%tool-learning%'"
+        ).fetchall()
+        conn.close()
+        existing_hashes = {r[0] for r in rows if r[0]}
+    except Exception:
+        pass
+
 sys.path.insert(0, project_root)
 try:
-    from hooks.lib.om_write import om_write
+    from hooks.lib.om_write import om_write, _compute_simhash
     for entry in entries:
-        om_write(content=entry, tags=["tool-learning"], user_id="global")
+        if _compute_simhash(entry) not in existing_hashes:
+            om_write(content=entry, tags=["tool-learning"], user_id="global")
+        else:
+            print(f"tool-learning: skipped (already in OM): {entry[:60]}", file=sys.stderr)
 except Exception:
     pass
 LEARNEOF
