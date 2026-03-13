@@ -26,6 +26,47 @@ User has requested: `/run-stories {{args}}`
 
 ---
 
+## Run state management
+
+At the start of execution (before MCP delegation), initialize the run state database:
+
+```bash
+SESSION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+python3 ~/.claude/scripts/init-run-db.py --session-id "$SESSION_ID" --dev-branch dev
+```
+
+If init fails (exit code 2), stop and report: "Run state initialization failed: <stderr>".
+
+Store $SESSION_ID for use throughout the run. Pass it to scripts that write to run-state.db.
+
+At the end of execution (after Step 6 report, or on any early exit), clean up:
+
+```bash
+python3 ~/.claude/scripts/cleanup_run_state.py --session-id "$SESSION_ID"
+```
+
+---
+
+## Script output handling
+
+All scripts in `~/.claude/scripts/` emit a single JSON object on stdout. Parse with:
+
+```bash
+RESULT=$(bash ~/.claude/scripts/<script>.sh <args>)
+echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'])"
+```
+
+If JSON parsing fails (python3 exits non-zero), log the raw output and treat as a system error:
+- For build-verify: treat as FAIL
+- For diff-gate: treat as non-blocking warning
+- For worktree-setup: treat as BLOCKED for that story
+- For worktree-cleanup: note in report, continue
+- For merge-gate: treat as BLOCKED for that story
+
+Exit codes: 0 = success (check JSON for functional result), 1 = functional error (check JSON), 2 = system error.
+
+---
+
 ## MCP Delegation (ORCHESTRATION §15)
 
 Steps 1–3 and the enrichment portion of Step 4 (pitfalls, learnings, gitignore checks) involve 10+ MCP calls whose verbose JSON responses consume main-session context. **Delegate them to a single foreground `general-purpose` subagent.**
@@ -37,6 +78,11 @@ Steps 1–3 and the enrichment portion of Step 4 (pitfalls, learnings, gitignore
    - The enrichment instructions (pitfalls, learnings, read-only context, gitignore — copied from Step 4's "Enrichment reference" section)
    - The resolved `{{args}}` value and project root path
    - ToolSearch instructions: `select:mcp__gemini__pm_get_story,mcp__gemini__pm_view,mcp__gemini__pm_list_stories,mcp__gemini__pm_check_conflicts,mcp__gemini__pm_dev_branch,mcp__gemini__pm_list_patterns` and `select:mcp__openmemory__openmemory_query`
+   - For each story in the execution plan, call worktree-setup.sh to pre-create the worktree:
+     ```bash
+     WORKTREE_RESULT=$(bash ~/.claude/scripts/worktree-setup.sh --project-root <project-root> --branch <story-branch> --worktree-path <worktree-path> --dev-branch <dev-branch>)
+     ```
+     Include the result status in the STORIES return data. If setup fails, mark the story as SKIPPED with reason.
 2. Append the return format below to the prompt
 3. Launch: `Agent(subagent_type="general-purpose", prompt=<constructed>)` — **foreground**, not background
 4. Parse the structured response
@@ -67,6 +113,7 @@ STORIES:
       <formatted openmemory_query output, or "none">
     read_only_context: [path1, path2] | []
     gitignore_warnings: [warning] | []
+    worktree_status: success | error:<message>
 
 NEEDS_PLANNING: [story-XXX] | none
 SKIPPED: story-AAA (reason) | none
@@ -160,34 +207,33 @@ If ANY story uses a bare filename (no symbol), it conflicts with all other stori
 
 ---
 
-## Step 2c: Build verification (reference)
+## Step 2c: Build verification (via shared script)
 
 This block defines the reusable build verification logic referenced by both the bootstrap gate and Step 4.1 (batch verification). It is not executed directly — it is invoked by those steps.
 
-### Project-type detection
+### Build verification
 
-Detect the project type by checking for build system files in the project root:
+Run build verification using the shared script:
 
-| File | Project type | Build command | Lint command |
-|---|---|---|---|
-| `package.json` | Node/TS | `npm install && npm run build` (or `npx tsc --noEmit` if no `build` script in package.json) | `npm run lint` (only if `lint` script exists in package.json) |
-| `pubspec.yaml` | Flutter | `flutter pub get && flutter analyze` | (included in analyze) |
-| `pyproject.toml` | Python | `pip install -e . 2>&1 \| tail -5` | — |
-| `Cargo.toml` | Rust | `cargo check && cargo clippy --quiet 2>&1` | (included in clippy) |
-| `go.mod` | Go | `go build ./... && go vet ./...` | (included in vet) |
+```bash
+RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <project-root>)
+```
 
-### Failure semantics
+Parse the JSON result:
+- `status: "success"` with `build_result: "pass"` → PASS
+- `status: "success"` with `build_result: "pass"` and `lint_warnings` > 0 → PASS with warnings (log warning count, do not block)
+- `status: "success"` with `build_result: "skip"` (project_type is `"unknown"`) → SKIP (no recognized build system). Log: "No recognized build system — skipping batch verification."
+- `status: "error"` with `build_result: "fail"` (exit code 1) → build FAIL (blocks downstream). Build output is in `build_output` field.
+- `status: "error"` (exit code 2) → system error, treat as FAIL
 
-- Non-zero exit code on build/typecheck command = **FAIL** (blocks downstream).
-- Lint warnings with zero exit code = **PASS with warnings** (log warning count, do not block).
-- No recognized build system file found = **SKIP** verification. Log: "No recognized build system — skipping batch verification."
+If JSON parse fails, log raw output and mark as FAIL.
 
 ### Bootstrap gate (existing behavior, unchanged)
 
 After the bootstrap batch (Group 0) completes and merges into the dev branch, before launching Group 1:
 
 1. Checkout the dev branch (post-bootstrap-merge).
-2. Run build verification using the commands above.
+2. Run build verification using `build-verify.sh` as described above.
 3. If PASS → continue to Group 1 (launch feature stories).
 4. If FAIL → report the error, mark all remaining stories as BLOCKED with reason "Bootstrap build verification failed: <error>", stop execution.
 
@@ -267,8 +313,6 @@ Project root: <project-root>
 
 WORKTREE: <worktree-path>
 All reads and writes MUST use paths under this directory.
-Before doing anything else, run: git -C <worktree-path> branch --show-current
-Confirm it prints <story-branch>. If not, STOP and report branch mismatch.
 Do NOT edit files outside this worktree.
 
 Do not edit any protected files. <If protected-files.md exists: "Protected files: <list>">
@@ -289,48 +333,48 @@ Gemini is a research tool for the orchestrator — not available to coders.
 
 ## Steps
 
-1. Create the story worktree using direct git commands:
+1. Verify the story worktree (pre-created by the resolution subagent):
 
-   ```bash
-   cd <project-root>
-   git fetch origin <dev-branch>
-   git show-ref --verify --quiet "refs/heads/<story-branch>" || git branch "<story-branch>" <dev-branch>
-   git worktree list | grep -q '<worktree-path>' || git worktree add <worktree-path> "<story-branch>"
-   ```
-
-2. Verify worktree branch:
    ```bash
    git -C <worktree-path> branch --show-current
    ```
+
    Must print `<story-branch>`. If not, STOP and report branch mismatch.
 
-3. Mark the story in-progress and record the branch/worktree in the DB:
+   If the worktree was not pre-created (worktree_status was error), create it now:
+   ```bash
+   WORKTREE_RESULT=$(bash ~/.claude/scripts/worktree-setup.sh --project-root <project-root> --branch <story-branch> --worktree-path <worktree-path> --dev-branch <dev-branch>)
+   ```
+
+   Parse the JSON result. If `status` is not `"success"` or `verified` is not `true`, STOP and report: "Worktree setup failed: <error from JSON>".
+
+2. Mark the story in-progress and record the branch/worktree in the DB:
    Call: pm_update_story("<story_id>", state="in-progress", branch="<story-branch>", worktree_path="<worktree-path>", worktree_active=True, force=True)
    (Use force=True so this succeeds regardless of whether the story is in ready or draft state)
 
-4. Read the plan file at `<plan_file>`. Understand what changes are required.
+3. Read the plan file at `<plan_file>`. Understand what changes are required.
 
-5. Work **exclusively** inside `<worktree-path>`. Never edit files in `<project-root>` directly.
+4. Work **exclusively** inside `<worktree-path>`. Never edit files in `<project-root>` directly.
 
-6. Implement the plan: <agent-approach>
+5. Implement the plan: <agent-approach>
    - Focus on the files listed in the write scope if provided
    - Do not modify files outside the write scope unless the plan explicitly requires it
    - Reference read-only context files for interfaces and utilities but do not modify them
 
-7. Stage and commit changes inside the worktree:
+6. Stage and commit changes inside the worktree:
    - Stage only the files you modified or created: `git -C <worktree-path> add <file1> <file2> ...`
    - Do NOT use `git add -A` or `git add .`
    - Commit: `git -C <worktree-path> commit -m "<story_id>: <title>"`
 
-8. Push the story branch:
+7. Push the story branch:
    ```bash
    git -C <worktree-path> push -u origin <story-branch>
    ```
 
-9. After all changes are committed and pushed, mark done:
+8. After all changes are committed and pushed, mark done:
    Call: pm_update_story("<story_id>", state="done")
 
-10. Return exactly one of:
+9. Return exactly one of:
    - Success: "DONE: <story-branch> pushed. Commit: <short-hash>. State: done. Files changed: <list of files staged>. Notes: <any relevant notes or 'none'>"
    - Decision needed (max 1 per story): "NEED_DECISION: <blocker>\nOption A: <option>\nOption B: <option>\n[Option C: <option>]"
    - Failure: "BLOCKED: <clear reason why the story could not be completed>"
@@ -380,11 +424,9 @@ Write tests from the plan's acceptance criteria and function signatures ONLY. Yo
 
 1. Create the test worktree from the dev branch (NOT the story branch — you must not see the coder's changes):
    ```bash
-   cd <project-root>
-   git fetch origin <dev-branch>
-   git show-ref --verify --quiet "refs/heads/<story-branch>--test" || git branch "<story-branch>--test" <dev-branch>
-   git worktree list | grep -q '<test-worktree-path>' || git worktree add <test-worktree-path> "<story-branch>--test"
+   WORKTREE_RESULT=$(bash ~/.claude/scripts/worktree-setup.sh --project-root <project-root> --branch <story-branch>--test --worktree-path <test-worktree-path> --dev-branch <dev-branch>)
    ```
+   Parse the JSON result. If `status` is not `"success"` or `verified` is not `true`, STOP and report: "Test worktree setup failed: <error from JSON>".
 
 2. Read the plan file. Extract acceptance criteria and function signatures.
 
@@ -441,11 +483,16 @@ After each batch's stories are merged into dev via Step 5c, verify the dev branc
 ### Procedure
 
 1. Checkout the dev branch (post-merge state).
-2. Run build verification using the project-type detection and commands from Step 2c.
-3. Results:
+2. Run build verification:
+   ```bash
+   RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <project-root>)
+   ```
+3. Parse JSON result and apply the same pass/fail/skip logic as Step 2c.
+4. Results:
    - **PASS**: Log `"Batch N verification: PASS"`. Continue to the next batch.
-   - **PASS with lint warnings**: Log `"Batch N verification: PASS (warnings: <count>)"`. Continue to the next batch. Include warning summary in Step 6 report.
-   - **FAIL**: Log `"Batch N verification: FAIL — <error output (last 30 lines)>"`. Mark ALL stories in subsequent batches as BLOCKED with reason `"Blocked: batch N verification failed"`. Do NOT block stories in the current batch (they already merged successfully). Stop executing further batches.
+   - **PASS with lint warnings**: Log `"Batch N verification: PASS (warnings: <count from lint_warnings>)"`. Continue. Include warning summary in Step 6 report.
+   - **FAIL**: Log `"Batch N verification: FAIL — <build output from JSON>"`. Mark ALL stories in subsequent batches as BLOCKED with reason `"Blocked: batch N verification failed"`. Stop executing further batches.
+   - **SKIP**: Log `"Batch N verification: SKIP (no build system)"`. Continue.
 
 ---
 
@@ -478,10 +525,12 @@ If the agent result doesn't include usage metadata, skip — merge-worktree hand
 For each DONE story, verify only expected files changed:
 
 ```bash
-git -C <worktree-path> diff --name-only <dev-branch>
+DIFF_RESULT=$(bash ~/.claude/scripts/diff-gate.sh --worktree-path <worktree-path> --dev-branch <dev-branch> --write-files "<comma-separated write_files>")
 ```
 
-Compare against the story's write_files. If unexpected files changed, warn but continue — the coder may have legitimately needed adjacent files. Log any discrepancies.
+Parse the JSON result:
+- If `unexpected_files` is non-empty: log the unexpected files as a warning, but continue (non-blocking). The coder may have legitimately needed adjacent files.
+- If `status` is `"error"`: log the error, continue (non-blocking).
 
 ### Step 5b: Per-story testing
 
@@ -489,71 +538,62 @@ Compare against the story's write_files. If unexpected files changed, warn but c
 
 For each DONE story that has `test_files` and both the coder and test agent returned DONE:
 
-1. **Create a merge-candidate worktree** from the story branch:
+1. **Run the merge gate**:
    ```bash
-   MERGE_CANDIDATE="<project-root>/.claude/worktrees/merge-candidate/<story-slug>"
-   git worktree add "$MERGE_CANDIDATE" <story-branch>
+   GATE_RESULT=$(python3 ~/.claude/scripts/merge-gate.py \
+     --merge-candidate "<project-root>/.claude/worktrees/merge-candidate/<story-slug>" \
+     --story-branch <story-branch> \
+     --test-branch <story-branch>--test \
+     --dev-branch <dev-branch> \
+     --test-cmd "<detected-test-command>" \
+     --test-files "<comma-separated test_files>")
    ```
 
-2. **Cherry-pick the test agent's commit(s)** into the merge-candidate worktree:
-   ```bash
-   # Get the test agent's commit hash(es) from the --test branch
-   TEST_COMMITS=$(git -C "$MERGE_CANDIDATE" log --oneline origin/<story-branch>--test --not origin/<dev-branch> --reverse --format=%H)
-   git -C "$MERGE_CANDIDATE" cherry-pick $TEST_COMMITS
-   ```
-   If cherry-pick conflicts, this is a file overlap between coder and test agent — attribute to **test agent** (wrote to files outside test_files scope). Log friction: `category: retry, type: automatic, skill: run-stories, detail: "cherry-pick conflict — test agent wrote outside test_files scope"`. Skip to test agent retry (step 4).
+   Parse the JSON result.
 
-3. **Run the test suite** in the merge-candidate worktree. Use the project's test runner (detect from `package.json` scripts, `pytest.ini`, `_test.go`, etc.). Run only the test files from `test_files`, not the full suite:
-   ```bash
-   cd "$MERGE_CANDIDATE" && <test-command> <test_files>
-   ```
-   Capture exit code and full output.
+2. **If `test_passed` is true**: proceed to step 5 (merge test commits into code worktree).
 
-4. **Failure attribution** — classify test output and retry (max 1 retry per agent, max 2 total):
+3. **If `test_passed` is false**: use `classification` to decide retry strategy:
 
-   | Signal | Attribution | Action |
-   |--------|------------|--------|
-   | Test **compile/import error** | **Test agent** — wrong interface from plan | Log friction `category: retry, type: automatic, skill: run-stories`. Re-launch test agent (see below). Max 1 retry. |
-   | Test **logic failure** (assertion failed, wrong value, timeout) | **Coder** — implementation doesn't match spec | Log friction `category: retry, type: automatic, skill: run-stories`. Re-launch coder (see below). Max 1 retry. |
-   | **Mixed** (some compile, some logic) | Prioritize compile errors first | Fix compile errors (test agent retry), then re-run. If logic failures remain, retry coder. |
-   | **Ambiguous** (runtime error that could be either) | **Coder** — default attribution | Same as logic failure path. Coder owns runtime behavior. |
+   | `classification` | Attribution | Action |
+   |---|---|---|
+   | `compile_error` | **Test agent** — wrong interface | Log friction. Re-launch test agent with error output + actual exports. Max 1 retry. |
+   | `logic_failure` | **Coder** — implementation wrong | Log friction. Re-launch coder with failing tests as read-only context. Max 1 retry. |
+   | `ambiguous` | **Coder** (default) | Same as logic_failure path. |
 
-   **Detection heuristic** — classify from test runner exit code + output:
-   - **Compile/import error**: output contains `Cannot find module`, `is not a function`, `has no exported member`, `ImportError`, `ModuleNotFoundError`, `undefined is not`, `TypeError:`, `SyntaxError:`, or other type/parse errors
-   - **Logic failure**: output contains `AssertionError`, `Expected .* to equal`, `expected .* but got`, `FAIL` with assertion details, `TimeoutError`, `timed out`
-   - If output matches neither pattern clearly, default to **coder** attribution (logic failure)
+   Use `error_output` from the JSON result to construct the retry prompt.
 
-   **Test agent retry** (compile/import error):
+   **Test agent retry** (compile_error):
    Re-launch test agent with error output + actual exports from coder's source files as read-only context:
    ```
    Your tests have compile/import errors when run against the real implementation.
    Fix test imports and types to match the actual interface.
 
    Error output:
-   <test runner output>
+   <error_output from merge-gate.py JSON>
 
    Actual exports from coder's source files (read-only — match your imports to these):
    <relevant export signatures from coder's files in the merge-candidate>
    ```
-   Test agent pushes fix to `<story-branch>--test`. Re-run merge-candidate validation from step 1.
+   Test agent pushes fix to `<story-branch>--test`. Re-run merge-gate.py from step 1.
 
-   **Coder retry** (logic failure):
+   **Coder retry** (logic_failure or ambiguous):
    Before cleaning up the merge-candidate, read the failing test files. Re-launch coder with:
    ```
    Your implementation failed spec-derived tests. The tests were written independently from
    your code, based on the acceptance criteria in the plan.
 
    Failing tests:
-   <test runner output>
+   <error_output from merge-gate.py JSON>
 
    Test file (read-only — do not modify):
    <test file contents>
 
    Fix your implementation to pass these tests. The tests define correct behavior.
    ```
-   Coder pushes fix commit to `<story-branch>`. Re-run merge-candidate validation from step 1.
+   Coder pushes fix commit to `<story-branch>`. Re-run merge-gate.py from step 1.
 
-   **After retry**: if second attempt also fails, mark story BLOCKED with the failure output. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
+4. **After retry**: re-run merge-gate.py from step 1. If second attempt also fails, mark story BLOCKED with the failure output. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
 
 5. **On pass** — before cleanup, merge test commits into the code worktree and push:
    ```bash
@@ -638,3 +678,5 @@ If all stories complete successfully, print: "All stories executed successfully.
 If any story is BLOCKED, list it with its reason in a "Blocked" section. Never stop other stories due to one failure — they run independently.
 
 If all stories were BLOCKED or skipped (zero DONE), stop after printing the summary.
+
+After printing the report, run `cleanup_run_state.py` as described in "Run state management" above.

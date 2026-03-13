@@ -46,7 +46,7 @@ When the caller has **2+ stories** to merge (e.g., run-stories Step 5c with mult
 
 Build a prompt containing:
 
-1. The full text of Steps 1 through 5.5 below (the single-story merge procedure)
+1. The full text of Steps 1 through 5.5 below (the single-story merge procedure). The Step 4 cleanup uses `worktree-cleanup.sh` — include the script invocation syntax in the prompt.
 2. The batch story list with pre-resolved data for each story:
    - `story_id`, `title`, `epic_id`
    - `story-branch` (already computed by run-stories)
@@ -62,10 +62,10 @@ Build a prompt containing:
 Before merging each story, the subagent runs the diff gate:
 
 ```bash
-git -C <worktree-path> diff --name-only <dev-branch>
+DIFF_RESULT=$(bash ~/.claude/scripts/diff-gate.sh --worktree-path <worktree-path> --dev-branch <dev-branch> --write-files "<comma-separated write_files>")
 ```
 
-Compare against the story's `write_files`. If unexpected files appear:
+Parse the JSON result. If `unexpected_files` is non-empty:
 - Log the discrepancy in the return summary
 - Continue with the merge (non-blocking, same as current behavior)
 
@@ -207,33 +207,16 @@ If this fails (branch not found on origin), stop and report:
 
 ## Step 2.5: Smoke test
 
-Run project tests in the story worktree before merging. This catches regressions early.
+Run build verification and tests in the story worktree before merging:
 
-1. Detect test infrastructure in `<worktree-path>`:
-   - `package.json` with `scripts.test` → `npm test`
-   - `pytest.ini`, `pyproject.toml` with `[tool.pytest]`, or `tests/` dir with `*_test.py`/`test_*.py` → `pytest`
-   - `go.mod` with `*_test.go` files → `go test ./...`
-   - `Cargo.toml` → `cargo test`
-   - `pubspec.yaml` with `test/` dir → `flutter test`
+```bash
+VERIFY_RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <worktree-path>)
+```
 
-2. If no test infrastructure detected:
-   - Set `test_result = "skipped (no infra)"`
-   - Continue to Step 3.
-
-3. If test infrastructure detected, run the test command:
-   ```bash
-   cd <worktree-path> && <test-command>
-   ```
-
-4. If tests pass:
-   - Set `test_result = "pass"`
-   - Continue to Step 3.
-
-5. If tests fail:
-   - Set `test_result = "FAIL"`
-   - Display the failure output.
-   - Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging, or re-run with `--skip-tests` to bypass."
-   - Do NOT proceed to merge.
+Parse the JSON result:
+- `project_type` is `"unknown"` → Set `test_result = "skipped (no infra)"`. Continue to Step 3.
+- `build_result` is `"pass"` → Set `test_result = "pass"`. Continue to Step 3.
+- `build_result` is `"fail"` → Set `test_result = "FAIL"`. Display the failure output from JSON. Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging, or re-run with `--skip-tests` to bypass." Do NOT proceed to merge.
 
 ### Step 2.5b: Test validation gate (test_files stories only)
 
@@ -320,26 +303,14 @@ git worktree remove --force "$TEMP"
 ## Step 4: Clean up story worktree and branches
 
 ```bash
-# Check for uncommitted changes before removal (informational — the merge
-# already captured all committed work, but this surfaces unexpected state)
-DIRTY=$(git -C <worktree-path> status --porcelain 2>/dev/null)
-if [ -n "$DIRTY" ]; then
-  echo "Warning: worktree has uncommitted changes that will be lost:"
-  echo "$DIRTY"
-fi
-
-# Remove the story worktree
-git worktree remove --force <worktree-path>
-git worktree prune
-
-# Delete local story branch
-git branch -D <story-branch>
-
-# Delete remote story branch
-git push origin --delete <story-branch>
+CLEANUP_RESULT=$(bash ~/.claude/scripts/worktree-cleanup.sh --worktree-path <worktree-path> --branch <story-branch>)
 ```
 
-If any cleanup command fails, note the failure in the report but do not stop — continue to Step 5.
+Parse the JSON result:
+- `status: "success"` → worktree removed, branch deleted (local + remote). Log `removed_worktree` and `removed_branch` from JSON.
+- `status: "error"` → note the failure in the report but do not stop. Continue to Step 5. The error details are in the JSON `error` field.
+
+If the cleanup reports uncommitted changes (in the JSON), include a warning in the Step 6 report.
 
 ---
 
