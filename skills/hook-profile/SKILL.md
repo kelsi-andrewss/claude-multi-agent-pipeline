@@ -7,8 +7,8 @@ Manage the active hook profile. Profiles control which hooks run during the sess
 
 **Levels:**
 - `minimal` (1): load-session-context, cost-alert, session-learning-check
-- `standard` (2): all of minimal + guard-protected-files, block-env-read, context-check, mark-orch-read, require-orch-read (via standard), log-skill-invocation, track-skill-changes, warn-sync-heavy-bash
-- `strict` (3): all of standard + guard-direct-edit, block-enter-worktree, require-orch-read
+- `standard` (2): all of minimal + guard-protected-files, block-env-read, context-check, log-skill-invocation, track-skill-changes, warn-sync-heavy-bash
+- `strict` (3): all of standard + guard-direct-edit, block-enter-worktree
 
 **Arguments:** `$ARGUMENTS` — either a profile name (minimal/standard/strict) or empty to show current.
 

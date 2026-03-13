@@ -41,7 +41,7 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
     echo ""
   fi
 
-  # Compact OpenMemory query — top 5 behavioral prefs + top 5 tool learnings
+  # Compact OpenMemory query — top 5 tool learnings
   OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
   if [[ -f "$OM_DB" ]]; then
   python3 - "$OM_DB" <<'OMCOMPACTEOF'
@@ -80,42 +80,23 @@ def om_query(sql):
 def trunc(s, n=150):
     return s[:n] + "..." if len(s) > n else s
 
-prefs = om_query(
-    f"SELECT content FROM memories "
-    f"WHERE tags LIKE '%behavioral-pref%' AND tags NOT LIKE '%bootstrap%' "
-    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
-)
 learnings = om_query(
     f"SELECT content FROM memories "
     f"WHERE tags LIKE '%tool-learning%' AND tags NOT LIKE '%bootstrap%' "
     f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
 )
 
-if prefs or learnings:
+if learnings:
     print("")
     print("=== MEMORY SNAPSHOT (mandatory context) ===")
-    if prefs:
-        print("  Behavioral prefs:")
-        for row in prefs:
-            print(f"    - {trunc(row[0])}")
-    if learnings:
-        print("  Tool learnings:")
-        for row in learnings:
-            print(f"    - {trunc(row[0])}")
+    print("  Tool learnings:")
+    for row in learnings:
+        print(f"    - {trunc(row[0])}")
     print("=== END MEMORY SNAPSHOT ===")
 OMCOMPACTEOF
   fi
 
-  echo "=== MANDATORY TOOL CALL REQUIREMENT ==="
-  echo "Before answering ANY question about workflow, pipeline, or how you would handle a task,"
-  echo "you MUST use the Read tool to read these files — do NOT answer from memory or loaded context alone:"
-  echo "  1. Read ~/.claude/ORCHESTRATION.md"
-  echo "  2. Read the project CLAUDE.md (find it via Glob if path unknown)"
-  echo "Answering without calling Read first is a violation of these rules."
-
-  # Satisfy the orch-read guard so no explicit Read is required this session
   SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
-  touch "/tmp/orch-read-${SESSION_ID}"
 
   # OpenMemory health check — warn if Ollama is unreachable
   if ! curl -s --connect-timeout 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
@@ -185,23 +166,6 @@ def branch_age_hours(branch):
         pass
     return None
 
-def get_dependency_status(story_id):
-    """Return dependency info for a story: list of (dep_id, dep_state) tuples."""
-    rows = query_db(
-        f"SELECT depends_on FROM stories WHERE id='{story_id}' AND archived=0;"
-    )
-    if not rows or not rows[0][0]:
-        return []
-    dep_ids = [d.strip() for d in rows[0][0].split(",") if d.strip()]
-    deps = []
-    for dep_id in dep_ids:
-        dep_rows = query_db(
-            f"SELECT state FROM stories WHERE id='{dep_id}';"
-        )
-        dep_state = dep_rows[0][0] if dep_rows else "unknown"
-        deps.append((dep_id, dep_state))
-    return deps
-
 # --- In-progress stories (with stale detection) ---
 in_progress_rows = query_db(
     f"SELECT id, title, state, branch FROM stories WHERE state IN {RUNNING_STATES} AND archived=0 ORDER BY id;"
@@ -220,7 +184,7 @@ for row in in_progress_rows:
     else:
         active_in_progress.append(entry)
 
-# --- Ready stories (with dependency status) ---
+# --- Ready stories ---
 ready_rows = query_db(
     "SELECT id, title FROM stories WHERE state='ready' AND archived=0 ORDER BY id;"
 )
@@ -229,14 +193,7 @@ for row in ready_rows:
     if len(row) < 2:
         continue
     sid, title = row[0], row[1]
-    deps = get_dependency_status(sid)
-    non_terminal = [(d, s) for d, s in deps if s not in ("done", "shipped")]
-    if non_terminal:
-        dep_str = ", ".join(f"{d} ({s})" for d, s in non_terminal)
-        status = f"(blocked by: {dep_str})"
-    else:
-        status = "(no blockers)"
-    ready_stories.append({"id": sid, "title": title, "dep_status": status})
+    ready_stories.append({"id": sid, "title": title})
 
 # --- Recently completed (last 48h, limit 5) ---
 cutoff_iso = datetime.fromtimestamp(now - RECENTLY_COMPLETED_HOURS * 3600, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -251,8 +208,7 @@ if stale:
     print("")
     print("=== STALE STORIES DETECTED ===")
     for s in stale:
-        print(f"  [{s['id']}] {s['title']}")
-        print(f"    state: {s['state']}  branch: {s['branch']}  last commit: {s['age']}")
+        print(f"  [{s['id']}] {s['title']} (stale: {s['age']})")
     print("  Run /recover to resume or discard these stories.")
 
 if has_content:
@@ -262,12 +218,12 @@ if has_content:
     if active_in_progress:
         print("  In progress:")
         for s in active_in_progress:
-            print(f"    [{s['id']}] {s['title']}  (last commit: {s['age']})")
+            print(f"    [{s['id']}] {s['title']}")
 
     if ready_stories:
         print("  Ready to run:")
         for s in ready_stories:
-            print(f"    [{s['id']}] {s['title']}  {s['dep_status']}")
+            print(f"    [{s['id']}] {s['title']}")
 
     if completed_rows:
         print("  Recently completed:")
