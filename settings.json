@@ -42,16 +42,6 @@
         ]
       },
       {
-        "matcher": "Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/require-orch-read.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -99,17 +89,6 @@
       }
     ],
     "PostToolUse": [
-      {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/mark-orch-read.sh",
-            "timeout": 5,
-            "async": true
-          }
-        ]
-      },
       {
         "matcher": "TaskUpdate",
         "hooks": [
