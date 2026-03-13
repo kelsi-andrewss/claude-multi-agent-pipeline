@@ -1,6 +1,6 @@
 #!/bin/bash
 # Injects CLAUDE.md into Claude's context at session start.
-# Orchestration-specific context (ORCHESTRATION.md, behavioral-prefs, agenda)
+# Orchestration-specific context (ORCHESTRATION.md, rendered-prefs sidecar, agenda)
 # is only loaded when working inside the ~/.claude/ project.
 
 source "$(dirname "$0")/lib/profile.sh"
@@ -30,10 +30,57 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
   echo "--- ~/.claude/ORCHESTRATION.md ---"
   cat "$HOME/.claude/ORCHESTRATION.md"
   echo ""
-  if [[ -f "$HOME/.claude/behavioral-prefs.md" ]]; then
-    echo "--- ~/.claude/behavioral-prefs.md ---"
-    cat "$HOME/.claude/behavioral-prefs.md"
-    echo ""
+  # Render behavioral preferences from DB to sidecar file
+  RENDERED_PREFS="$HOME/.claude/.claude/rendered-prefs.md"
+  DB_FILE_PREFS="$HOME/.claude/.claude/epics.db"
+  if [[ -f "$DB_FILE_PREFS" ]]; then
+  python3 - "$DB_FILE_PREFS" "$RENDERED_PREFS" <<'RENDERPREFSEOF'
+import subprocess, sys
+
+db_path = sys.argv[1]
+out_path = sys.argv[2]
+
+def query_db(sql):
+    try:
+        result = subprocess.run(
+            ["sqlite3", "-separator", "\t", db_path, sql],
+            capture_output=True, text=True, timeout=5
+        )
+        return [line.split("\t") for line in result.stdout.strip().splitlines() if line.strip()]
+    except Exception:
+        return []
+
+# Check if text column exists (requires story-711 schema migration)
+cols = query_db("PRAGMA table_info(correction_groups);")
+col_names = [c[1] for c in cols if len(c) > 1]
+if "text" not in col_names:
+    # Schema not migrated yet — write empty file and exit
+    with open(out_path, "w") as f:
+        f.write("# Behavioral Preferences\n\n_Schema migration pending._\n")
+    sys.exit(0)
+
+rows = query_db(
+    "SELECT text FROM correction_groups "
+    "WHERE (status IN ('promoted','pending_promotion') OR source='manual') "
+    "AND status != 'dismissed' "
+    "ORDER BY updated_at DESC;"
+)
+
+with open(out_path, "w") as f:
+    f.write("# Behavioral Preferences\n\n")
+    if rows:
+        for row in rows:
+            text = row[0].strip()
+            if text:
+                f.write(f"- {text}\n")
+    else:
+        f.write("_No preferences recorded yet._\n")
+RENDERPREFSEOF
+  else
+    # No DB — write empty sidecar
+    echo "# Behavioral Preferences" > "$RENDERED_PREFS"
+    echo "" >> "$RENDERED_PREFS"
+    echo "_No database available._" >> "$RENDERED_PREFS"
   fi
   if [[ -f "$HOME/.claude/session-handoff.md" ]]; then
     echo "=== SESSION HANDOFF (from previous session) ==="
@@ -41,7 +88,7 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
     echo ""
   fi
 
-  # Compact OpenMemory query — top 5 behavioral prefs + top 5 tool learnings
+  # Compact OpenMemory query — top 5 tool learnings
   OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
   if [[ -f "$OM_DB" ]]; then
   python3 - "$OM_DB" <<'OMCOMPACTEOF'
@@ -80,42 +127,23 @@ def om_query(sql):
 def trunc(s, n=150):
     return s[:n] + "..." if len(s) > n else s
 
-prefs = om_query(
-    f"SELECT content FROM memories "
-    f"WHERE tags LIKE '%behavioral-pref%' AND tags NOT LIKE '%bootstrap%' "
-    f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
-)
 learnings = om_query(
     f"SELECT content FROM memories "
     f"WHERE tags LIKE '%tool-learning%' AND tags NOT LIKE '%bootstrap%' "
     f"ORDER BY {DECAY_SCORE} DESC LIMIT 5;"
 )
 
-if prefs or learnings:
+if learnings:
     print("")
     print("=== MEMORY SNAPSHOT (mandatory context) ===")
-    if prefs:
-        print("  Behavioral prefs:")
-        for row in prefs:
-            print(f"    - {trunc(row[0])}")
-    if learnings:
-        print("  Tool learnings:")
-        for row in learnings:
-            print(f"    - {trunc(row[0])}")
+    print("  Tool learnings:")
+    for row in learnings:
+        print(f"    - {trunc(row[0])}")
     print("=== END MEMORY SNAPSHOT ===")
 OMCOMPACTEOF
   fi
 
-  echo "=== MANDATORY TOOL CALL REQUIREMENT ==="
-  echo "Before answering ANY question about workflow, pipeline, or how you would handle a task,"
-  echo "you MUST use the Read tool to read these files — do NOT answer from memory or loaded context alone:"
-  echo "  1. Read ~/.claude/ORCHESTRATION.md"
-  echo "  2. Read the project CLAUDE.md (find it via Glob if path unknown)"
-  echo "Answering without calling Read first is a violation of these rules."
-
-  # Satisfy the orch-read guard so no explicit Read is required this session
   SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
-  touch "/tmp/orch-read-${SESSION_ID}"
 
   # OpenMemory health check — warn if Ollama is unreachable
   if ! curl -s --connect-timeout 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
@@ -145,12 +173,12 @@ OUTCOMES_MTIME=$OUTCOMES_MTIME
 CORRECTIONS_MTIME=$CORRECTIONS_MTIME
 SNAP
 
-  # Session agenda + stale detection + distillation trigger (single Python block)
+  # Session agenda + stale detection (single Python block)
   DB_FILE="$HOME/.claude/.claude/epics.db"
 
   if [[ -f "$DB_FILE" ]]; then
   python3 - "$DB_FILE" "$HOME/.claude" <<'PYEOF'
-import os, subprocess, sys, time, re
+import subprocess, sys, time
 from datetime import datetime, timezone
 
 STALE_SECONDS = 86400  # 24 hours
@@ -185,23 +213,6 @@ def branch_age_hours(branch):
         pass
     return None
 
-def get_dependency_status(story_id):
-    """Return dependency info for a story: list of (dep_id, dep_state) tuples."""
-    rows = query_db(
-        f"SELECT depends_on FROM stories WHERE id='{story_id}' AND archived=0;"
-    )
-    if not rows or not rows[0][0]:
-        return []
-    dep_ids = [d.strip() for d in rows[0][0].split(",") if d.strip()]
-    deps = []
-    for dep_id in dep_ids:
-        dep_rows = query_db(
-            f"SELECT state FROM stories WHERE id='{dep_id}';"
-        )
-        dep_state = dep_rows[0][0] if dep_rows else "unknown"
-        deps.append((dep_id, dep_state))
-    return deps
-
 # --- In-progress stories (with stale detection) ---
 in_progress_rows = query_db(
     f"SELECT id, title, state, branch FROM stories WHERE state IN {RUNNING_STATES} AND archived=0 ORDER BY id;"
@@ -220,7 +231,7 @@ for row in in_progress_rows:
     else:
         active_in_progress.append(entry)
 
-# --- Ready stories (with dependency status) ---
+# --- Ready stories ---
 ready_rows = query_db(
     "SELECT id, title FROM stories WHERE state='ready' AND archived=0 ORDER BY id;"
 )
@@ -229,14 +240,7 @@ for row in ready_rows:
     if len(row) < 2:
         continue
     sid, title = row[0], row[1]
-    deps = get_dependency_status(sid)
-    non_terminal = [(d, s) for d, s in deps if s not in ("done", "shipped")]
-    if non_terminal:
-        dep_str = ", ".join(f"{d} ({s})" for d, s in non_terminal)
-        status = f"(blocked by: {dep_str})"
-    else:
-        status = "(no blockers)"
-    ready_stories.append({"id": sid, "title": title, "dep_status": status})
+    ready_stories.append({"id": sid, "title": title})
 
 # --- Recently completed (last 48h, limit 5) ---
 cutoff_iso = datetime.fromtimestamp(now - RECENTLY_COMPLETED_HOURS * 3600, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -251,8 +255,7 @@ if stale:
     print("")
     print("=== STALE STORIES DETECTED ===")
     for s in stale:
-        print(f"  [{s['id']}] {s['title']}")
-        print(f"    state: {s['state']}  branch: {s['branch']}  last commit: {s['age']}")
+        print(f"  [{s['id']}] {s['title']} (stale: {s['age']})")
     print("  Run /recover to resume or discard these stories.")
 
 if has_content:
@@ -262,12 +265,12 @@ if has_content:
     if active_in_progress:
         print("  In progress:")
         for s in active_in_progress:
-            print(f"    [{s['id']}] {s['title']}  (last commit: {s['age']})")
+            print(f"    [{s['id']}] {s['title']}")
 
     if ready_stories:
         print("  Ready to run:")
         for s in ready_stories:
-            print(f"    [{s['id']}] {s['title']}  {s['dep_status']}")
+            print(f"    [{s['id']}] {s['title']}")
 
     if completed_rows:
         print("  Recently completed:")
@@ -276,75 +279,7 @@ if has_content:
                 print(f"    [{row[0]}] {row[1]}")
     print("")
 
-# --- Distillation trigger ---
-behavioral_prefs = os.path.join(project_root, "behavioral-prefs.md")
-outcomes = os.path.join(project_root, "outcomes.md")
-corrections = os.path.join(project_root, "corrections.md")
-
-last_distilled = None
-if os.path.isfile(behavioral_prefs):
-    try:
-        with open(behavioral_prefs) as f:
-            content = f.read()
-        match = re.search(r'<!-- last-distilled: (\d{4}-\d{2}-\d{2}) -->', content)
-        if match:
-            last_distilled = match.group(1)
-    except Exception:
-        pass
-
-def count_entries_since(filepath, since_date):
-    """Count ## entries newer than since_date (by scanning ## [date] headers)."""
-    if not os.path.isfile(filepath):
-        return 0
-    try:
-        with open(filepath) as f:
-            lines = f.readlines()
-    except Exception:
-        return 0
-    count = 0
-    for line in lines:
-        if line.startswith("## "):
-            if since_date is None:
-                count += 1  # no prior distillation — count all
-            else:
-                # Try to extract date from header (## YYYY-MM-DD or ## [YYYY-MM-DD])
-                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', line)
-                if date_match and date_match.group(1) > since_date:
-                    count += 1
-                elif not date_match:
-                    count += 1  # undated entry — assume new
-    return count
-
-unprocessed = count_entries_since(outcomes, last_distilled) + count_entries_since(corrections, last_distilled)
-
-triggered = unprocessed >= 5
-if last_distilled and not triggered:
-    from datetime import timedelta
-    try:
-        ld_date = datetime.strptime(last_distilled, "%Y-%m-%d")
-        if (datetime.now() - ld_date).days >= 7:
-            triggered = True
-    except ValueError:
-        pass
-
-if triggered:
-    print("")
-    print("=== BEHAVIORAL DISTILLATION DUE ===")
-    if unprocessed >= 5:
-        print(f"  {unprocessed} unprocessed entries in outcomes.md + corrections.md")
-    else:
-        print(f"  Last distillation was {last_distilled} (>7 days ago)")
-    print("  Review and distill before starting work.")
-    print("")
 PYEOF
-
-  # Auto-distillation check — flag recently auto-distilled entries for review
-  if [[ -f "$HOME/.claude/behavioral-prefs.md" ]] && grep -q "(auto-distilled)" "$HOME/.claude/behavioral-prefs.md" 2>/dev/null; then
-    echo ""
-    echo "=== AUTO-DISTILLED ENTRIES PENDING REVIEW ==="
-    grep "(auto-distilled)" "$HOME/.claude/behavioral-prefs.md"
-    echo "  Review and remove the (auto-distilled) marker once confirmed."
-  fi
 
   # Correction patterns — from correction_groups DB table
   if [[ -f "$DB_FILE" ]]; then
@@ -394,7 +329,7 @@ if pending:
         theme, status, count, dates = r[0], r[1], r[2], r[3]
         promoted_at = r[4] if len(r) > 4 else ""
         print(f'    [{count}x] "{theme}" (evidence: {dates})')
-    print("  Process pending promotions: write preference text to behavioral-prefs.md")
+    print("  Process pending promotions: use /prefs to review and promote")
 if accumulating:
     print("  Accumulating:")
     for r in accumulating:

@@ -6,18 +6,36 @@ import asyncio
 import fnmatch
 import json
 import os
+import signal
 from pathlib import Path
 
 from constants import (
     DEFAULT_IGNORE_DIRS,
     DEFAULT_IGNORE_EXTENSIONS,
     DEFAULT_MODEL,
+    GEMINI_TIMEOUT,
     SOURCE_EXTENSIONS,
     MAX_CONTEXT_BYTES,
     PROJECT_ROOT,
     AUDIT_PROMPT_PATH,
     DOCUMENTS,
 )
+
+
+class GeminiError(Exception):
+    """Base exception for Gemini CLI failures."""
+
+
+class GeminiTimeoutError(GeminiError):
+    """Gemini CLI did not respond within timeout."""
+
+
+class GeminiCLIError(GeminiError):
+    """Gemini CLI exited with non-zero status."""
+
+
+class GeminiParseError(GeminiError):
+    """Gemini CLI returned invalid JSON."""
 
 
 async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_instruction: str | None = None) -> str:
@@ -33,16 +51,27 @@ async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_inst
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
     )
-    stdout, stderr = await proc.communicate(input=prompt.encode())
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(input=prompt.encode()), timeout=GEMINI_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        await proc.wait()
+        raise GeminiTimeoutError(f"No response after {GEMINI_TIMEOUT}s")
     if proc.returncode != 0:
         err = stderr.decode().strip()
-        return f"[gemini error (exit {proc.returncode})]: {err}"
+        raise GeminiCLIError(f"Exit {proc.returncode}: {err}")
     try:
         data = json.loads(stdout.decode())
     except json.JSONDecodeError:
         raw = stdout.decode()
-        return f"[gemini parse error]: {raw[:2000]}"
+        raise GeminiParseError(f"Invalid JSON: {raw[:500]}")
     return data.get("response", "(empty response)")
 
 

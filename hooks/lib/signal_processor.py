@@ -74,18 +74,6 @@ def parse_transcript_turns(transcript_path):
     return turns
 
 
-IMPERATIVE_STARTS = re.compile(
-    r'^(use |stop |don\'t |do not |just |why didn\'t |why don\'t |why aren\'t |'
-    r'make |run |try |ship |log |fix |check |read |write |call |add |remove |'
-    r'never |always )',
-    re.IGNORECASE
-)
-
-META_PATTERN = re.compile(
-    r"you'?ve been |you'?re not |you keep |you should |you always |you never ",
-    re.IGNORECASE
-)
-
 SYSTEM_MSG = re.compile(
     r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
     r'^Base directory for this skill|'
@@ -100,35 +88,40 @@ POSITIVE_INTENT = re.compile(
     re.IGNORECASE
 )
 
-EXTERNAL_CONTENT = re.compile(
-    r'^\w[\w\s]{0,30}\s+\[\d{1,2}:\d{2}\s*[AP]M\]|'  # Slack: "Username  [9:52 PM]"
-    r'\[\d{1,2}:\d{2}\s*[AP]M\]|'                       # Bare timestamp: "[9:52 PM]"
-    r'This session is being continued|'                   # Exact continuation
-    r'session.*continued from|'                           # Variant continuations
-    r'continued from previous|'                           # Variant continuations
-    r'^(~~~|```)',                                         # Code fence starts
-    re.MULTILINE
-)
-
-
-def is_frustration(msg):
-    if len(msg) > 200:
-        return False
-    if msg.rstrip().endswith("!!") or msg.rstrip().endswith("??"):
+def is_structural_content(msg):
+    """Pre-filter: returns True if message is structural/pasted content that should
+    be rejected before embedding. Catches code fences, long messages, markdown
+    headers, timestamps, and URL-heavy pastes."""
+    if len(msg) > 300:
         return True
-    caps_words = [w for w in msg.split() if w.isupper() and len(w) > 1]
-    return len(caps_words) >= 2
+    if "```" in msg or "~~~" in msg:
+        return True
+    if msg.count("\n") > 3:
+        return True
+    if re.search(r"^#{1,6}\s", msg, re.MULTILINE):
+        return True
+    if re.search(r"\[\d{1,2}:\d{2}\s*[AP]M\]", msg):
+        return True
+    if len(re.findall(r"https?://", msg)) >= 3:
+        return True
+    return False
 
 
 def extract_corrections(turns):
-    """Extract user corrections with intensity weights.
+    """Extract user corrections using structural pre-filter + semantic delta.
 
     Returns list of dicts: {turn_idx, content, weight}
-    Weight: 1.0 normal, 2.0 frustration, 3.0 repeated (same correction theme twice+)
+    Weight: 1.0 normal, 3.0 repeated (same correction theme twice+).
+    Returns empty list if Ollama is unavailable (no regex fallback).
     """
+    prototype_embs = _get_prototype_embeddings()
+    if prototype_embs is None:
+        return []
+
     corrections = []
     seen_themes = {}
     prev_assistant_had_tool_use = False
+    embedding_calls = 0
 
     for i, turn in enumerate(turns):
         if turn["role"] == "assistant":
@@ -144,25 +137,19 @@ def extract_corrections(turns):
         if POSITIVE_INTENT.match(msg):
             prev_assistant_had_tool_use = False
             continue
-        if EXTERNAL_CONTENT.search(msg):
+        if is_structural_content(msg):
             prev_assistant_had_tool_use = False
             continue
 
-        matched = False
-
-        if len(msg) < 150 and prev_assistant_had_tool_use and IMPERATIVE_STARTS.match(msg):
-            matched = True
-        if not matched and prev_assistant_had_tool_use and is_frustration(msg):
-            matched = True
-        if not matched and META_PATTERN.search(msg):
-            matched = True
+        if embedding_calls < MAX_EMBEDDING_CALLS_PER_SESSION:
+            embedding_calls += 1
+            matched = is_correction(msg, prototype_embs)
+        else:
+            matched = False
 
         if matched:
             theme_key = msg[:30].lower().strip()
             weight = 1.0
-
-            if is_frustration(msg):
-                weight = 2.0
 
             if theme_key in seen_themes:
                 weight = 3.0
@@ -184,7 +171,7 @@ def extract_corrections_from_transcript(transcript_path):
 
     Combines parse_transcript_turns() and extract_corrections() into a single
     file-path-in, corrections-out call. All filtering (SYSTEM_MSG, POSITIVE_INTENT,
-    EXTERNAL_CONTENT) is applied via extract_corrections().
+    structural pre-filter) is applied via extract_corrections().
 
     Args:
         transcript_path: Path to JSONL transcript file.
@@ -272,6 +259,22 @@ OLLAMA_MODEL = "nomic-embed-text"
 SIMILARITY_THRESHOLD = 0.85
 PROMOTION_THRESHOLD = 3
 
+CORRECTION_PROTOTYPES = [
+    "stop doing that, I told you not to",
+    "why did you ignore my instruction",
+    "use the ship skill instead",
+    "you keep making the same mistake",
+    "that's wrong, do it this way instead",
+    "why aren't you using worktrees",
+    "I already told you to log that",
+    "don't narrate what you're about to do",
+    "why did you skip the pipeline",
+    "you're not listening to me",
+]
+PROTOTYPE_THRESHOLD = 0.55
+MAX_EMBEDDING_CALLS_PER_SESSION = 5
+_prototype_embeddings = None
+
 
 def _get_embedding(text):
     payload = json.dumps({"model": OLLAMA_MODEL, "prompt": text}).encode()
@@ -282,6 +285,34 @@ def _get_embedding(text):
         return data.get("embedding")
     except (URLError, OSError, json.JSONDecodeError, KeyError):
         return None
+
+
+def _get_prototype_embeddings():
+    """Lazy-load and cache prototype embeddings. Returns None if Ollama unavailable."""
+    global _prototype_embeddings
+    if _prototype_embeddings is not None:
+        return _prototype_embeddings
+    embeddings = []
+    for proto in CORRECTION_PROTOTYPES:
+        vec = _get_embedding(proto)
+        if vec is None:
+            return None
+        embeddings.append(vec)
+    _prototype_embeddings = embeddings
+    return _prototype_embeddings
+
+
+def is_correction(msg, prototype_embeddings):
+    """Returns True if msg is semantically similar to a correction prototype.
+
+    Computes cosine similarity against each prototype embedding and returns
+    True if max similarity >= PROTOTYPE_THRESHOLD.
+    """
+    msg_vec = _get_embedding(msg)
+    if msg_vec is None:
+        return False
+    similarities = [_cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
+    return max(similarities) >= PROTOTYPE_THRESHOLD
 
 
 def _embedding_to_blob(vec):
@@ -304,7 +335,9 @@ def _ensure_correction_groups_table(cursor):
         "embedding BLOB, "
         "promoted_at TEXT, "
         "created_at INTEGER, "
-        "updated_at INTEGER)"
+        "updated_at INTEGER, "
+        "source TEXT DEFAULT 'auto', "
+        "text TEXT DEFAULT '')"
     )
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)"
@@ -386,26 +419,32 @@ def _find_matching_group(cursor, embedding, threshold):
 
 
 def _check_promoted(theme_text, project_root):
-    prefs_path = os.path.join(project_root, "behavioral-prefs.md")
-    if not os.path.isfile(prefs_path):
+    """Check if theme is already promoted in correction_groups DB."""
+    db_path = os.path.join(project_root, ".claude", "epics.db")
+    if not os.path.isfile(db_path):
         return False
 
-    with open(prefs_path) as f:
-        text = f.read()
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        rows = conn.execute(
+            "SELECT theme FROM correction_groups WHERE status='promoted'"
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return False
 
-    pref_lines = [line.strip()[2:] for line in text.split('\n') if line.strip().startswith('- ')]
-    if not pref_lines:
+    if not rows:
         return False
 
     theme_vec = _get_embedding(theme_text)
     if theme_vec is None:
         return False
 
-    for pref_line in pref_lines:
-        pref_vec = _get_embedding(pref_line)
-        if pref_vec is None:
+    for (existing_theme,) in rows:
+        existing_vec = _get_embedding(existing_theme)
+        if existing_vec is None:
             continue
-        if _cosine_similarity(theme_vec, pref_vec) > 0.8:
+        if _cosine_similarity(theme_vec, existing_vec) > 0.8:
             return True
 
     return False
@@ -452,8 +491,8 @@ def _process_correction_groups(db_path, project_root):
             )
         else:
             cursor.execute(
-                "INSERT INTO correction_groups (theme, count, correction_dates, embedding, status, created_at, updated_at) "
-                "VALUES (?, 1, ?, ?, 'accumulating', ?, ?)",
+                "INSERT INTO correction_groups (theme, count, correction_dates, embedding, source, status, created_at, updated_at) "
+                "VALUES (?, 1, ?, ?, 'auto', 'accumulating', ?, ?)",
                 (entry["header"], json.dumps([entry["date"]]), _embedding_to_blob(vec), now, now),
             )
 
@@ -476,6 +515,105 @@ def _process_correction_groups(db_path, project_root):
 
     conn.commit()
     conn.close()
+
+
+def process_session_corrections(transcript_path, db_file, session_id="", project_root=None):
+    """Unified entry point: detect corrections from transcript + sync corrections.md to DB.
+
+    Handles:
+    1. Transcript-based correction detection (pre-filter + semantic delta)
+    2. corrections.md manual entry parsing for today's entries
+    3. Per-session rate limiting: max 1 DB increment per theme per session
+
+    Args:
+        transcript_path: Path to JSONL transcript file.
+        db_file: Path to epics.db.
+        session_id: Session identifier (used for rate-limiting log, not DB key).
+        project_root: Root of the dotclaude project (defaults to grandparent of db_file).
+
+    Returns:
+        List of correction dicts: [{"turn_idx": int, "content": str, "weight": float}]
+    """
+    if project_root is None:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_file)))
+
+    all_corrections = []
+    seen_themes = set()
+
+    # --- Part 1: Transcript-based detection ---
+    transcript_corrections = extract_corrections_from_transcript(transcript_path)
+    all_corrections.extend(transcript_corrections)
+
+    # --- Part 2: corrections.md manual entries (today only) ---
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    corrections_file = os.path.join(project_root, "corrections.md")
+    if os.path.isfile(corrections_file):
+        try:
+            with open(corrections_file) as f:
+                content = f.read()
+            for match in re.finditer(r'^## (\d{4}-\d{2}-\d{2}) — (.+)', content, re.MULTILINE):
+                entry_date = match.group(1)
+                entry_desc = match.group(2).strip()
+                if entry_date == today:
+                    all_corrections.append({
+                        "turn_idx": -1,
+                        "content": entry_desc[:300],
+                        "weight": 1.0,
+                    })
+        except (OSError, IOError):
+            pass
+
+    # --- Part 3: Upsert to correction_groups with per-session rate limiting ---
+    if not db_file or not os.path.isfile(db_file):
+        return all_corrections
+
+    try:
+        conn = sqlite3.connect(db_file, timeout=10)
+        cursor = conn.cursor()
+        _ensure_correction_groups_table(cursor)
+        now = int(time.time())
+
+        for correction in all_corrections:
+            theme_text = correction["content"]
+            theme_key = theme_text[:40].strip().lower()
+
+            # Per-session rate limit: skip DB increment if theme already seen this session
+            if theme_key in seen_themes:
+                continue
+            seen_themes.add(theme_key)
+
+            # Check for existing group by text prefix match
+            row = cursor.execute(
+                "SELECT id, count, correction_dates, status FROM correction_groups "
+                "WHERE LOWER(SUBSTR(theme, 1, 40)) = LOWER(SUBSTR(?, 1, 40))",
+                (theme_key,)
+            ).fetchone()
+
+            if row:
+                if row[3] in ('promoted', 'dismissed'):
+                    continue
+                new_count = row[1] + 1
+                old_dates = json.loads(row[2]) if row[2] else []
+                old_dates.append(today)
+                new_status = 'pending_promotion' if new_count >= PROMOTION_THRESHOLD else row[3]
+                cursor.execute(
+                    "UPDATE correction_groups SET count=?, correction_dates=?, status=?, updated_at=? WHERE id=?",
+                    (new_count, json.dumps(old_dates), new_status, now, row[0])
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO correction_groups (theme, status, count, correction_dates, source, created_at, updated_at) "
+                    "VALUES (?, 'accumulating', 1, ?, 'auto', ?, ?)",
+                    (theme_text[:300], json.dumps([today]), now, now)
+                )
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"process_session_corrections DB error: {e}", file=sys.stderr)
+
+    return all_corrections
 
 
 def main():
@@ -538,7 +676,8 @@ def main():
 
     find_decision_mention_turns(decisions, turns)
 
-    corrections = extract_corrections(turns)
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_path)))
+    corrections = process_session_corrections(transcript_path, db_path, session_id, project_root)
 
     matched_decision_ids = set()
 
@@ -580,12 +719,6 @@ def main():
 
     conn.commit()
     conn.close()
-
-    try:
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_path)))
-        _process_correction_groups(db_path, project_root)
-    except Exception as e:
-        print(f"Correction grouping failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -74,10 +74,12 @@ When the user says "log" or "log that", immediately write a correction entry to 
 The Stop hook also auto-detects corrections from the transcript (prefixed `AUTO:`). These are verified at next session start.
 
 ## Behavioral learning
+@.claude/rendered-prefs.md
+
 These files track patterns across sessions:
 - `~/.claude/outcomes.md` — post-merge/rejection results (consulted on-demand)
 - `~/.claude/corrections.md` — course corrections (AUTO-detected + manual; verified at session start)
-- `~/.claude/behavioral-prefs.md` — distilled preferences inferred over time (loaded every session)
+- `~/.claude/.claude/rendered-prefs.md` — rendered from correction_groups DB at session start (loaded via @import, survives compaction)
 - `~/.claude/tool-learnings.md` — model/tool capability audit log (append-only, git-tracked)
 - OpenMemory (`procedural` sector) — queryable store for tool/model observations
 - `decision_preferences` table (epics.db) — machine-learned preference predictions from correction/decision correlation (see `hooks/lib/signal_processor.py`)

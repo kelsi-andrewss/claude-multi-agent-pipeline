@@ -18,7 +18,7 @@ No separate friction-log.md file.
 ## Pattern promotion
 
 When the same correction theme recurs 3+ times (tracked in `correction_groups` table):
-1. Stop hook auto-promotes to behavioral-prefs.md + OpenMemory via om_write
+1. Stop hook auto-promotes to correction_groups DB + OpenMemory via om_write
 2. Feeds model selection, plan critique, and coder prompts
 3. If pattern suggests a skill is needed, run the pre-creation gate (below).
    If pattern occurs inside an existing skill, the skill may need redesign.

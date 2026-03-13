@@ -48,8 +48,6 @@ if [[ -f "$SNAPSHOT" ]]; then
 
   CURRENT_CORRECTIONS=$(mtime "$HOME/.claude/corrections.md")
   CURRENT_OUTCOMES=$(mtime "$HOME/.claude/outcomes.md")
-  CURRENT_BEHAVPREFS=$(mtime "$HOME/.claude/behavioral-prefs.md")
-
   [[ "$CURRENT_CORRECTIONS" != "${CORRECTIONS_MTIME:-0}" ]] && CORRECTIONS_CHANGED=true
   [[ "$CURRENT_OUTCOMES" != "${OUTCOMES_MTIME:-0}" ]] && OUTCOMES_CHANGED=true
 
@@ -74,103 +72,16 @@ fi
 # ============================================================
 DB_FILE="$HOME/.claude/.claude/epics.db"
 
-python3 - "$TRANSCRIPT_PATH" "$HOME/.claude" "${SESSION_ID_RAW:-}" "${CORRECTIONS_MTIME:-0}" "$DB_FILE" <<'TALLYEOF'
-import json, os, re, sys, sqlite3
-from datetime import datetime, timezone
-
+python3 - "$TRANSCRIPT_PATH" "$DB_FILE" "${SESSION_ID_RAW:-}" "$HOME/.claude" <<'CORREOF'
+import sys, os
 transcript_path = sys.argv[1]
-project_root = sys.argv[2]
+db_file = sys.argv[2]
 session_id = sys.argv[3] if len(sys.argv) > 3 else ""
-corrections_mtime_start = sys.argv[4] if len(sys.argv) > 4 else "0"
-db_file = sys.argv[5] if len(sys.argv) > 5 else ""
-
-corrections_file = os.path.join(project_root, "corrections.md")
-today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-# Ensure correction_groups table exists (use signal_processor's schema)
-if db_file and os.path.isfile(db_file):
-    try:
-        conn = sqlite3.connect(db_file, timeout=5)
-        conn.execute("""CREATE TABLE IF NOT EXISTS correction_groups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            theme TEXT NOT NULL,
-            status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')),
-            count INTEGER DEFAULT 1,
-            correction_dates TEXT DEFAULT '[]',
-            embedding BLOB,
-            promoted_at TEXT,
-            created_at INTEGER,
-            updated_at INTEGER)""")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)")
-        conn.commit()
-    except Exception:
-        conn = None
-else:
-    conn = None
-
-def upsert_correction(theme_text):
-    if not conn:
-        return
-    theme_key = theme_text[:80].strip().lower()
-    try:
-        row = conn.execute(
-            "SELECT id, count, correction_dates, status FROM correction_groups "
-            "WHERE LOWER(SUBSTR(theme, 1, 40)) = LOWER(SUBSTR(?, 1, 40))",
-            (theme_key,)
-        ).fetchone()
-        if row:
-            new_count = row[1] + 1
-            old_dates = json.loads(row[2]) if row[2] else []
-            old_dates.append(today)
-            new_status = row[3] if row[3] in ('promoted', 'dismissed') else ('pending_promotion' if new_count >= 3 else row[3])
-            conn.execute(
-                "UPDATE correction_groups SET count=?, correction_dates=?, status=? WHERE id=?",
-                (new_count, json.dumps(old_dates), new_status, row[0])
-            )
-        else:
-            conn.execute(
-                "INSERT INTO correction_groups (theme, status, count, correction_dates, created_at, updated_at) "
-                "VALUES (?, 'accumulating', 1, ?, ?, ?)",
-                (theme_text[:300], json.dumps([today]), int(datetime.now().timestamp()), int(datetime.now().timestamp()))
-            )
-        conn.commit()
-    except Exception:
-        pass
-
-# Use centralized detection from signal_processor
+project_root = sys.argv[4]
 sys.path.insert(0, project_root)
-from hooks.lib.signal_processor import extract_corrections_from_transcript
-
-corrections = extract_corrections_from_transcript(transcript_path)
-for correction in corrections:
-    upsert_correction(correction["content"])
-
-# Manual correction detection from corrections.md (new entries added this session)
-try:
-    corrections_mtime_start_val = int(corrections_mtime_start)
-except (ValueError, TypeError):
-    corrections_mtime_start_val = 0
-
-if os.path.isfile(corrections_file):
-    try:
-        current_mtime = int(os.path.getmtime(corrections_file))
-    except Exception:
-        current_mtime = 0
-    if current_mtime > corrections_mtime_start_val:
-        try:
-            with open(corrections_file) as f:
-                content = f.read()
-            for match in re.finditer(r'^## (\d{4}-\d{2}-\d{2}) — (.+)', content, re.MULTILINE):
-                entry_date = match.group(1)
-                entry_desc = match.group(2).strip()
-                if entry_date == today:
-                    upsert_correction(entry_desc[:300])
-        except Exception:
-            pass
-
-if conn:
-    conn.close()
-TALLYEOF
+from hooks.lib.signal_processor import process_session_corrections
+process_session_corrections(transcript_path, db_file, session_id, project_root)
+CORREOF
 
 # ============================================================
 # Section 3: Signal processing
@@ -298,7 +209,6 @@ from datetime import datetime
 
 db_file = sys.argv[1]
 project_root = sys.argv[2]
-prefs_file = os.path.join(project_root, "behavioral-prefs.md")
 today = datetime.now().strftime("%Y-%m-%d")
 
 try:
@@ -315,34 +225,15 @@ if not rows:
 
 sys.path.insert(0, project_root)
 
-# Read existing prefs file to check for duplicates
-existing_content = ""
-try:
-    with open(prefs_file) as f:
-        existing_content = f.read()
-except Exception:
-    pass
-
 for theme, count, dates in rows:
-    pref_text = f"(auto-distilled) User corrected {count}x on: {theme[:200]} ({dates}). Review and refine next session."
+    pref_text = f"User corrected {count}x on: {theme[:200]} ({dates})"
 
     try:
-        with open(prefs_file, "r") as f:
-            content = f.read()
-        theme_key = theme[:40].lower()
-        lines = content.split('\n')
-        replaced = False
-        for idx, line in enumerate(lines):
-            if '(auto-distilled)' in line and theme_key in line.lower():
-                lines[idx] = f"- {pref_text}"
-                replaced = True
-                break
-        if replaced:
-            with open(prefs_file, "w") as f:
-                f.write('\n'.join(lines))
-        else:
-            with open(prefs_file, "a") as f:
-                f.write(f"\n- {pref_text}\n")
+        conn.execute(
+            "UPDATE correction_groups SET status='promoted', text=?, promoted_at=? WHERE theme=?",
+            (pref_text, today, theme)
+        )
+        conn.commit()
     except Exception:
         pass
 
@@ -351,32 +242,6 @@ for theme, count, dates in rows:
         om_write(content=pref_text, tags=["behavioral-pref"], user_id="proj:dotclaude")
     except Exception:
         pass
-
-    try:
-        conn.execute(
-            "UPDATE correction_groups SET status='promoted', promoted_at=? WHERE theme=?",
-            (today, theme)
-        )
-        conn.commit()
-    except Exception:
-        pass
-
-# Cleanup: mark pending_promotion rows as promoted if already present in behavioral-prefs.md
-try:
-    with open(prefs_file, "r") as f:
-        prefs_content = f.read().lower()
-    remaining = conn.execute(
-        "SELECT theme FROM correction_groups WHERE status='pending_promotion'"
-    ).fetchall()
-    for (rtheme,) in remaining:
-        if '(auto-distilled)' in prefs_content and rtheme[:40].lower() in prefs_content:
-            conn.execute(
-                "UPDATE correction_groups SET status='promoted', promoted_at=? WHERE theme=?",
-                (today, rtheme)
-            )
-    conn.commit()
-except Exception:
-    pass
 
 conn.close()
 DISTILLEOF

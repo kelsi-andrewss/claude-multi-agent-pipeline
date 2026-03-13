@@ -2,17 +2,18 @@
 name: briefing
 description: >
   Gemini synthesis + Claude critique + scope check + decision recording.
-  Reads research artifacts (.research-<slug>.json), walks prev pointers to
-  load clarify data, writes human-readable presearch briefing (presearch/<slug>.md).
-  Standalone invocable. Use when the user says "/briefing <slug>",
-  "/briefing --research path/to/.research-foo.json", or
+  Reads scout artifacts (presearch/.scout-<slug>.json), walks prev pointers to
+  load clarify, research, and scope data, writes human-readable presearch briefing
+  (presearch/<slug>.md). Standalone invocable. Use when the user says "/briefing <slug>",
+  "/briefing --scout path/to/.scout-foo.json", or
   "/briefing --refine presearch/existing.md".
 args:
   - name: args
     type: string
     description: >
-      <slug> (looks up .research-<slug>.json in cwd),
-      --research path/to/.research-foo.json (explicit path),
+      <slug> (looks up presearch/.scout-<slug>.json),
+      --scout path/to/.scout-foo.json (explicit path),
+      --research path/to/.research-foo.json (backward compat, treated as --scout),
       or --refine presearch/existing.md (update existing briefing with new research).
 ---
 
@@ -27,28 +28,40 @@ User has requested: `/briefing {{args}}`
 Parse `{{args}}` into mode, flags, and input path:
 
 **Flags** (strip from args after detection):
-- `--deep` is NOT a flag for this skill directly — but check the research artifact's metadata for `deep: true` (set upstream). If present, run extra Gemini passes in Step 5.
+- `--deep` is NOT a flag for this skill directly — but check the scout artifact's metadata for `deep: true` (set upstream). If present, run extra Gemini passes in Step 5.
 
 **Mode detection** (after stripping flags):
-1. **Slug mode** (default): remaining arg is a plain string. Look for `.research-<slug>.json` in cwd. Error if not found:
+1. **Slug mode** (default): remaining arg is a plain string. Look for `presearch/.scout-<slug>.json`. Error if not found:
    ```
-   Error: No .research-<slug>.json found in current directory. Run /research first, or use --research <path> to specify the artifact.
+   Error: No .scout-<slug>.json found. Run /scout first, or use --scout <path>.
    ```
-2. **Explicit research mode**: `--research <path>` — read the specified file directly. Extract slug from the artifact's `slug` field.
-3. **Refine mode**: `--refine <path>` — path should be an existing `presearch/<slug>.md`. Read the existing briefing AND the corresponding `.research-<slug>.json` (extract slug from the briefing filename). Both must exist.
+2. **Explicit scout mode**: `--scout <path>` — read the specified file directly. Extract slug from the artifact's `slug` field. Backward compat: `--research <path>` is also accepted and treated identically.
+3. **Refine mode**: `--refine <path>` — path should be an existing `presearch/<slug>.md`. Read the existing briefing AND the corresponding `presearch/.scout-<slug>.json` (extract slug from the briefing filename). Both must exist.
 
 **Load artifacts:**
-- Read the `.research-<slug>.json` file. Validate:
-  - Has `"skill": "research"` field
+- Read the `presearch/.scout-<slug>.json` file. Validate:
+  - Has `"skill": "scout"` field (also accept `"skill": "research"` for backward compat during transition)
   - Has non-empty `data` field
   - Error with actionable message if validation fails:
     ```
-    Error: Artifact is not a research output (skill: "<actual>"). Expected skill: "research". Did you mean to pass a different file?
+    Error: Artifact is not a scout output (skill: "<actual>"). Expected skill: "scout". Did you mean to pass a different file?
     ```
-- Walk the `prev` pointer: if the research artifact has a `prev` array containing a path to `.clarify-<slug>.json`, and that file exists, read it. Extract:
-  - `data.decisions` — resolved Q&A decisions and constraints
-  - `data.constraints` — hard constraints from clarify phase
-  - If the clarify file doesn't exist, continue without it — clarify is optional.
+- **Walk the `prev` chain** — the chain is now longer than before. From the scout artifact:
+  1. Read `prev` array. It may contain paths to `.clarify-<slug>.json` and/or `presearch/.research-<slug>.json`.
+  2. **Load clarify artifact**: if a `.clarify-<slug>.json` path is in `prev` and the file exists, read it. Extract:
+     - `data.decisions` — resolved Q&A decisions and constraints
+     - `data.constraints` — hard constraints from clarify phase
+     - If the clarify file doesn't exist, continue without it — clarify is optional.
+  3. **Load knowledge synthesis artifact**: if a `presearch/.research-<slug>.json` path is in `prev` (or in clarify's own `prev`), and the file exists, read it. Extract:
+     - `data.synthesized_findings` — domain knowledge for Gemini synthesis
+     - `data.citations` — source attribution to preserve in the briefing
+     - `data.conflicts` — contradictions to surface in the briefing
+     - If the research file doesn't exist, continue without it — research is optional.
+  4. **Load scope artifact**: walk further up via research's `prev` (or clarify's `prev` if research was skipped). If `.scope-<slug>.json` exists, read it. Extract:
+     - `data.stack_detected` — detected project stack
+     - `data.in_scope` — must-include items
+     - `data.out_of_scope` — explicitly excluded items
+     - If the scope file doesn't exist, continue without it — scope context is optional.
 
 ---
 
@@ -59,7 +72,7 @@ Check the current working directory for project markers:
 
 If found: read relevant files to extract stack info (framework, language, existing dependencies, patterns). This becomes hard constraints for synthesis.
 
-If the research artifact's `data` already contains stack constraints (from upstream /research or /clarify), use those instead of re-scanning. Avoid duplicating constraint detection.
+If the scout artifact's `data` already contains stack constraints (from upstream /scope, /research, or /clarify via prev chain), use those instead of re-scanning. Avoid duplicating constraint detection.
 
 If nothing found and no upstream constraints: greenfield mode.
 
@@ -68,7 +81,7 @@ If nothing found and no upstream constraints: greenfield mode.
 ## Step 3: Synthesize with Gemini
 
 1. Load Gemini: `ToolSearch: select:mcp__gemini__gemini_chat`
-2. Call `gemini_chat` with ALL accumulated context (research data, clarify decisions, stack constraints, web research results from the research artifact) in a single prompt:
+2. Call `gemini_chat` with ALL accumulated context (scout implementation data, knowledge synthesis from research if in chain, clarify decisions, scope context, stack constraints) in a single prompt:
 
 ```
 Given this research, produce a structured technical briefing. Include:
@@ -93,10 +106,15 @@ Flag anything you're uncertain about.
 
 Also assess complexity: estimate feature count. If >5 features, suggest MVP phasing — what ships first vs what can wait.
 
-Research data: <research artifact data field>
+If research conflicts exist, address each one: evaluate the sources, pick a position if possible, or surface both sides with your assessment.
+
+Scout implementation data: <scout artifact data field (findings, api_shapes, testable_assertions)>
+Knowledge synthesis: <research artifact data.synthesized_findings if in chain, or "none — research was skipped">
+Research conflicts: <research artifact data.conflicts if in chain, or "none">
+Research citations: <research artifact data.citations if in chain, or "none">
+Scope context: <scope artifact data (in_scope, out_of_scope, stack_detected) if in chain, or "none">
 Clarify decisions: <clarify decisions if loaded, or "none">
 Stack constraints: <constraints from Step 2>
-Web research results: <web_results from research artifact data, if present>
 ```
 
 **For `--refine` mode**: include the existing briefing content and instruct Gemini to update rather than regenerate:
@@ -109,14 +127,15 @@ Do not regenerate sections where the existing content is still accurate.
 Existing briefing:
 <briefing contents>
 
-New research data: <research artifact data>
+New scout data: <scout artifact data>
+Knowledge synthesis: <research artifact data if in chain, or "none">
 ```
 
 ---
 
 ## Step 4: Build Test Strategy
 
-Extract `testable_assertions` from the research artifact's `data` field (if present).
+Extract `testable_assertions` from the scout artifact's `data` field (if present).
 
 Combine with gotchas and API edge cases from Gemini synthesis output (Step 3).
 
@@ -143,7 +162,7 @@ Cross-check Gemini's synthesis:
 - Does the deployment path work? Is the recommended platform compatible with the stack (e.g. don't recommend Vercel for a Python-only backend)?
 
 ### 5b. Deep mode (optional)
-If the research artifact metadata contains `deep: true`: run a second `gemini_chat` pass on uncertain areas identified in 5a. Feed the specific questions back to Gemini with the original research context.
+If the scout artifact metadata contains `deep: true`: run a second `gemini_chat` pass on uncertain areas identified in 5a. Feed the specific questions back to Gemini with the original scout and research context.
 
 ### 5c. Scope assessment
 If >5 features in the synthesis:
@@ -161,8 +180,8 @@ Write the phasing directly into the briefing output. This skill does NOT gate on
 ## Step 6: Write briefing
 
 **File path:**
-- Default: `presearch/<slug>.md` (slug from the research artifact's `slug` field)
-- `--refine` mode: update the existing file in place. Preserve `## Constraints` and `## Decisions` sections unless the research explicitly provides updated information for them.
+- Default: `presearch/<slug>.md` (slug from the scout artifact's `slug` field)
+- `--refine` mode: update the existing file in place. Preserve `## Constraints` and `## Decisions` sections unless the scout or research data explicitly provides updated information for them.
 
 **Briefing structure:**
 
@@ -325,20 +344,29 @@ Do NOT prompt to ship. That is the orchestrator's job (Phase 2 rewiring). Just r
 ### How to verify this skill works
 
 **Critical paths:**
-- Given a valid `.research-<slug>.json`, the skill writes `presearch/<slug>.md` with all required sections
-- Given `prev` pointers in the research artifact, clarify data is loaded and incorporated
-- Given `testable_assertions` in research data, `## Test Strategy` section appears with all four subsections
+- Given a valid `presearch/.scout-<slug>.json`, the skill writes `presearch/<slug>.md` with all required sections
+- Given `prev` pointers in the scout artifact, clarify data is loaded and incorporated
+- Given research knowledge artifact in chain, synthesized_findings incorporated into Gemini synthesis prompt
+- Given conflicts in research data, briefing surfaces them with resolution or both sides
+- Given research citations in chain, briefing preserves source attribution
+- Given scope artifact in chain, stack_detected/in_scope/out_of_scope inform constraints
+- Given `testable_assertions` in scout data, `## Test Strategy` section appears with all four subsections
 - Given >5 features, phasing is applied (MVP / Phase 2 / Cut with reasoning)
 
 **Edge cases:**
-- Research artifact missing or malformed: actionable error message, not a stack trace
+- Scout artifact missing or malformed: actionable error message, not a stack trace
 - Clarify file referenced in `prev` but doesn't exist: skill continues without it
+- Research file referenced in chain but doesn't exist: skill continues without it
+- Scope file referenced in chain but doesn't exist: skill continues without it
 - `--refine` mode: existing Constraints and Decisions sections preserved unless explicitly changed
-- `--research` with explicit path: slug extracted from artifact, not from arg parsing
+- `--scout` with explicit path: slug extracted from artifact, not from arg parsing
+- `--research` flag accepted for backward compat, treated as `--scout`
+- Old artifacts with `skill: "research"` accepted as scout artifacts during transition
 - Empty `testable_assertions`: Test Strategy section still appears with edge cases from gotchas
 
 **Integration boundaries:**
-- Artifact contract: reads `slug`, `scope`, `prev`, `skill`, `data` fields per refs/skill-graph.md
+- Artifact contract: reads `slug`, `scope`, `prev`, `skill`, `data` fields per refs/artifact-contract.md
+- Extended prev chain: scout -> clarify -> research -> scope (walks recursively)
 - Output feeds /plan-stories: briefing must contain ## Features, ## Test Strategy, ## Technical Research
 - Decisions recorded via pm_add_decision + OpenMemory shadow
 

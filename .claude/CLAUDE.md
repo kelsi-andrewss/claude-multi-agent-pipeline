@@ -4,7 +4,7 @@
 When CORRECTION PATTERNS appears at session start:
 1. Group entries by theme (same underlying problem)
 2. For groups with ≥ 3 entries:
-   - **Behavioral** (communication style, judgment calls): auto-promote to `behavioral-prefs.md`. Corrections are tracked in `correction_groups` table (epics.db) and auto-promoted by stop hook when count >= 3.
+   - **Behavioral** (communication style, judgment calls): auto-promoted to correction_groups DB when count >= 3. Rendered to sidecar at session start.
    - **Process** (workflow steps, tool usage): surface to user — "This keeps happening: [pattern]. Should this become a hook or skill?"
 3. Groups with < 3 entries: leave to accumulate — don't act on them yet
 
@@ -23,7 +23,7 @@ See ~/.claude/ORCHESTRATION.md — applies to the main session only, not to spaw
 ## Infrastructure internals
 
 ### Distilling preferences
-Distillation is automated. The stop hook auto-promotes correction patterns (count >= 3) to behavioral-prefs.md and OpenMemory via om_write.py. Auto-distilled entries are prefixed with "(auto-distilled)". Review them at session start to refine wording if needed — but the system works without manual intervention.
+Distillation is automated. The stop hook auto-promotes correction patterns (count >= 3) to the correction_groups DB and OpenMemory via om_write.py. At session start, the SessionStart hook renders all promoted/manual preferences from the DB to `.claude/rendered-prefs.md`, which CLAUDE.md @imports for compaction-resilient context injection.
 
 ### Tool & model learnings
 When a model or tool repeatedly succeeds or fails at a specific task type (2+ occurrences):
@@ -41,23 +41,3 @@ Features that expose registries, hooks, or plugin APIs become implicit dependenc
 - **Storage:** `~/.claude/.claude/openmemory.sqlite`
 - **Scoping:** user_id="global" (cross-project) or user_id="proj:<name>" (per-project)
 - **Embeddings:** Ollama nomic-embed-text (local)
-
-#### OpenMemory Write Discipline
-- **Owner:** `hooks/lib/om_write.py`
-- **Rule:** All OpenMemory writes go through om_write(). No direct SQL inserts.
-- **Tags:** Only `behavioral-pref`, `tool-learning`, `decision`, `prompt-pattern`, `session-summary`, `critique-learning`, `gemini-blind-spot` accepted.
-- **Enforcement:** Tag whitelist, embedding-based dedup (0.85 threshold), per-category budgets, decay-weighted pruning.
-- **Ops log:** `~/.claude/.claude/tracking/om-ops.json`
-
-#### Conversation Memory Pipeline
-- **Owner:** `hooks/lib/signal_processor.py` (correction-decision correlation)
-- **Storage:** `decision_preferences` table in `epics.db`, `correction_groups` table in `epics.db`
-- **MCP tools:** `pm_predict_preference` (query predicted preferences for a domain), `pm_decision_insights` (correlate decisions with outcomes)
-- **Session hook:** `hooks/load-session-context.sh` outputs `PREDICTED PREFERENCES` section from `decision_preferences` table at session start
-- **Write pattern:** `signal_processor.py` correlates corrections with recent decisions and updates `decision_preferences`; stop hook detects corrections in transcript, writes to `correction_groups`, auto-promotes when count >= 3
-
-### Project structure
-`~/.claude/` is itself a git project. Claude Code treats `~/.claude/.claude/` as its project-level config folder. That subfolder contains the live infrastructure: `epics.db`, `scripts/epics-cli.sh`, `hooks/`, `prompts/`. Global skills and instructions live at `~/.claude/skills/` and `~/.claude/ORCHESTRATION.md` — duplicating them into `.claude/.claude/skills/` creates drift between two sources of truth.
-- Framework-specific patterns (React, Firebase, CSS, Konva) live in `refs/pitfalls-*.md` and are delivered to coders via `pm_list_patterns`.
-- Canonical memory files: `memory/*.md` (portable, git-tracked). Run `scripts/setup-memory.sh` on a new machine to symlink into auto memory paths. Run `/bootstrap-memory` to rebuild OpenMemory from flat files.
-- When a planning session ends without implementation (plan rejected, approach changed, or pure research), still write a tracking entry — mark it as architecture category and note what was decided against and why.
