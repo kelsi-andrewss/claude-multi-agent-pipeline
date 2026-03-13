@@ -4,7 +4,7 @@
 When CORRECTION PATTERNS appears at session start:
 1. Group entries by theme (same underlying problem)
 2. For groups with ≥ 3 entries:
-   - **Behavioral** (communication style, judgment calls): auto-promote to `behavioral-prefs.md`. Corrections are tracked in `correction_groups` table (epics.db) and auto-promoted by stop hook when count >= 3.
+   - **Behavioral** (communication style, judgment calls): auto-promoted to correction_groups DB when count >= 3. Rendered to sidecar at session start.
    - **Process** (workflow steps, tool usage): surface to user — "This keeps happening: [pattern]. Should this become a hook or skill?"
 3. Groups with < 3 entries: leave to accumulate — don't act on them yet
 
@@ -23,7 +23,7 @@ See ~/.claude/ORCHESTRATION.md — applies to the main session only, not to spaw
 ## Infrastructure internals
 
 ### Distilling preferences
-Distillation is automated. The stop hook auto-promotes correction patterns (count >= 3) to behavioral-prefs.md and OpenMemory via om_write.py. Auto-distilled entries are prefixed with "(auto-distilled)". Review them at session start to refine wording if needed — but the system works without manual intervention.
+Distillation is automated. The stop hook auto-promotes correction patterns (count >= 3) to the correction_groups DB and OpenMemory via om_write.py. At session start, the SessionStart hook renders all promoted/manual preferences from the DB to `.claude/rendered-prefs.md`, which CLAUDE.md @imports for compaction-resilient context injection.
 
 ### Tool & model learnings
 When a model or tool repeatedly succeeds or fails at a specific task type (2+ occurrences):
