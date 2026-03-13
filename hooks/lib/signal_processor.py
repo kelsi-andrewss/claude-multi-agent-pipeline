@@ -511,6 +511,105 @@ def _process_correction_groups(db_path, project_root):
     conn.close()
 
 
+def process_session_corrections(transcript_path, db_file, session_id="", project_root=None):
+    """Unified entry point: detect corrections from transcript + sync corrections.md to DB.
+
+    Handles:
+    1. Transcript-based correction detection (pre-filter + semantic delta)
+    2. corrections.md manual entry parsing for today's entries
+    3. Per-session rate limiting: max 1 DB increment per theme per session
+
+    Args:
+        transcript_path: Path to JSONL transcript file.
+        db_file: Path to epics.db.
+        session_id: Session identifier (used for rate-limiting log, not DB key).
+        project_root: Root of the dotclaude project (defaults to grandparent of db_file).
+
+    Returns:
+        List of correction dicts: [{"turn_idx": int, "content": str, "weight": float}]
+    """
+    if project_root is None:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_file)))
+
+    all_corrections = []
+    seen_themes = set()
+
+    # --- Part 1: Transcript-based detection ---
+    transcript_corrections = extract_corrections_from_transcript(transcript_path)
+    all_corrections.extend(transcript_corrections)
+
+    # --- Part 2: corrections.md manual entries (today only) ---
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    corrections_file = os.path.join(project_root, "corrections.md")
+    if os.path.isfile(corrections_file):
+        try:
+            with open(corrections_file) as f:
+                content = f.read()
+            for match in re.finditer(r'^## (\d{4}-\d{2}-\d{2}) — (.+)', content, re.MULTILINE):
+                entry_date = match.group(1)
+                entry_desc = match.group(2).strip()
+                if entry_date == today:
+                    all_corrections.append({
+                        "turn_idx": -1,
+                        "content": entry_desc[:300],
+                        "weight": 1.0,
+                    })
+        except (OSError, IOError):
+            pass
+
+    # --- Part 3: Upsert to correction_groups with per-session rate limiting ---
+    if not db_file or not os.path.isfile(db_file):
+        return all_corrections
+
+    try:
+        conn = sqlite3.connect(db_file, timeout=10)
+        cursor = conn.cursor()
+        _ensure_correction_groups_table(cursor)
+        now = int(time.time())
+
+        for correction in all_corrections:
+            theme_text = correction["content"]
+            theme_key = theme_text[:40].strip().lower()
+
+            # Per-session rate limit: skip DB increment if theme already seen this session
+            if theme_key in seen_themes:
+                continue
+            seen_themes.add(theme_key)
+
+            # Check for existing group by text prefix match
+            row = cursor.execute(
+                "SELECT id, count, correction_dates, status FROM correction_groups "
+                "WHERE LOWER(SUBSTR(theme, 1, 40)) = LOWER(SUBSTR(?, 1, 40))",
+                (theme_key,)
+            ).fetchone()
+
+            if row:
+                if row[3] in ('promoted', 'dismissed'):
+                    continue
+                new_count = row[1] + 1
+                old_dates = json.loads(row[2]) if row[2] else []
+                old_dates.append(today)
+                new_status = 'pending_promotion' if new_count >= PROMOTION_THRESHOLD else row[3]
+                cursor.execute(
+                    "UPDATE correction_groups SET count=?, correction_dates=?, status=?, updated_at=? WHERE id=?",
+                    (new_count, json.dumps(old_dates), new_status, now, row[0])
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO correction_groups (theme, status, count, correction_dates, source, created_at, updated_at) "
+                    "VALUES (?, 'accumulating', 1, ?, 'auto', ?, ?)",
+                    (theme_text[:300], json.dumps([today]), now, now)
+                )
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"process_session_corrections DB error: {e}", file=sys.stderr)
+
+    return all_corrections
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]", file=sys.stderr)
@@ -571,7 +670,8 @@ def main():
 
     find_decision_mention_turns(decisions, turns)
 
-    corrections = extract_corrections(turns)
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_path)))
+    corrections = process_session_corrections(transcript_path, db_path, session_id, project_root)
 
     matched_decision_ids = set()
 
@@ -613,12 +713,6 @@ def main():
 
     conn.commit()
     conn.close()
-
-    try:
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_path)))
-        _process_correction_groups(db_path, project_root)
-    except Exception as e:
-        print(f"Correction grouping failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
