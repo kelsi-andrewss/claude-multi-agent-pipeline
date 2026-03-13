@@ -385,7 +385,10 @@ fi
 # ============================================================
 # Section 6b: Compliance hook generation for newly promoted prefs
 # ============================================================
-if [[ -f "$DB_FILE" ]]; then
+# Skip hook generation in subagent sessions
+if [[ -n "${CLAUDE_AGENT_ID:-}" ]]; then
+  :
+elif [[ -f "$DB_FILE" ]]; then
 python3 - "$DB_FILE" "$HOME/.claude" <<'HOOKGENEOF'
 import json, os, sqlite3, sys
 
