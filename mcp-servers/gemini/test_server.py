@@ -2305,3 +2305,73 @@ class TestPmOrganizeRegroup:
         # If moves exist, they should only reference epic-001 as source
         for epic_id_val in all_from:
             assert epic_id_val == "epic-001"
+
+
+# ---------------------------------------------------------------------------
+# web_search
+# ---------------------------------------------------------------------------
+
+class TestWebSearch:
+    def test_returns_response(self, mock_subprocess):
+        """web_search returns non-empty string from Gemini."""
+        _, proc = mock_subprocess
+
+        result = asyncio.get_event_loop().run_until_complete(
+            server.web_search("latest Python 3.13 features")
+        )
+
+        assert result == "test response"
+
+    def test_system_instruction_includes_search_grounding(self, mock_subprocess):
+        """System instruction forces Google Search grounding and citations."""
+        _, proc = mock_subprocess
+
+        asyncio.get_event_loop().run_until_complete(
+            server.web_search("test query")
+        )
+
+        piped_input = proc.communicate.call_args[1]["input"].decode()
+        assert "Google Search" in piped_input
+        assert "citation" in piped_input.lower()
+
+    def test_does_not_include_no_code_instruction(self, mock_subprocess):
+        """web_search must NOT use NO_CODE_INSTRUCTION — results may contain code."""
+        _, proc = mock_subprocess
+
+        asyncio.get_event_loop().run_until_complete(
+            server.web_search("test query")
+        )
+
+        piped_input = proc.communicate.call_args[1]["input"].decode()
+        assert server.NO_CODE_INSTRUCTION not in piped_input
+
+    def test_short_response_returned_directly(self, mock_subprocess):
+        """Responses under 2000 chars are returned as-is."""
+        _, proc = mock_subprocess
+        proc.communicate = AsyncMock(return_value=(
+            json.dumps({"response": "short answer"}).encode(),
+            b"",
+        ))
+
+        result = asyncio.get_event_loop().run_until_complete(
+            server.web_search("test query")
+        )
+
+        assert result == "short answer"
+        assert "/tmp/gemini/" not in result
+
+    def test_long_response_writes_detail_file(self, mock_subprocess):
+        """Responses over 2000 chars write to /tmp/gemini/search.md."""
+        _, proc = mock_subprocess
+        long_text = "A" * 2500
+        proc.communicate = AsyncMock(return_value=(
+            json.dumps({"response": long_text}).encode(),
+            b"",
+        ))
+
+        result = asyncio.get_event_loop().run_until_complete(
+            server.web_search("test query")
+        )
+
+        assert "/tmp/gemini/search.md" in result
+        assert result.startswith("A")
