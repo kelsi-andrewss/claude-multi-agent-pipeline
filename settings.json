@@ -14,7 +14,8 @@
       "Bash(/Users/kelsiandrews/.claude/tracking/stop-hook.sh*)",
       "Bash(/Users/kelsiandrews/.claude/tracking/subagent-stop-hook.sh*)",
       "Bash(~/.claude/hooks/compliance/compliance-kelsi-andrews-9-52-pm-hey-reuben-i-have-a-really-interesting.sh*)",
-      "Bash(~/.claude/hooks/compliance/compliance-2026-03-04-why-didn-t-u-use-ship-skill-omfg.sh*)"
+      "Bash(~/.claude/hooks/compliance/compliance-2026-03-04-why-didn-t-u-use-ship-skill-omfg.sh*)",
+      "Bash(~/.claude/hooks/inject-tier2-context.sh*)"
     ],
     "defaultMode": "default"
   },
@@ -173,6 +174,17 @@
             "command": "/Users/kelsiandrews/.claude/tracking/subagent-stop-hook.sh",
             "timeout": 30,
             "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/inject-tier2-context.sh",
+            "timeout": 5
           }
         ]
       }
