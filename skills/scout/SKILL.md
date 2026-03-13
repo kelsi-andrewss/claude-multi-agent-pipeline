@@ -1,23 +1,27 @@
 ---
-name: research
+name: scout
 description: >
-  Parallel web research for a technical topic using two independent subagents —
-  Gemini for broad discovery, Claude for deep extraction. Merges findings with
-  conflict detection and agent attribution. Reads .clarify-<slug>.json if provided.
-  Writes .research-<slug>.json with merged findings, URLs, API shapes, testable
-  assertions, conflicts, and search queries. Use when the user says "/research <topic>",
-  "/research --clarify presearch/.clarify-foo.json", or "/research --deep <topic>".
+  Gemini seed scouting + web validation for implementation details. Finds APIs,
+  packages, architecture patterns, and testable assertions. Accepts upstream
+  knowledge context via --research flag. Parallel subagents (Gemini broad discovery,
+  Claude deep extraction) with conflict detection and agent attribution.
+  Reads .clarify-<slug>.json if provided. Writes .scout-<slug>.json with merged
+  findings, URLs, API shapes, testable assertions, conflicts, and search queries.
+  Use when the user says "/scout <topic>", "/scout --clarify presearch/.clarify-foo.json",
+  "/scout --research presearch/.research-foo.json", or "/scout --deep <topic>".
 args:
   - name: args
     type: string
     description: >
       Topic (quoted string or free text), optional flags: --clarify <path> (path to
-      .clarify-<slug>.json), --deep (double search/fetch budgets for both agents).
+      .clarify-<slug>.json), --research <path> (path to .research-<slug>.json
+      knowledge synthesis artifact from upstream deep research), --deep (double
+      search/fetch budgets for both agents).
 ---
 
-# Research Skill Invoked
+# Scout Skill Invoked
 
-User has requested: `/research {{args}}`
+User has requested: `/scout {{args}}`
 
 ---
 
@@ -26,15 +30,17 @@ User has requested: `/research {{args}}`
 Parse `{{args}}` to extract:
 
 - `--clarify <path>` -> path to a `.clarify-<slug>.json` artifact. Optional. The value is the next token after `--clarify`.
+- `--research <path>` -> path to a `presearch/.research-<slug>.json` knowledge synthesis artifact. Optional. The value is the next token after `--research`.
 - `--deep` -> flag to double search/fetch budgets for both agents. Boolean, no value.
 - Everything remaining after flag stripping -> `topic`. Required. If empty after stripping flags, ask:
   ```
-  AskUserQuestion: "What topic should I research?"
+  AskUserQuestion: "What topic should I scout?"
   ```
   Wait for the user's response before proceeding.
 
 **Slug derivation:**
 - If `--clarify` was provided and the artifact contains a `slug` field: use that slug.
+- If `--research` was provided and the artifact contains a `slug` field (and no slug from clarify): use that slug.
 - Otherwise: topic text lowercased, spaces to hyphens, non-alphanumeric stripped, truncated to 40 chars.
 
 ---
@@ -64,9 +70,33 @@ Parse `{{args}}` to extract:
 
 ---
 
+## Step 1.5: Load research context (if --research)
+
+**If `--research <path>` was provided:**
+
+1. Read the file at the given path using the Read tool.
+2. Validate it matches the knowledge synthesis artifact contract:
+   - Must have `slug` (string)
+   - Must have `skill: "research"`
+   - Must have `data` containing `synthesized_findings` (array) and `citations` (array)
+3. If validation fails, stop and report:
+   ```
+   Error: <path> is not a valid research artifact. Expected slug, skill="research", and data with synthesized_findings/citations.
+   ```
+4. Extract from the artifact:
+   - `data.synthesized_findings` -> domain knowledge findings (these inform what APIs/packages to scout for)
+   - `data.citations` -> source URLs already discovered (avoid re-fetching)
+   - `data.conflicts` -> unresolved conflicts to be aware of
+   - `data.gaps` -> knowledge gaps that scout should try to fill
+   - `slug` -> use as slug if no slug derived yet
+
+**If not provided:** standalone mode. No upstream knowledge context.
+
+---
+
 ## Step 2: Generate search focus areas
 
-Analyze the topic (and clarify decisions if present) to produce **3-5 specific search focus areas**. These focus areas are shared input to both subagent prompts, ensuring both agents cover the same dimensions without anchoring one to the other's findings.
+Analyze the topic (and clarify decisions if present, and research findings if present) to produce **3-5 specific search focus areas**. These focus areas are shared input to both subagent prompts, ensuring both agents cover the same dimensions without anchoring one to the other's findings.
 
 Focus areas are short descriptions of what to investigate, NOT search queries. Agents derive their own queries from these. Examples:
 - "Authentication flow and token management for <service>"
@@ -76,6 +106,8 @@ Focus areas are short descriptions of what to investigate, NOT search queries. A
 - "Real-time sync architecture patterns for <use case>"
 
 If `--clarify` was provided, the focus areas must reflect the clarify decisions. For example, if the decision was "use Firebase Auth, not Supabase Auth", the focus area should be about Firebase Auth specifically — not a generic "authentication options" focus area.
+
+If `--research` was provided, prioritize focus areas that address the research gaps. Avoid duplicating focus areas for topics already well-covered by the upstream research findings -- focus on implementation specifics the domain research did not cover.
 
 This is a reasoning-only step. No tool calls.
 
@@ -116,7 +148,25 @@ Constraints:
 <list each constraint: type, value>
 </if --clarify>
 
-OUTPUT: When done, write your findings to the file presearch/.research-<slug>-gemini.json
+<if --research>
+Upstream knowledge context (from deep research phase):
+Key findings:
+<list synthesized_findings summaries>
+
+Known gaps (prioritize scouting for these):
+<list gaps>
+
+Unresolved conflicts:
+<list conflicts if any>
+
+Use this domain knowledge to inform your implementation recommendations.
+Focus on concrete APIs, packages, and architecture patterns that align with these findings.
+
+Already-discovered URLs (skip these, find new sources):
+<list citation URLs from research artifact>
+</if --research>
+
+OUTPUT: When done, write your findings to the file presearch/.scout-<slug>-gemini.json
 using the Write tool. The file must be valid JSON matching this exact schema:
 
 {
@@ -139,7 +189,7 @@ include whatever claims you gathered. If you fail completely, set "status": "fai
 and "error": "<what went wrong>".
 
 RETURN: After writing the file, return ONLY this line:
-DONE: <N> findings written to presearch/.research-<slug>-gemini.json
+DONE: <N> findings written to presearch/.scout-<slug>-gemini.json
 
 Do NOT return the findings themselves. Do NOT ask questions. Do NOT use AskUserQuestion
 or any interactive tools.
@@ -189,7 +239,25 @@ Constraints:
 <list each constraint: type, value>
 </if --clarify>
 
-OUTPUT: When done, write your findings to the file presearch/.research-<slug>-claude.json
+<if --research>
+Upstream knowledge context (from deep research phase):
+Key findings:
+<list synthesized_findings summaries>
+
+Known gaps (prioritize scouting for these):
+<list gaps>
+
+Unresolved conflicts:
+<list conflicts if any>
+
+Use this domain knowledge to inform your implementation recommendations.
+Focus on concrete APIs, packages, and architecture patterns that align with these findings.
+
+Already-discovered URLs (skip these, find new sources):
+<list citation URLs from research artifact>
+</if --research>
+
+OUTPUT: When done, write your findings to the file presearch/.scout-<slug>-claude.json
 using the Write tool. The file must be valid JSON matching this exact schema:
 
 {
@@ -212,7 +280,7 @@ include whatever claims you gathered. If you fail completely, set "status": "fai
 and "error": "<what went wrong>".
 
 RETURN: After writing the file, return ONLY this line:
-DONE: <N> findings written to presearch/.research-<slug>-claude.json
+DONE: <N> findings written to presearch/.scout-<slug>-claude.json
 
 Do NOT return the findings themselves. Do NOT ask questions. Do NOT use AskUserQuestion
 or any interactive tools.
@@ -230,8 +298,8 @@ Both agents were launched with `run_in_background=true`. Wait for notification t
 
 Once both agents have completed (or timed out), read the intermediate files:
 
-1. Read `presearch/.research-<slug>-gemini.json` using the Read tool.
-2. Read `presearch/.research-<slug>-claude.json` using the Read tool.
+1. Read `presearch/.scout-<slug>-gemini.json` using the Read tool.
+2. Read `presearch/.scout-<slug>-claude.json` using the Read tool.
 
 **Validate each file:**
 - File exists and contains valid JSON
@@ -244,7 +312,7 @@ Once both agents have completed (or timed out), read the intermediate files:
 - **One fails** (file missing, invalid JSON, or `status: "failed"`): Proceed to Step 5 with the successful agent's data only. Set `partial_research = true`. Add to gaps: `"<agent> agent failed: <error message or 'file not found or invalid JSON'>"`.
 - **Both fail**: Stop. Do not write a canonical artifact. Report:
   ```
-  Research failed — both agents returned errors.
+  Scouting failed — both agents returned errors.
 
   Gemini: <error or "file not found">
   Claude: <error or "file not found">
@@ -355,9 +423,9 @@ Confidence levels:
 
 ## Step 6: Write canonical artifact
 
-Write the merged output to `presearch/.research-<slug>.json`.
+Write the merged output to `presearch/.scout-<slug>.json`.
 
-**Schema** (backward-compatible with existing `/briefing` consumption):
+**Schema:**
 
 ```json
 {
@@ -368,8 +436,8 @@ Write the merged output to `presearch/.research-<slug>.json`.
     "complexity": "<small | medium | large | null>"
   },
   "route_hint": "<from clarify if available, else null>",
-  "prev": ["<clarify artifact path if --clarify was used, else empty array>"],
-  "skill": "research",
+  "prev": ["<clarify artifact path if --clarify was used>", "<research artifact path if --research was used>"],
+  "skill": "scout",
   "data": {
     "topic": "<original topic text>",
     "findings": [
@@ -419,7 +487,7 @@ Write the merged output to `presearch/.research-<slug>.json`.
       }
     ],
     "gaps": [
-      "string — topics where research failed or was incomplete"
+      "string — topics where scouting failed or was incomplete"
     ]
   }
 }
@@ -428,11 +496,11 @@ Write the merged output to `presearch/.research-<slug>.json`.
 **Field rules:**
 - If `scope` and `route_hint` came from the clarify artifact, preserve them as-is.
 - If standalone (no `--clarify`): set scope fields to null, route_hint to null. The briefing skill determines these.
-- `prev`: array containing the clarify artifact path if `--clarify` was used, otherwise empty array.
+- `prev`: array containing all upstream artifact paths. Include the clarify artifact path if `--clarify` was used, and the research artifact path if `--research` was used. Empty array if neither was used.
 - `conflicts`: empty array if no conflicts detected.
 - `search_queries`: aggregated from both agents, deduplicated.
 - `partial_research`: `true` only if one agent failed. `false` by default.
-- `gaps`: empty array if all research succeeded and both agents completed.
+- `gaps`: empty array if all scouting succeeded and both agents completed.
 
 ---
 
@@ -440,7 +508,7 @@ Write the merged output to `presearch/.research-<slug>.json`.
 
 Print:
 ```
-Research complete.
+Scout complete.
 
 Topic: <topic>
 Agents: <which agents completed> (e.g., "gemini + claude" or "claude only (gemini failed)")
@@ -451,14 +519,15 @@ Search queries: <count> used
 Testable assertions: <count> (<verified count> verified, <uncertain count> uncertain)
 Gaps: <list or "none">
 
-Output: presearch/.research-<slug>.json
+Output: presearch/.scout-<slug>.json
 ```
 
 If `partial_research` is true, prepend:
 ```
-WARNING: Partial research — <agent> agent failed. Results may have reduced coverage.
+WARNING: Partial scouting — <agent> agent failed. Results may have reduced coverage.
 ```
 
+If `--research` was used, also print: `Upstream: <research artifact path>`
 If `--clarify` was used, also print: `Upstream: <clarify artifact path>`
 
 Do NOT prompt to run /briefing or any downstream skill. This skill writes its artifact and reports. Routing is the orchestrator's job.
