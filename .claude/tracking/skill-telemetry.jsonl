@@ -223,3 +223,11 @@
 {"timestamp": "2026-03-11T21:12:14Z", "date": "2026-03-11", "skill": "ship", "args": "presearch/visual-iteration-loop.md", "session_id": "unknown"}
 {"timestamp": "2026-03-11T21:12:21Z", "date": "2026-03-11", "skill": "plan-stories", "args": "presearch/visual-iteration-loop.md", "session_id": "unknown"}
 {"timestamp": "2026-03-11T21:14:48Z", "date": "2026-03-11", "skill": "draft-plans", "args": ".ship-manifest.json --skip-critique --briefing presearch/visual-iteration-loop.md", "session_id": "unknown"}
+{"timestamp": "2026-03-13T22:25:20Z", "date": "2026-03-13", "skill": "ship", "args": "presearch/refactor-run-stories-skill.md", "session_id": "unknown"}
+{"timestamp": "2026-03-13T22:27:54Z", "date": "2026-03-13", "skill": "draft-plans", "args": ".ship-manifest.json --skip-critique --briefing presearch/refactor-run-stories-skill.md", "session_id": "unknown"}
+{"timestamp": "2026-03-13T22:30:11Z", "date": "2026-03-13", "skill": "presearch", "args": "web search MCP command", "session_id": "unknown"}
+{"timestamp": "2026-03-13T22:30:16Z", "date": "2026-03-13", "skill": "scope", "args": "web search MCP command", "session_id": "unknown"}
+{"timestamp": "2026-03-13T22:31:16Z", "date": "2026-03-13", "skill": "run-stories", "args": "story-720 story-721 story-722", "session_id": "unknown"}
+{"timestamp": "2026-03-13T22:32:58Z", "date": "2026-03-13", "skill": "research", "args": "--scope .scope-web-search-mcp-command.json web search MCP command for Gemini MCP server", "session_id": "unknown"}
+{"timestamp": "2026-03-13T22:36:02Z", "date": "2026-03-13", "skill": "clarify", "args": "web search MCP command", "session_id": "unknown"}
+{"timestamp": "2026-03-13T22:36:09Z", "date": "2026-03-13", "skill": "scout", "args": "--scope .scope-web-search-mcp-command.json web search MCP command", "session_id": "unknown"}

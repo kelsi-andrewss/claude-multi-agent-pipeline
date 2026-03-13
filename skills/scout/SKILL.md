@@ -128,6 +128,19 @@ INVESTIGATE ALL OF THE FOLLOWING:
 5. **Test patterns**: Find existing tests related to the topic area. Note the test
    framework, assertion style, and what's tested vs what isn't.
 
+6. **Completeness check**: Find ALL occurrences of the pattern, function, component,
+   or code path being changed. Don't stop at the first match — exhaust the search.
+   Use multiple Grep queries with variations (aliases, re-exports, dynamic references).
+   For each write target, answer: "Are there other places that do the same thing,
+   call the same thing, or depend on the same thing?" List every occurrence found
+   and flag any that might be missed.
+
+7. **Blast radius**: For each write target, trace what depends on it — imports,
+   callers, consumers, downstream data flows. Identify what could break if this
+   file changes. Include: direct importers, test files that exercise this code,
+   config files that reference it, and any runtime dependencies (e.g., API contracts,
+   event listeners, database queries that assume a specific shape).
+
 DEPTH: <"thorough" if --deep, "medium" otherwise>
 
 OUTPUT: Return a structured summary with these sections:
@@ -150,6 +163,17 @@ TEST LANDSCAPE:
 - What test framework and patterns are used?
 - What's the test coverage situation for this area?
 - What assertion patterns are established?
+
+COMPLETENESS:
+- For each write target: list ALL occurrences of the pattern/function/component found
+- Flag any search strategies that might miss occurrences (dynamic imports, string references, etc.)
+- Confidence level: "exhaustive" (all variants searched) or "best-effort" (some vectors couldn't be searched)
+
+BLAST RADIUS:
+- For each write target: what files import/call/depend on it?
+- What tests exercise this code?
+- What runtime contracts (APIs, events, DB schemas) could break?
+- Downstream effects: if this change is wrong, what symptoms would appear and where?
 
 GAPS:
 - Areas where the codebase has no established pattern (greenfield)
@@ -207,6 +231,8 @@ Categories:
 - `dependency` — relevant packages, their versions, and what they provide
 - `test` — test framework, patterns, coverage gaps
 - `architecture` — structural decisions about how the codebase is organized
+- `completeness` — all occurrences of the target pattern/code, with confidence level
+- `blast_radius` — downstream dependencies, callers, and what could break
 
 ### 4b: Build testable assertions
 
@@ -285,6 +311,26 @@ Write to `presearch/.scout-<slug>.json`.
         "resolution": "string -- which should win and why"
       }
     ],
+    "completeness": {
+      "confidence": "exhaustive | best-effort",
+      "occurrences": [
+        {
+          "target": "string -- what was searched for",
+          "locations": ["string -- file:line or file paths"],
+          "search_strategies": ["string -- grep patterns, glob patterns used"],
+          "blind_spots": ["string -- search vectors that couldn't be covered"]
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "string -- file being modified",
+        "dependents": ["string -- files that import/call/depend on this"],
+        "test_coverage": ["string -- test files that exercise this code"],
+        "runtime_contracts": ["string -- APIs, events, DB schemas that could break"],
+        "failure_symptoms": "string -- if this change is wrong, what breaks and where"
+      }
+    ],
     "gaps": [
       "string -- topics where codebase has no established pattern"
     ]
@@ -311,6 +357,8 @@ Findings: <count> across <category count> categories
 Decisions: <count> relevant recorded decisions
 Write targets: <count> files (<list>)
 Testable assertions: <count>
+Completeness: <exhaustive | best-effort> (<N> occurrences mapped, <M> blind spots)
+Blast radius: <count> write targets with <total dependents> downstream files
 Conflicts: <count> (codebase vs research disagreements)
 Gaps: <list or "none">
 

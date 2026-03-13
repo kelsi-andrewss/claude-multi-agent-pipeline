@@ -148,3 +148,19 @@ these dates to compare friction rates before and after skill changes.
 - 2026-03-11 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
 - 2026-03-11 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
 - 2026-03-11 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
+- 2026-03-13 modified /scope — Capture lightweight project definition, detect existing stack, and classify domain complexity to determine whether deep research is needed before clarify. Use when the user says \"/scope <topic>\" or \"/scope --skip-qa <topic>\".
+- 2026-03-13 modified /scope — Capture lightweight project definition, detect existing stack, and classify domain complexity to determine whether deep research is needed before clarify. Use when the user says \"/scope <topic>\" or \"/scope --skip-qa <topic>\".
+- 2026-03-13 modified /scope — Capture lightweight project definition, detect existing stack, and classify domain complexity to determine whether deep research is needed before clarify. Use when the user says \"/scope <topic>\" or \"/scope --skip-qa <topic>\".
+- 2026-03-13 modified /clarify — Detect project constraints, analyze ambiguities via Gemini, batch Q&A to the user, and write a typed JSON artifact (.clarify-<slug>.json) for downstream consumption. Use when the user says \"/clarify <topic>\", \"/clarify path/to/requirements.md\", \"/clarify --quick <topic>\", or \"/clarify --research <path> <topic>\".
+- 2026-03-13 modified /clarify — Detect project constraints, analyze ambiguities via Gemini, batch Q&A to the user, and write a typed JSON artifact (.clarify-<slug>.json) for downstream consumption. Use when the user says \"/clarify <topic>\", \"/clarify path/to/requirements.md\", \"/clarify --quick <topic>\", or \"/clarify --research <path> <topic>\".
+- 2026-03-13 modified /scout — Project introspection for implementation planning. Reads the codebase, queries r
+- 2026-03-13 modified /scout — Project introspection for implementation planning. Reads the codebase, queries r
+- 2026-03-13 modified /scout — Project introspection for implementation planning. Reads the codebase, queries r
+- 2026-03-13 modified /scout — Project introspection for implementation planning. Reads the codebase, queries r
+- 2026-03-13 modified /briefing — Gemini synthesis + Claude critique + scope check + decision recording. Reads sco
+- 2026-03-13 modified /briefing — Gemini synthesis + Claude critique + scope check + decision recording. Reads sco
+- 2026-03-13 modified /briefing — Gemini synthesis + Claude critique + scope check + decision recording. Reads sco
+- 2026-03-13 modified /briefing — Gemini synthesis + Claude critique + scope check + decision recording. Reads sco
+- 2026-03-13 modified /scout — Project introspection for implementation planning. Reads the codebase, queries r
+- 2026-03-13 modified /scope — Capture lightweight project definition, detect existing stack, and classify domain complexity to determine whether deep research is needed before clarify. Use when the user says \"/scope <topic>\" or \"/scope --skip-qa <topic>\".
+- 2026-03-13 modified /scope — Capture lightweight project definition, detect existing stack, and classify domain complexity to determine whether deep research is needed before clarify. Use when the user says \"/scope <topic>\" or \"/scope --skip-qa <topic>\".
