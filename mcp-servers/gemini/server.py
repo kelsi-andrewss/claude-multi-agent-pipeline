@@ -40,6 +40,9 @@ _r_pm_decisions(mcp)
 from tools_knowledge import register as _r_knowledge
 _r_knowledge(mcp)
 
+from tools_search import register as _r_search
+_r_search(mcp)
+
 
 if __name__ == "__main__":
     import sys
