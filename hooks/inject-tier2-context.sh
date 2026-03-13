@@ -93,7 +93,7 @@ for cat in "${MATCHED_CATEGORIES[@]}"; do
       FRAGMENTS+=("Full orchestration rules in ~/.claude/ORCHESTRATION.md. Read it with the Read tool -- do not rely on session context alone.")
       ;;
     infra_corrections)
-      FRAGMENTS+=("Corrections: logged to corrections.md, tracked in correction_groups table (epics.db), auto-promoted to behavioral-prefs.md when count>=3. Distillation: stop hook runs signal_processor.py.")
+      FRAGMENTS+=("Corrections: logged to corrections.md, tracked in correction_groups table (epics.db), auto-promoted when count>=3. Preferences rendered from DB to .claude/rendered-prefs.md at session start. Distillation: stop hook runs signal_processor.py.")
       ;;
     infra_skills)
       FRAGMENTS+=("Skills: ~/.claude/skills/*.md. Invoked via /skill-name. Telemetry logged to .claude/tracking/skill-telemetry.jsonl by log-skill-invocation.sh hook.")
