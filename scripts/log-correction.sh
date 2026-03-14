@@ -55,11 +55,10 @@ cursor.execute(
     "CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)"
 )
 
-theme_key = theme[:40].strip().lower()
 row = cursor.execute(
     "SELECT id, count, correction_dates, status FROM correction_groups "
-    "WHERE LOWER(SUBSTR(theme, 1, 40)) = ? LIMIT 1",
-    (theme_key,)
+    "WHERE theme = ? LIMIT 1",
+    (theme,)
 ).fetchone()
 
 now = int(time.time())
