@@ -12,7 +12,7 @@ These are decision rules and constraints for the main Claude Code session. Spawn
 
 **No direct commits to main or dev**: All work — including hotfixes and quickfixes — must happen on a named feature branch (`hotfix/<slug>`, `quickfix/<slug>`, or story branch). Never commit directly to main or dev from any session.
 
-**Branch merge hierarchy**: `main` is production. The ONLY thing that merges to main is `dev`. Everything else (story branches, hotfixes, quickfixes, epic dev branches) merges to `dev`.
+**Branch merge hierarchy**: `main` is production. The ONLY thing that merges to main is `dev`. Everything else (story branches, hotfixes, quickfixes) merges to `dev`. Stories from different epics execute in parallel — epics are organizational grouping only, not execution boundaries. Conflict detection and dependency ordering operate at the story level across all epics.
 
 **Gemini** — research and planning via MCP tools (`pm_*`, `gemini_*`). Writes to `epics.db`.
 **Coders** (`quick-fixer`, `architect`) — execute approved plan files in worktrees. Never plan. Always `run_in_background: true`.

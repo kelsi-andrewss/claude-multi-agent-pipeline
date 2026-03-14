@@ -159,8 +159,8 @@ Build an execution plan from two analyses:
 - **Group 0**: stories with no `depends_on`, or all dependencies already `done`
 - **Group 1**: stories whose `depends_on` entries are all in Group 0
 - **Group N**: stories whose `depends_on` entries are all in earlier groups
-- If a story's dependency is in a **different epic** and not yet `done`, place it in a named deferred group and explain when it will run:
-  > "story-NNN deferred: depends on story-MMM (different epic, not done). Will run after story-MMM is merged."
+- If a story's dependency (same or different epic) is not yet `done` and is not in the current run batch, place it in a named deferred group and explain when it will run:
+  > "story-NNN deferred: depends on story-MMM (not done, not in this run). Will run after story-MMM is merged."
 - **Never skip a story just because it has dependencies** — place it in the correct dependency group. Every story passed to `/run-stories` MUST appear in the execution plan, either in a parallel batch or a sequential deferred group with a clear "runs after story-NNN merges" label.
 
 ### 2a-post. Bootstrap detection
@@ -168,23 +168,24 @@ Build an execution plan from two analyses:
 After building dependency groups, scan Group 0 for bootstrap stories:
 
 1. A story is a **bootstrap story** if its title matches `/bootstrap/i` AND it has no `depends_on` of its own.
-2. If a bootstrap story is found: move all other Group 0 stories (non-bootstrap) to Group 1, with an implicit dependency on the bootstrap story. Log: "Auto-serialized: story-NNN (bootstrap) runs before all others in this epic"
+2. If a bootstrap story is found: move all other Group 0 stories **from the same epic** (non-bootstrap) to Group 1, with an implicit dependency on the bootstrap story. Stories from other epics in Group 0 are unaffected. Log: "Auto-serialized: story-NNN (bootstrap) runs before all others in epic-MMM"
 3. A story titled like "Bootstrap payment provider" that has `depends_on` entries is NOT treated as bootstrap — it runs normally in its dependency group.
 4. If no bootstrap story exists in the batch, no change to execution order.
 
-### 2b. File conflict detection (within each dependency group)
+### 2b. File conflict detection (across all stories in the run)
 
-Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each dependency group:
+Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then:
 
-1. Collect all story IDs in the group and call `pm_check_conflicts(story_ids=[...])`.
-2. Read the detail file. It contains:
+1. Collect ALL story IDs across all dependency groups and call `pm_check_conflicts(story_ids=[...])` once. This catches write-target overlaps regardless of which epic a story belongs to.
+2. Apply the conflict results to each dependency group: stories within the same group that conflict get serialized; stories in different groups already run sequentially by dependency ordering.
+3. Read the detail file. It contains:
    - `conflicts`: list of `{file, stories}` write-write overlap entries
    - `read_conflicts`: list of `{file, writer, reader}` write-read overlap entries
    - `safe_parallel`: story IDs with no write-file overlaps (launch together)
    - `sequential`: story IDs that must run after conflicting stories merge
-3. Use `safe_parallel` as batch 0. For `sequential` stories, chain them after their conflicting partner from `safe_parallel` finishes.
-4. For `read_conflicts`: ensure the `reader` story runs in a batch after the `writer` story's batch. This prevents a reader from seeing stale file content.
-5. Within each batch, order stories by ID (lowest first) for determinism.
+4. Use `safe_parallel` as batch 0. For `sequential` stories, chain them after their conflicting partner from `safe_parallel` finishes.
+5. For `read_conflicts`: ensure the `reader` story runs in a batch after the `writer` story's batch. This prevents a reader from seeing stale file content.
+6. Within each batch, order stories by ID (lowest first) for determinism.
 
 > **Note:** A story may be placed in a later sequential batch even if it doesn't directly conflict with the story immediately before it. This happens when a downstream story conflicts with *both*, forcing them into a strict order. Stories are always chained safely to prevent merge conflicts.
 
@@ -669,7 +670,7 @@ Batch verification:
   batch 1: BLOCKED (batch 0 failed)
 ```
 
-The `batch` column shows the parallel batch each story ran in (batch 0 = first parallel wave; batch 1 = ran after batch 0 due to conflict; `deferred` = cross-epic dependency not yet merged).
+The `batch` column shows the parallel batch each story ran in (batch 0 = first parallel wave; batch 1 = ran after batch 0 due to conflict; `deferred` = dependency not in this run, not yet merged).
 
 The `verify` column shows the batch verification result for each story's batch. Stories in batches that were blocked by a prior verification failure show `verify: batch N failed`.
 
