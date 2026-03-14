@@ -40,10 +40,12 @@ Read all data sources. Missing files are not errors — report what's available.
    - Apply `since_date` filter if set
    - Apply `focus_skill` filter if set
 
-3. **Outcomes**: Read `~/.claude/outcomes.md`. Parse each `## ` entry:
-   - date, story_id, title, intent, result, agent, model, cycle_time, coder_effort,
-     skills_used, friction_events, file_count, complexity, memory_attributed, what_worked, what_failed
-   - Apply `since_date` filter if set
+3. **Outcomes**: Query `~/.claude/.claude/run-state.db` merge_outcomes table:
+   ```bash
+   sqlite3 -separator "\t" ~/.claude/.claude/run-state.db \
+     "SELECT story_id, agent, model, success, cycle_time_s, skills_used, friction_events, what_worked, what_failed, created_at FROM merge_outcomes WHERE created_at >= '<since_date>' ORDER BY created_at DESC;"
+   ```
+   If `since_date` is not set, omit the `WHERE` clause. If the DB file is missing, skip this source.
 
 4. **Skill changelog**: Read `~/.claude/skill-changelog.md`. Parse each `- ` entry:
    - date, action (created/modified/retired), skill_name, description

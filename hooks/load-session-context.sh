@@ -203,20 +203,6 @@ TRUSTEOF
   # Session-start timestamp for debrief freshness check
   echo "$(date +%s)" > "/tmp/session-start-${SESSION_ID}"
 
-  # Snapshot behavioral file mtimes for session-learning-check Stop hook
-  if stat -f %m / >/dev/null 2>&1; then
-    _mtime() { stat -f %m "$1" 2>/dev/null || echo "0"; }
-  elif stat -c %Y / >/dev/null 2>&1; then
-    _mtime() { stat -c %Y "$1" 2>/dev/null || echo "0"; }
-  else
-    _mtime() { python3 -c "import os; print(int(os.path.getmtime('$1')))" 2>/dev/null || echo "0"; }
-  fi
-  SNAPSHOT="/tmp/session-mtimes-${SESSION_ID}"
-  OUTCOMES_MTIME=$(_mtime "$HOME/.claude/outcomes.md")
-  cat > "$SNAPSHOT" <<SNAP
-OUTCOMES_MTIME=$OUTCOMES_MTIME
-SNAP
-
   # Session agenda + stale detection (single Python block)
   DB_FILE="$HOME/.claude/.claude/epics.db"
 
