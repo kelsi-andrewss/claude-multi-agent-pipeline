@@ -68,6 +68,31 @@ conn.execute("CREATE INDEX IF NOT EXISTS idx_dp_created ON decision_preferences(
 conn.commit()
 conn.close()
 MIGRATEEOF
+
+  # One-time: fix correction_groups count mismatches (count should equal unique dates)
+  python3 - "$DB_FILE_PREFS" <<'COUNTFIXEOF'
+import json, sqlite3, sys
+try:
+    conn = sqlite3.connect(sys.argv[1], timeout=5)
+    rows = conn.execute(
+        "SELECT rowid, correction_dates, count FROM correction_groups"
+    ).fetchall()
+    fixes = []
+    for rowid, dates_json, stored_count in rows:
+        try:
+            dates = json.loads(dates_json) if dates_json else []
+        except (json.JSONDecodeError, TypeError):
+            continue
+        actual = len(set(dates))
+        if actual != stored_count:
+            fixes.append((actual, rowid))
+    if fixes:
+        conn.executemany("UPDATE correction_groups SET count=? WHERE rowid=?", fixes)
+        conn.commit()
+    conn.close()
+except Exception:
+    pass
+COUNTFIXEOF
   fi
 
   # Render behavioral preferences from DB to sidecar file
