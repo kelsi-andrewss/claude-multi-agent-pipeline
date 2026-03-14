@@ -17,6 +17,34 @@ fi
 echo "Hook profile: $ACTIVE_PROFILE"
 echo ""
 
+# Reconciliation: warn about dead hook references in settings.json
+(
+  python3 - "$HOME/.claude/settings.json" <<'RECONCILEEOF'
+import json, os, sys
+try:
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+    hooks = cfg.get("hooks", {})
+    home = os.path.expanduser("~")
+    dead = []
+    for event, entries in hooks.items():
+        for entry in entries:
+            for hook in entry.get("hooks", []):
+                cmd = hook.get("command", "")
+                resolved = cmd.replace("~", home, 1) if cmd.startswith("~") else cmd
+                if resolved and not os.path.isfile(resolved):
+                    dead.append(cmd)
+    if dead:
+        print("=== DEAD HOOK REFERENCES IN settings.json ===")
+        for d in dead:
+            print(f"  WARN: {d} does not exist on disk")
+        print("  Run story cleanup to remove these entries.")
+        print("")
+except Exception:
+    pass  # Never block session start
+RECONCILEEOF
+) 2>/dev/null || true
+
 echo "=== SESSION CONTEXT: MANDATORY PRE-READ ==="
 echo "The following files have been loaded into your context. You MUST treat their"
 echo "rules as active constraints before responding to any message this session."
