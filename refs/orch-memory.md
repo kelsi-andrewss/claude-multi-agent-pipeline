@@ -92,7 +92,7 @@ All stores from Claude's session go through the MCP `openmemory_store` tool. All
 
 ## Trust Calibration
 
-Trust scores are derived from merge_outcomes in run-state.db (populated by outcomes-parser.py from outcomes.md).
+Trust scores are derived from merge_outcomes in run-state.db (populated directly at merge time; legacy data backfilled via outcomes-parser.py).
 
 ### Computation
 - **Global score**: success_count / total_count across all merge_outcomes (default 0.5 when empty)

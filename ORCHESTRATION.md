@@ -129,7 +129,7 @@ Full template: run-stories/SKILL.md Step 4. Must include: story title, plan file
 
 Procedures: merge-worktree/SKILL.md. After coder: NEED_DECISION → pick, resume. DONE → diff gate → test → review → merge. Auto-launch unblocked stories after merge.
 
-**Escalation**: 2 BLOCKING → Opus (architect only). Still BLOCKING → `blocked`. **Restart**: plan was wrong (not coder) → new plan, same model, max 1. **Outcome logging**: every terminal transition → `outcomes.md` (merge-worktree Step 5.5). **Parallel**: no write-target overlap required; first merges, second rebases.
+**Escalation**: 2 BLOCKING → Opus (architect only). Still BLOCKING → `blocked`. **Restart**: plan was wrong (not coder) → new plan, same model, max 1. **Outcome logging**: every terminal transition → `merge_outcomes` table in run-state.db (merge-worktree Step 5.5). **Parallel**: no write-target overlap required; first merges, second rebases.
 
 ---
 
