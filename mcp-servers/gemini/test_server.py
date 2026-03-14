@@ -1182,6 +1182,11 @@ def _create_test_db(tmp_path):
         CREATE INDEX idx_stories_state ON stories(state) WHERE archived = 0;
         CREATE INDEX idx_stories_epic ON stories(epic_id) WHERE archived = 0;
         CREATE INDEX idx_stories_branch ON stories(branch) WHERE branch IS NOT NULL;
+
+        CREATE TABLE id_sequences (
+          prefix  TEXT PRIMARY KEY,
+          last_id INTEGER NOT NULL DEFAULT 0
+        );
     """)
 
     # Insert fixture data
@@ -1224,6 +1229,9 @@ def _create_test_db(tmp_path):
     conn.execute(
         "INSERT INTO tasks VALUES ('t2', 'story-001', 'Write code', 'in-progress', 't1')"
     )
+    # Seed id_sequences from fixture data (stories 1-3, epics 1-2)
+    conn.execute("INSERT INTO id_sequences (prefix, last_id) VALUES ('story-', 3)")
+    conn.execute("INSERT INTO id_sequences (prefix, last_id) VALUES ('epic-', 2)")
     conn.commit()
     conn.close()
     return db_path
