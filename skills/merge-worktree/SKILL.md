@@ -416,24 +416,43 @@ Determine outcome metadata:
 - `memory_list`: recall OpenMemory queries during this session's plan critique or coder prompt
   construction for this story. If any influenced a decision, list topics. Otherwise "none".
 
-Append to `~/.claude/outcomes.md`:
+Write outcome to `~/.claude/.claude/run-state.db` (merge_outcomes table):
 
-```
-## [ISO date] -- [story_id] -- [title]
-**Intent**: [story title from DB]
-**Result**: merged
-**Agent**: [agent]
-**Model**: [model]
-**Cycle time**: [cycle_time]
-**Coder effort**: [coder_effort]
-**Skills used**: [skills_list]
-**Friction events**: [friction_summary]
-**Tests**: [test_result]
-**File count**: [file_count]
-**Complexity**: [complexity_bucket]
-**Memory attributed**: [memory_list]
-**What worked**: [brief — infer from merge process: clean execution, or note if escalation/restart occurred]
-**What failed**: [brief — "nothing" or summarize any coder failures/restarts that preceded the merge]
+```python
+python3 -c "
+import sqlite3, os
+db = os.path.expanduser('~/.claude/.claude/run-state.db')
+conn = sqlite3.connect(db, timeout=10)
+c = conn.cursor()
+c.execute('PRAGMA journal_mode=WAL')
+c.execute('PRAGMA busy_timeout=5000')
+# Migrate new columns (idempotent)
+for col in [
+    'what_worked TEXT',
+    'what_failed TEXT',
+    'friction_events INTEGER DEFAULT 0',
+    'file_count INTEGER',
+    'complexity TEXT',
+    'skills_used TEXT',
+    'coder_effort TEXT',
+    'memory_attributed TEXT',
+]:
+    try:
+        c.execute(f'ALTER TABLE merge_outcomes ADD COLUMN {col}')
+    except sqlite3.OperationalError:
+        pass
+c.execute('''INSERT OR REPLACE INTO merge_outcomes
+    (story_id, epic_id, agent, model, domain_tags, success, cycle_time_s,
+     revert_count, what_worked, what_failed, friction_events, file_count,
+     complexity, skills_used, coder_effort, memory_attributed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+    ('[story_id]', '[epic_id]', '[agent]', '[model]', '[skills_list]',
+     True, [cycle_time_seconds], [friction_count],
+     '[what_worked]', '[what_failed]', [friction_count], [file_count],
+     '[complexity_bucket]', '[skills_list]', '[coder_effort]', '[memory_list]'))
+conn.commit()
+conn.close()
+"
 ```
 
 ---

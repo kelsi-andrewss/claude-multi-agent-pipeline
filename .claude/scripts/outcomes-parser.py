@@ -144,14 +144,31 @@ def populate_merge_outcomes(db_path, records):
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=5000")
 
+    # Migrate new columns (idempotent)
+    for col in [
+        "what_worked TEXT",
+        "what_failed TEXT",
+        "friction_events INTEGER DEFAULT 0",
+        "file_count INTEGER",
+        "complexity TEXT",
+        "skills_used TEXT",
+        "coder_effort TEXT",
+        "memory_attributed TEXT",
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE merge_outcomes ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass
+
     inserted = 0
     for rec in records:
         try:
             cursor.execute(
                 "INSERT OR IGNORE INTO merge_outcomes "
                 "(story_id, epic_id, agent, model, domain_tags, predicted_conflict, "
-                "actual_conflict, success, cycle_time_s, revert_count) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "actual_conflict, success, cycle_time_s, revert_count, "
+                "what_worked, what_failed) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     rec["story_id"],
                     rec["epic_id"],
@@ -163,6 +180,8 @@ def populate_merge_outcomes(db_path, records):
                     rec["success"],
                     rec["cycle_time_s"],
                     rec["revert_count"],
+                    rec.get("what_worked"),
+                    rec.get("what_failed"),
                 ),
             )
             if cursor.rowcount > 0:
