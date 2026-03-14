@@ -307,3 +307,10 @@ def register(mcp):
             lines.append("")
 
         return "\n".join(lines).rstrip()
+
+    return {
+        "pm_record_decision": pm_record_decision,
+        "pm_list_decisions_by_type": pm_list_decisions_by_type,
+        "pm_predict_preference": pm_predict_preference,
+        "pm_decision_insights": pm_decision_insights,
+    }

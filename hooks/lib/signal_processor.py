@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Signal processor: correlate user corrections with recorded decision preferences.
 
-Usage: signal_processor.py <transcript_path> <epics_db_path> <session_id>
+Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]
 
-Reads the session transcript, identifies corrections, matches them against
-decision_preferences from the current session or last 24 hours, and updates
-signal_score/signal_count accordingly.
+Reads the session transcript, identifies corrections via semantic embedding,
+matches them against decision_preferences, and updates signal_score/signal_count.
+Manual corrections are written directly to correction_groups via log-correction.sh.
 """
-import hashlib, json, math, os, re, sqlite3, struct, sys, time, uuid
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+import json, os, re, sqlite3, sys, time
+
+from hooks.lib.embedding_utils import get_embedding, cosine_similarity, embedding_to_blob, blob_to_embedding
 
 
 def parse_transcript_turns(transcript_path):
@@ -254,8 +254,6 @@ def find_decision_mention_turns(decisions, turns):
                 break
 
 
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
-OLLAMA_MODEL = "nomic-embed-text"
 SIMILARITY_THRESHOLD = 0.85
 PROMOTION_THRESHOLD = 3
 
@@ -276,17 +274,6 @@ MAX_EMBEDDING_CALLS_PER_SESSION = 5
 _prototype_embeddings = None
 
 
-def _get_embedding(text):
-    payload = json.dumps({"model": OLLAMA_MODEL, "prompt": text}).encode()
-    req = Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
-    try:
-        with urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-        return data.get("embedding")
-    except (URLError, OSError, json.JSONDecodeError, KeyError):
-        return None
-
-
 def _get_prototype_embeddings():
     """Lazy-load and cache prototype embeddings. Returns None if Ollama unavailable."""
     global _prototype_embeddings
@@ -294,7 +281,7 @@ def _get_prototype_embeddings():
         return _prototype_embeddings
     embeddings = []
     for proto in CORRECTION_PROTOTYPES:
-        vec = _get_embedding(proto)
+        vec = get_embedding(proto)
         if vec is None:
             return None
         embeddings.append(vec)
@@ -308,20 +295,11 @@ def is_correction(msg, prototype_embeddings):
     Computes cosine similarity against each prototype embedding and returns
     True if max similarity >= PROTOTYPE_THRESHOLD.
     """
-    msg_vec = _get_embedding(msg)
+    msg_vec = get_embedding(msg)
     if msg_vec is None:
         return False
-    similarities = [_cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
+    similarities = [cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
     return max(similarities) >= PROTOTYPE_THRESHOLD
-
-
-def _embedding_to_blob(vec):
-    return struct.pack(f"<{len(vec)}f", *vec)
-
-
-def _blob_to_embedding(blob):
-    n = len(blob) // 4
-    return list(struct.unpack(f"<{n}f", blob))
 
 
 def _ensure_correction_groups_table(cursor):
@@ -344,74 +322,14 @@ def _ensure_correction_groups_table(cursor):
     )
 
 
-def _parse_corrections(project_root):
-    corrections_path = os.path.join(project_root, "corrections.md")
-    if not os.path.isfile(corrections_path):
-        return []
-
-    with open(corrections_path) as f:
-        text = f.read()
-
-    tallies = {}
-    tallies_path = os.path.join(project_root, "correction-tallies.jsonl")
-    if os.path.isfile(tallies_path):
-        with open(tallies_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if entry.get("promoted"):
-                        tallies[entry.get("header", "")] = True
-                except json.JSONDecodeError:
-                    continue
-
-    entries = []
-    sections = re.split(r'^## ', text, flags=re.MULTILINE)
-    for section in sections:
-        section = section.strip()
-        if not section:
-            continue
-
-        lines = section.split('\n', 1)
-        header_line = lines[0].strip()
-        body = lines[1].strip() if len(lines) > 1 else ""
-
-        # Skip non-correction sections (file header, format notes)
-        date_match = re.match(r'^(\d{4}-\d{2}-\d{2})', header_line)
-        if not date_match:
-            continue
-
-        if header_line.startswith("AUTO:") and header_line in tallies:
-            continue
-
-        date = date_match.group(1)
-        header = header_line[:80]
-
-        if body or header:
-            entries.append({"date": date, "header": header, "body": (header + "\n" + body)[:1000]})
-
-    return entries
-
-
-def _cosine_similarity(vec_a, vec_b):
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
 def _find_matching_group(cursor, embedding, threshold):
     cursor.execute("SELECT id, embedding FROM correction_groups WHERE embedding IS NOT NULL")
     rows = cursor.fetchall()
     best_id = None
     best_sim = threshold
     for row in rows:
-        stored_vec = _blob_to_embedding(row[1])
-        sim = _cosine_similarity(embedding, stored_vec)
+        stored_vec = blob_to_embedding(row[1])
+        sim = cosine_similarity(embedding, stored_vec)
         if sim > best_sim:
             best_sim = sim
             best_id = row[0]
@@ -436,94 +354,26 @@ def _check_promoted(theme_text, project_root):
     if not rows:
         return False
 
-    theme_vec = _get_embedding(theme_text)
+    theme_vec = get_embedding(theme_text)
     if theme_vec is None:
         return False
 
     for (existing_theme,) in rows:
-        existing_vec = _get_embedding(existing_theme)
+        existing_vec = get_embedding(existing_theme)
         if existing_vec is None:
             continue
-        if _cosine_similarity(theme_vec, existing_vec) > 0.8:
+        if cosine_similarity(theme_vec, existing_vec) > 0.8:
             return True
 
     return False
 
 
-def _process_correction_groups(db_path, project_root):
-    entries = _parse_corrections(project_root)
-    if not entries:
-        return
-
-    first_vec = _get_embedding(entries[0]["body"])
-    if first_vec is None:
-        print("Correction grouping: Ollama unavailable, skipping", file=sys.stderr)
-        return
-
-    conn = sqlite3.connect(db_path, timeout=10)
-    cursor = conn.cursor()
-    _ensure_correction_groups_table(cursor)
-    now = int(time.time())
-
-    for idx, entry in enumerate(entries):
-        if idx == 0:
-            vec = first_vec
-        else:
-            vec = _get_embedding(entry["body"])
-            if vec is None:
-                continue
-
-        match_id = _find_matching_group(cursor, vec, SIMILARITY_THRESHOLD)
-
-        if match_id is not None:
-            cursor.execute("SELECT count, correction_dates, embedding FROM correction_groups WHERE id = ?", (match_id,))
-            row = cursor.fetchone()
-            old_count = row[0]
-            old_dates = json.loads(row[1]) if row[1] else []
-            old_vec = _blob_to_embedding(row[2])
-
-            new_count = old_count + 1
-            old_dates.append(entry["date"])
-            avg_vec = [(a * old_count + b) / new_count for a, b in zip(old_vec, vec)]
-            cursor.execute(
-                "UPDATE correction_groups SET count = ?, correction_dates = ?, embedding = ?, updated_at = ? WHERE id = ?",
-                (new_count, json.dumps(old_dates), _embedding_to_blob(avg_vec), now, match_id),
-            )
-        else:
-            cursor.execute(
-                "INSERT INTO correction_groups (theme, count, correction_dates, embedding, source, status, created_at, updated_at) "
-                "VALUES (?, 1, ?, ?, 'auto', 'accumulating', ?, ?)",
-                (entry["header"], json.dumps([entry["date"]]), _embedding_to_blob(vec), now, now),
-            )
-
-    cursor.execute(
-        "SELECT id, theme FROM correction_groups WHERE count >= ? AND status = 'accumulating'",
-        (PROMOTION_THRESHOLD,),
-    )
-    promotable = cursor.fetchall()
-    for group_id, theme in promotable:
-        if _check_promoted(theme, project_root):
-            cursor.execute(
-                "UPDATE correction_groups SET status = 'promoted', promoted_at = ?, updated_at = ? WHERE id = ?",
-                (time.strftime("%Y-%m-%d"), now, group_id),
-            )
-        else:
-            cursor.execute(
-                "UPDATE correction_groups SET status = 'pending_promotion', updated_at = ? WHERE id = ?",
-                (now, group_id),
-            )
-
-    conn.commit()
-    conn.close()
-
-
 def process_session_corrections(transcript_path, db_file, session_id="", project_root=None):
-    """Unified entry point: detect corrections from transcript + sync corrections.md to DB.
+    """Unified entry point: detect corrections from transcript and upsert to correction_groups.
 
     Handles:
     1. Transcript-based correction detection (pre-filter + semantic delta)
-    2. corrections.md manual entry parsing for today's entries
-    3. Per-session rate limiting: max 1 DB increment per theme per session
+    2. Per-session rate limiting: max 1 DB increment per theme per session
 
     Args:
         transcript_path: Path to JSONL transcript file.
@@ -544,25 +394,9 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
     transcript_corrections = extract_corrections_from_transcript(transcript_path)
     all_corrections.extend(transcript_corrections)
 
-    # --- Part 2: corrections.md manual entries (today only) ---
+    # Manual corrections now written directly to correction_groups via log-correction.sh
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    corrections_file = os.path.join(project_root, "corrections.md")
-    if os.path.isfile(corrections_file):
-        try:
-            with open(corrections_file) as f:
-                content = f.read()
-            for match in re.finditer(r'^## (\d{4}-\d{2}-\d{2}) — (.+)', content, re.MULTILINE):
-                entry_date = match.group(1)
-                entry_desc = match.group(2).strip()
-                if entry_date == today:
-                    all_corrections.append({
-                        "turn_idx": -1,
-                        "content": entry_desc[:300],
-                        "weight": 1.0,
-                    })
-        except (OSError, IOError):
-            pass
 
     # --- Part 3: Upsert to correction_groups with per-session rate limiting ---
     if not db_file or not os.path.isfile(db_file):

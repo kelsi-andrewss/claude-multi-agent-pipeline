@@ -94,6 +94,7 @@ Record the user's response:
    (a) ambiguities that need clarification
    (b) missing requirements implied but not stated
    (c) technical decision points where multiple valid approaches exist
+   (d) why this work is integral to the project — what breaks, stalls, or degrades if it doesn't happen? If the upstream scope artifact includes a "problem" and "why" field, probe deeper on those. If they're missing or vague, this becomes a required clarification.
 
    For each decision point, present 2-3 options with tradeoffs.
    Scale your analysis to the input — a clear, specific request needs fewer questions than a vague idea.
@@ -117,6 +118,7 @@ Record the user's response:
    (a) ambiguities that need clarification — focus on DESIGN decisions, not domain understanding (research already covers that)
    (b) missing requirements implied but not stated
    (c) technical decision points where multiple valid approaches exist — use research findings to inform the tradeoffs
+   (d) why this work is integral to the project — what breaks, stalls, or degrades if it doesn't happen? If the upstream scope artifact includes a "problem" and "why" field, probe deeper on those. If they're missing or vague, this becomes a required clarification.
 
    For each decision point, present 2-3 options with tradeoffs. Reference research findings where relevant.
    Scale your analysis to the input — a clear, specific request needs fewer questions than a vague idea.

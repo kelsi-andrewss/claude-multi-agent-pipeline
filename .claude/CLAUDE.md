@@ -28,8 +28,6 @@ Distillation is automated. The stop hook auto-promotes correction patterns (coun
 ### Tool & model learnings
 When a model or tool repeatedly succeeds or fails at a specific task type (2+ occurrences):
 1. Store to OpenMemory (procedural sector, global scope) for semantic recall.
-2. Append a one-liner to `~/.claude/tool-learnings.md` as the audit trail.
-If OpenMemory is down, the log entry still captures it.
 These inform model selection (§2) and prompt crafting (§7).
 
 ### Integration surfaces

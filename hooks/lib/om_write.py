@@ -2,12 +2,12 @@
 """Centralized OpenMemory write gate.
 
 All OM writes should go through om_write() to enforce tag whitelist,
-dedup, budget limits, and ops logging.
+dedup, budget limits, and stderr logging.
 """
-import hashlib, json, math, os, sqlite3, struct, sys, time, uuid
+import hashlib, json, math, os, sqlite3, sys, time, uuid
 from datetime import datetime, timezone
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+
+from hooks.lib.embedding_utils import get_embedding, cosine_similarity, embedding_to_blob, blob_to_embedding
 
 ALLOWED_TAGS = {
     "behavioral-pref",
@@ -30,55 +30,9 @@ BUDGETS = {
 }
 
 OM_DB_PATH = os.path.expanduser("~/.claude/.claude/openmemory.sqlite")
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
-OLLAMA_MODEL = "nomic-embed-text"
-OPS_LOG_PATH = os.path.expanduser("~/.claude/.claude/tracking/om-ops.json")
 DEDUP_THRESHOLD = 0.85
 PRUNE_THRESHOLD = 0.01
 DEFAULT_DECAY = 0.05
-
-
-def _log_op(op_type, details=None):
-    try:
-        entry = {
-            "date": datetime.now(timezone.utc).isoformat(),
-            "op": op_type,
-            "details": details or {},
-        }
-        os.makedirs(os.path.dirname(OPS_LOG_PATH), exist_ok=True)
-        with open(OPS_LOG_PATH, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-    except OSError:
-        pass
-
-
-def _get_embedding(text):
-    payload = json.dumps({"model": OLLAMA_MODEL, "prompt": text}).encode()
-    req = Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
-    try:
-        with urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        return data.get("embedding")
-    except (URLError, OSError, json.JSONDecodeError, KeyError):
-        return None
-
-
-def _cosine_similarity(vec_a, vec_b):
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
-def _embedding_to_blob(vec):
-    return struct.pack(f"<{len(vec)}f", *vec)
-
-
-def _blob_to_embedding(blob):
-    n = len(blob) // 4
-    return list(struct.unpack(f"<{n}f", blob))
 
 
 def _compute_simhash(content):
@@ -86,7 +40,7 @@ def _compute_simhash(content):
 
 
 def dedup_check(content, primary_tag):
-    embedding = _get_embedding(content)
+    embedding = get_embedding(content)
 
     if embedding is not None:
         try:
@@ -100,15 +54,15 @@ def dedup_check(content, primary_tag):
             conn.close()
 
             for row_id, blob in rows:
-                stored_vec = _blob_to_embedding(blob)
-                sim = _cosine_similarity(embedding, stored_vec)
+                stored_vec = blob_to_embedding(blob)
+                sim = cosine_similarity(embedding, stored_vec)
                 if sim >= DEDUP_THRESHOLD:
                     return row_id
         except sqlite3.Error:
             pass
         return None
 
-    _log_op("ollama_fallback", {"reason": "embedding unavailable for dedup"})
+    print("om_write: ollama_fallback — embedding unavailable for dedup", file=sys.stderr)
     simhash = _compute_simhash(content)
     try:
         conn = sqlite3.connect(OM_DB_PATH, timeout=10)
@@ -191,10 +145,10 @@ def prune_expired(threshold=PRUNE_THRESHOLD):
 
         conn.commit()
         conn.close()
-        _log_op("pruning_ran", {"deleted": len(to_delete), "threshold": threshold})
+        print(f"om_write: pruning_ran — deleted={len(to_delete)} threshold={threshold}", file=sys.stderr)
         return len(to_delete)
     except sqlite3.Error as e:
-        _log_op("prune_error", {"error": str(e)})
+        print(f"om_write: prune_error — {e}", file=sys.stderr)
         return 0
 
 
@@ -202,7 +156,7 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
              salience=0.5, decay_lambda=0.05):
     valid_tags = [t for t in tags if t in ALLOWED_TAGS]
     if not valid_tags:
-        _log_op("write_rejected", {"tags": tags, "reason": "no allowed tags"})
+        print(f"om_write: write_rejected — tags={tags} reason=no allowed tags", file=sys.stderr)
         return None
 
     primary_tag = valid_tags[0]
@@ -219,19 +173,19 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
             )
             conn.commit()
             conn.close()
-            _log_op("dedup_fired", {"existing_id": existing_id, "primary_tag": primary_tag})
+            print(f"om_write: dedup_fired — existing_id={existing_id} primary_tag={primary_tag}", file=sys.stderr)
             return existing_id
 
         pruned = enforce_budget(primary_tag)
         if pruned > 0:
-            _log_op("budget_enforced", {"primary_tag": primary_tag, "pruned": pruned})
+            print(f"om_write: budget_enforced — primary_tag={primary_tag} pruned={pruned}", file=sys.stderr)
 
-        embedding = _get_embedding(content)
+        embedding = get_embedding(content)
         now = int(time.time())
         new_id = str(uuid.uuid4())
 
         if embedding is not None:
-            mean_vec = _embedding_to_blob(embedding)
+            mean_vec = embedding_to_blob(embedding)
             mean_dim = len(embedding)
             simhash = _compute_simhash(content)
         else:
@@ -255,9 +209,9 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
         conn.commit()
         conn.close()
 
-        _log_op("write_success", {"id": new_id, "primary_tag": primary_tag})
+        print(f"om_write: write_success — id={new_id} primary_tag={primary_tag}", file=sys.stderr)
         return new_id
 
     except Exception as e:
-        _log_op("write_error", {"error": str(e), "tags": tags})
+        print(f"om_write: write_error — error={e} tags={tags}", file=sys.stderr)
         return None

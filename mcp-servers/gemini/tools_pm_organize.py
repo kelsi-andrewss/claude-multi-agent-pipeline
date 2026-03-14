@@ -441,3 +441,10 @@ def register(mcp):
                 "created_epics": created_epics,
                 "skipped": skipped,
             })
+
+    return {
+        "pm_reorder": pm_reorder,
+        "pm_triage": pm_triage,
+        "pm_cleanup": pm_cleanup,
+        "pm_regroup": pm_regroup,
+    }

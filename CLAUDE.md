@@ -61,27 +61,23 @@ The bar is "would this help a future session solve a similar problem?" Skip rout
 After appending a key prompt entry, also store to OpenMemory: `openmemory_store(content="<title>: <why-it-worked, 1-2 sentences>", tags=["prompt-pattern", "<category>"], user_id="global")`. This enables semantic recall of effective prompt patterns across projects.
 
 ## Corrections
-After receiving a redirect or correction from the user, log BEFORE proceeding with the corrected approach. Append to `~/.claude/corrections.md`:
-```
-## [ISO date] — [first 80 chars of what user said]
-**Context**: [what Claude was doing / last action taken]
-**User said**: [full user message, truncated to 300 chars]
-**Turn**: [approximate turn number]
+After receiving a redirect or correction from the user, log BEFORE proceeding with the corrected approach. Run:
+```bash
+bash ~/.claude/scripts/log-correction.sh "[ISO date] — [first 80 chars of what user said]: [context, 1-2 sentences]"
 ```
 
-When the user says "log" or "log that", immediately write a correction entry to `corrections.md` capturing whatever just happened — the user is flagging something worth remembering.
+When the user says "log" or "log that", immediately run log-correction.sh capturing whatever just happened — the user is flagging something worth remembering.
 
-The Stop hook also auto-detects corrections from the transcript (prefixed `AUTO:`). These are verified at next session start.
+The Stop hook also auto-detects corrections from the transcript and writes them to the same correction_groups table.
 
 ## Behavioral learning
 @.claude/rendered-prefs.md
 
-These files track patterns across sessions:
-- `~/.claude/outcomes.md` — post-merge/rejection results (consulted on-demand)
-- `~/.claude/corrections.md` — course corrections (AUTO-detected + manual; verified at session start)
+These surfaces track patterns across sessions:
+- `correction_groups` table (epics.db) — single source of truth for corrections (manual via `log-correction.sh` + auto-detected by stop hook)
 - `~/.claude/.claude/rendered-prefs.md` — rendered from correction_groups DB at session start (loaded via @import, survives compaction)
-- `~/.claude/tool-learnings.md` — model/tool capability audit log (append-only, git-tracked)
-- OpenMemory (`procedural` sector) — queryable store for tool/model observations
+- OpenMemory — queryable semantic store for tool learnings, decisions, prompt patterns
 - `decision_preferences` table (epics.db) — machine-learned preference predictions from correction/decision correlation (see `hooks/lib/signal_processor.py`)
+- `~/.claude/outcomes.md` — post-merge/rejection results (consulted on-demand)
 
 > Infrastructure details (OpenMemory, pipelines, project structure): see ~/.claude/.claude/CLAUDE.md

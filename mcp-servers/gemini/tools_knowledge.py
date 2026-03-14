@@ -365,3 +365,12 @@ def register(mcp):
             if reason:
                 msg += f" Reason: {reason}"
             return msg
+
+    return {
+        "pm_add_decision": pm_add_decision,
+        "pm_list_decisions": pm_list_decisions,
+        "pm_supersede_decision": pm_supersede_decision,
+        "pm_add_pattern": pm_add_pattern,
+        "pm_list_patterns": pm_list_patterns,
+        "pm_deprecate_pattern": pm_deprecate_pattern,
+    }

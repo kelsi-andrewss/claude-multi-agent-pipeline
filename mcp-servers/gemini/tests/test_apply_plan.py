@@ -21,32 +21,39 @@ def _create_test_db(tmp_path):
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE epics (
-          id         TEXT PRIMARY KEY,
-          title      TEXT NOT NULL,
-          branch     TEXT,
-          pr_number  INTEGER,
-          persistent INTEGER DEFAULT 0,
-          state      TEXT DEFAULT 'active' CHECK(state IN ('active','done','shipped'))
+          id              TEXT PRIMARY KEY,
+          title           TEXT NOT NULL,
+          branch          TEXT,
+          pr_number       INTEGER,
+          persistent      INTEGER DEFAULT 0,
+          state           TEXT DEFAULT 'active' CHECK(state IN ('active','done','shipped')),
+          milestone_order INTEGER,
+          target_date     TEXT,
+          description     TEXT
         );
 
         CREATE TABLE stories (
-          id             TEXT PRIMARY KEY,
-          epic_id        TEXT NOT NULL REFERENCES epics(id),
-          title          TEXT NOT NULL,
-          state          TEXT DEFAULT 'draft',
-          branch         TEXT,
-          write_files    TEXT,
-          read_files     TEXT DEFAULT '[]',
-          needs_testing  INTEGER DEFAULT 0,
-          needs_review   INTEGER DEFAULT 0,
-          agent          TEXT,
-          model          TEXT,
-          depends_on     TEXT,
-          auto_merge     INTEGER DEFAULT 0,
-          started_at     TEXT,
-          completed_at   TEXT,
-          archived       INTEGER DEFAULT 0,
-          order_idx      INTEGER
+          id              TEXT PRIMARY KEY,
+          epic_id         TEXT NOT NULL REFERENCES epics(id),
+          title           TEXT NOT NULL,
+          state           TEXT DEFAULT 'draft',
+          branch          TEXT,
+          write_files     TEXT,
+          read_files      TEXT DEFAULT '[]',
+          test_files      TEXT DEFAULT '[]',
+          needs_testing   INTEGER DEFAULT 0,
+          needs_review    INTEGER DEFAULT 0,
+          agent           TEXT,
+          model           TEXT,
+          depends_on      TEXT,
+          auto_merge      INTEGER DEFAULT 0,
+          started_at      TEXT,
+          completed_at    TEXT,
+          archived        INTEGER DEFAULT 0,
+          order_idx       INTEGER,
+          plan_file       TEXT,
+          worktree_path   TEXT,
+          worktree_active INTEGER DEFAULT 0
         );
 
         CREATE TABLE tasks (
@@ -63,15 +70,19 @@ def _create_test_db(tmp_path):
           depends_on TEXT NOT NULL REFERENCES stories(id),
           PRIMARY KEY (story_id, depends_on)
         );
+        CREATE INDEX idx_story_deps_depends ON story_dependencies(depends_on);
     """)
 
     # Fixture data: one epic, one story in draft, two pre-existing tasks
     conn.execute(
-        "INSERT INTO epics VALUES ('epic-001', 'Test Epic', 'epic/001', NULL, 0, 'active')"
+        "INSERT INTO epics (id, title, branch, pr_number, persistent, state) "
+        "VALUES ('epic-001', 'Test Epic', 'epic/001', NULL, 0, 'active')"
     )
     conn.execute("""
-        INSERT INTO stories VALUES
-        ('story-001', 'epic-001', 'Test story', 'draft', NULL,
+        INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files,
+          needs_testing, needs_review, agent, model, depends_on, auto_merge,
+          started_at, completed_at, archived, order_idx)
+        VALUES ('story-001', 'epic-001', 'Test story', 'draft', NULL,
          '[]', '[]', 0, 0, NULL, NULL, NULL, 0,
          NULL, NULL, 0, NULL)
     """)

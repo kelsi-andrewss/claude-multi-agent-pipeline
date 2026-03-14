@@ -102,6 +102,20 @@ Given this research, produce a structured technical briefing. Include:
 - Cost projections: estimate monthly operational costs at 3 tiers (1K, 10K, 100K users/month) covering compute, database, storage, third-party APIs, and managed services. Identify the primary cost drivers first, then use published pricing. Provide ranges ("$5-15/mo"), not single numbers. Flag rough estimates. For development: estimate complexity per MVP feature using T-shirt sizes (S/M/L/XL) — not hours or days.
 - Deployment: for web apps, always include a publicly accessible deployment path. Recommend hosting platform with reasoning. Specify: build command, deploy command or CI/CD approach, domain/URL strategy, platform-specific config files, and where production secrets are stored. Bootstrap (feature 0) should create deployment config files — not provision infrastructure. For non-web projects (CLI tools, libraries, internal scripts), skip or adapt.
 
+Synthesize a Problem Statement from upstream data (scope artifact's problem/why/end_goal fields,
+clarify decisions, research findings). Answer these questions explicitly:
+1. What problem is being fixed? (what's broken, missing, or suboptimal)
+2. Why is this problem being fixed? (consequence of inaction)
+3. Why is this problem integral to the project? (how it connects to the project's purpose)
+4. What is the end goal? (what "done" looks like — not "tests pass" but what the user can do)
+If any of these can't be answered from upstream data, flag them as gaps.
+
+Assess blast radius: for each major change, what could break? Trace downstream dependencies,
+callers, consumers, runtime contracts. Frame as risk, not just dependency listing.
+
+Define success criteria: how will we know this worked? Not test cases — observable outcomes.
+What can the user do after this ships that they couldn't before? What metrics or behaviors change?
+
 Flag anything you're uncertain about.
 
 Also assess complexity: estimate feature count. If >5 features, suggest MVP phasing — what ships first vs what can wait.
@@ -164,7 +178,19 @@ Cross-check Gemini's synthesis:
 ### 5b. Deep mode (optional)
 If the scout artifact metadata contains `deep: true`: run a second `gemini_chat` pass on uncertain areas identified in 5a. Feed the specific questions back to Gemini with the original scout and research context.
 
-### 5c. Scope assessment
+### 5c. Problem statement gate
+Check whether the Problem Statement section answers all four questions. If any are missing or vague:
+- If upstream scope artifact had `problem`, `why`, `end_goal` fields: use them.
+- If clarify artifact addressed project-integral reasoning: use it.
+- If STILL can't answer a question: flag it in the briefing as `**[UNANSWERED]**` with a note explaining what upstream data was missing. Do NOT invent answers — a flagged gap is better than a fabricated justification.
+
+### 5d. Completeness and blast radius check
+Verify the Blast Radius section against scout's completeness and blast_radius data:
+- If scout reported `best-effort` confidence, surface the blind spots prominently.
+- If scout's blast_radius identified runtime contracts, ensure they appear in the briefing.
+- If Success Criteria are generic ("it works", "tests pass"), rewrite them to be observable and specific.
+
+### 5e. Scope assessment
 If >5 features in the synthesis:
 - Mark features as MVP / Phase 2 / Cut in the `## Features` section
 - Add reasoning for each phase assignment
@@ -187,6 +213,12 @@ Write the phasing directly into the briefing output. This skill does NOT gate on
 
 ```markdown
 # <Title>
+
+## Problem Statement
+**What problem?** <what's broken, missing, or suboptimal today>
+**Why fix it?** <consequence of NOT doing this — what breaks, stalls, or degrades>
+**Why integral?** <how this connects to the project's core purpose — why this isn't optional>
+**End goal:** <what "done" looks like — the observable outcome, not "tests pass">
 
 ## Overview
 <1-2 paragraph description of what we're building and why>
@@ -295,6 +327,18 @@ Write the phasing directly into the briefing output. This skill does NOT gate on
 - Wiring (route configs, component composition, dependency injection) — fails obviously
 - Types — the type system catches these
 - Don't duplicate what the compiler already verifies
+
+## Blast Radius
+For each major write target or change area:
+- **<file or component>**: <what depends on it, what could break, downstream effects>
+- Confidence: <exhaustive | best-effort — from scout completeness data>
+- If scout reported blind spots, list them here
+
+## Success Criteria
+How we'll know this worked — observable outcomes, not test results:
+- <What the user can do after this ships that they couldn't before>
+- <What behavior or metric changes>
+- <What failure mode is eliminated>
 
 ## Environment
 - `<ENV_VAR_NAME>` — <what service/feature needs it> (required | optional)

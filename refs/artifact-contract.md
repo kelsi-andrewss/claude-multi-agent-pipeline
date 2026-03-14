@@ -63,73 +63,59 @@ Walking the artifact chain: follow `prev` pointers recursively to reconstruct th
 
 Freeform object. Contents are skill-specific and documented in each skill's SKILL.md. The contract imposes no structure on `data` beyond requiring it to be a JSON object.
 
-#### Scout extensions
+#### Research extensions
 
-Scout artifacts (`presearch/.scout-<slug>.json`) include the following optional fields inside `data`. All are backward-compatible — artifacts that predate these fields remain valid. These fields were originally defined for the old `/research` skill (now `/scout`); existing artifacts with `skill: "research"` that contain these fields are still valid.
+Research artifacts (`presearch/.research-<slug>.json`) include these fields inside `data`:
 
 ##### partial_research
 
 Type: `boolean`. Default: `false`.
 
-When `true`, indicates research results are incomplete because one of the parallel research subagents failed. **Constraint:** when `partial_research` is `true`, the existing `gaps` array must contain at least one entry describing the failure (which agent failed, what error occurred).
+When `true`, indicates research results are incomplete because one or both models failed for some angles. **Constraint:** when `partial_research` is `true`, the `gaps` array must describe what failed.
 
 ##### agent_attribution
 
 Type: `"gemini" | "claude" | "both"`. Default: omitted.
 
-Set on individual entries in the `findings` array. Maps each finding back to its originating subagent. When both agents independently produce the same finding (matched by category and subject), attribution is `"both"`. Findings produced before this feature was introduced omit the field entirely — consumers should treat a missing `agent_attribution` as unknown provenance.
-
-```json
-{
-  "findings": [
-    {
-      "agent_attribution": "gemini",
-      "...existing fields..."
-    },
-    {
-      "agent_attribution": "both",
-      "...existing fields..."
-    }
-  ]
-}
-```
+Set on individual claims in `synthesized_findings`. Maps each claim to its originating model. When both models independently find the same fact, attribution is `"both"`.
 
 ##### conflicts
 
 Type: `array`. Default: `[]`.
 
-Records disagreements between the Gemini and Claude subagents. Each entry captures both positions and their supporting sources so downstream consumers (e.g., `/briefing`) can surface contradictions rather than silently picking one.
+Records disagreements between Gemini and Claude research results. Both positions and sources are preserved for downstream resolution by `/briefing`.
 
 Entry schema:
 
 | Field | Type | Description |
 |---|---|---|
-| `subject` | `string` | What the conflict is about (e.g., "API rate limit for /v2/search") |
-| `gemini_claim` | `string` | The Gemini agent's position |
-| `claude_claim` | `string` | The Claude agent's position |
-| `source_urls` | `{ gemini: string[], claude: string[] }` | Supporting URLs from each agent |
+| `topic` | `string` | What the conflict is about |
+| `gemini_claim` | `{ claim: string, source_urls: string[] }` | Gemini's position with sources |
+| `claude_claim` | `{ claim: string, source_urls: string[] }` | Claude's position with sources |
+| `credibility_assessment` | `string` | Which source is more authoritative and why |
 
-```json
-{
-  "conflicts": [
-    {
-      "subject": "Default timeout for WebSocket connections",
-      "gemini_claim": "30 seconds",
-      "claude_claim": "60 seconds",
-      "source_urls": {
-        "gemini": ["https://example.com/docs/ws"],
-        "claude": ["https://example.com/api/reference#timeout"]
-      }
-    }
-  ]
-}
-```
+#### Scout extensions
 
-##### search_queries
+Scout artifacts (`presearch/.scout-<slug>.json`) include these fields inside `data`. Scout does project introspection — no web research.
 
-Type: `string[]`. Default: `[]`.
+##### conflicts (scout)
 
-Aggregates all search queries used by both subagents during the research process. Serves as an audit trail of the discovery path — useful for debugging coverage gaps, understanding what was searched, and reproducing results.
+Type: `array`. Default: `[]`.
+
+Records disagreements between codebase reality and upstream research suggestions. Each entry captures what the codebase requires vs what research recommended.
+
+| Field | Type | Description |
+|---|---|---|
+| `subject` | `string` | What the conflict is about |
+| `codebase_says` | `string` | What the project does/requires |
+| `research_says` | `string` | What web research suggested |
+| `resolution` | `string` | Which should win and why |
+
+##### decisions_relevant
+
+Type: `array`. Default: `[]`.
+
+Recorded decisions from `pm_list_decisions` that affect the current work. Each entry has `id`, `summary`, and `impact`.
 
 ## File naming
 
@@ -187,14 +173,25 @@ Examples for the full pipeline:
 
 Note: This is the NEW /research skill's output (deep web research with fan-out/fan-in parallelism), distinct from the old /research (now /scout).
 
-### Scout artifact (was /research)
+### Scout artifact (project introspection)
 
-- **File naming**: `presearch/.scout-<slug>.json` (was `presearch/.research-<slug>.json` for the old skill)
-- **`skill`**: `"scout"` (was `"research"`)
+- **File naming**: `presearch/.scout-<slug>.json`
+- **`skill`**: `"scout"`
 - **`prev`**: array containing upstream artifact paths (clarify and/or research if provided)
-- **`data` payload**: findings, api_shapes, packages, testable_assertions, conflicts, search_queries, urls, gaps
+- **`data` payload**:
 
-See `skills/scout/SKILL.md` for the full data schema.
+| Field | Type | Description |
+|---|---|---|
+| `topic` | `string` | Original topic text |
+| `findings` | `array` | Codebase findings with category, summary, details, files, source |
+| `decisions_relevant` | `array` | Recorded decisions that affect this work |
+| `testable_assertions` | `array` | Verifiable claims from codebase analysis |
+| `write_targets` | `string[]` | Files that would likely be modified |
+| `read_targets` | `string[]` | Files needed for context |
+| `conflicts` | `array` | Codebase vs research disagreements (if research provided) |
+| `gaps` | `string[]` | Areas with no established codebase pattern |
+
+Scout does NOT do web research. It introspects the project: reads code, queries the decisions DB (`pm_list_decisions`), and searches OpenMemory. Web research is `/research`'s job.
 
 ### Artifact chain
 

@@ -182,3 +182,5 @@ def register(mcp):
             "epic_title": epic_title,
             "stories": created_stories,
         })
+
+    return {"pm_ship": pm_ship}

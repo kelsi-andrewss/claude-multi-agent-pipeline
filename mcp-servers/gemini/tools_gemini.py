@@ -139,6 +139,7 @@ def register(mcp):
 
     return {
         "gemini_chat": gemini_chat,
+        "fetch_doc": fetch_doc,
         "plan": plan,
         "analyze": analyze,
     }

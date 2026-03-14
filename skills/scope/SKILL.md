@@ -60,9 +60,12 @@ Quick project definition:
 3. **Target platform?** (web, mobile, CLI, API, library, etc.)
 4. **In scope**: what MUST this include?
 5. **Out of scope**: what should it explicitly NOT include?
+6. **What problem does this solve?** (what's broken, missing, or suboptimal today?)
+7. **Why does this need to happen?** (what's the consequence of NOT doing this?)
+8. **What does "done" look like?** (how will you know this succeeded?)
 ```
 
-Parse user responses into structured fields: `what`, `audience`, `platform`, `in_scope` (array), `out_of_scope` (array).
+Parse user responses into structured fields: `what`, `audience`, `platform`, `in_scope` (array), `out_of_scope` (array), `problem`, `why`, `end_goal`.
 
 No follow-up rounds — this is intentionally lightweight. One prompt, one response.
 
@@ -72,21 +75,23 @@ No follow-up rounds — this is intentionally lightweight. One prompt, one respo
 
 This is the core gating logic. Use the topic text + any Q&A answers + detected stack to determine whether `/research` should trigger before `/clarify`.
 
-**Classification criteria:**
+Research = web search for **external unknowns**. Scout = codebase introspection for **internal patterns**. If the codebase can answer the question, research is waste.
 
-`needs_research = true` when ANY of:
-- Topic involves a domain requiring specialized knowledge the system likely doesn't have (scientific, pedagogical, medical, legal, financial, regulatory)
-- Topic is a BrainLift (learning tool, educational content, curriculum design)
-- Topic involves APIs/services the system may not have current documentation for
-- Topic involves unfamiliar integration patterns or protocols
-- Domain ambiguity: the system can't confidently recommend an approach without external validation
-
-`needs_research = false` when ALL of:
-- Topic is a well-understood pattern (CRUD, UI changes, standard auth, common integrations)
+**`needs_research = false`** (check FIRST) when ANY of:
+- The work is adding/modifying features in code the user owns — the codebase defines the patterns
+- The work extends an existing system (add a tool, add an endpoint, add a component) where the system's own code shows how
+- Topic is a well-understood engineering pattern (CRUD, UI changes, standard auth, MCP tools, API endpoints)
 - Stack is detected and the change fits within it
-- No domain-specific knowledge required beyond standard engineering
+- The user has specified the target system (e.g., "add X to the Gemini MCP") — the system's code is the authority, not the web
 
-**Bias**: err toward `needs_research = true`. False positives cost tokens; false negatives produce uninformed decisions downstream.
+**`needs_research = true`** when ANY of:
+- Topic involves a domain requiring specialized knowledge outside standard engineering (scientific, pedagogical, medical, legal, financial, regulatory)
+- Topic is a BrainLift (learning tool, educational content, curriculum design)
+- Topic requires evaluating **unfamiliar** third-party services the user has never integrated (not extending ones already in the stack)
+- Topic involves protocols or standards the codebase has no prior implementation of
+- The user explicitly doesn't know which approach to take and needs external options surveyed
+
+**Bias**: err toward `needs_research = false`. Scout + clarify cover most engineering tasks. Research is expensive and usually unnecessary when you own the code. When in doubt: if the codebase has an existing instance of the pattern being requested, research is not needed.
 
 **Output of this step**: `needs_research` boolean + `complexity_reasoning` (one sentence explaining why).
 
@@ -146,6 +151,9 @@ Write `.scope-<slug>.json` in the current working directory.
         "dependencies": ["<key dependencies>"]
       }
     ],
+    "problem": "<what's broken, missing, or suboptimal>",
+    "why": "<consequence of not doing this>",
+    "end_goal": "<what done looks like>",
     "needs_research": "<boolean>",
     "complexity_reasoning": "<one sentence explaining the classification>"
   }
@@ -154,7 +162,7 @@ Write `.scope-<slug>.json` in the current working directory.
 
 **`prev` field**: always `[]` — scope is the chain root, it has no upstream artifacts.
 
-**`--skip-qa` mode**: `what`, `audience`, `platform`, `in_scope`, `out_of_scope` are set to `null`. Stack detection and domain complexity classification still run.
+**`--skip-qa` mode**: `what`, `audience`, `platform`, `in_scope`, `out_of_scope`, `problem`, `why`, `end_goal` are set to `null`. Stack detection and domain complexity classification still run.
 
 ---
 
@@ -179,6 +187,6 @@ Do NOT prompt to run downstream skills. Routing is the orchestrator's job.
 - **Empty topic with no args**: `AskUser` fires before anything else (Step 0)
 - **No project markers found**: greenfield mode, `stack_detected` is an empty array
 - **`--skip-qa` on a vague topic**: artifact has null Q&A fields but domain complexity classification still runs on topic text alone
-- **Ambiguous domain**: err toward `needs_research = true` (false positives cheaper than false negatives)
+- **Ambiguous domain**: if the codebase has the pattern, default to `needs_research = false` — scout will find it
 - **Multiple project markers** (e.g., `package.json` + `pyproject.toml`): detect all, store all in `stack_detected` array
 - **CLAUDE.md found but no other markers**: read `CLAUDE.md` for stack hints, but don't infer a specific framework

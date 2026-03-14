@@ -570,4 +570,6 @@ def register(mcp):
     return {
         "audit": audit,
         "find_bug": find_bug,
+        "gemini_redesign": gemini_redesign,
+        "pm_consistency_check": pm_consistency_check,
     }

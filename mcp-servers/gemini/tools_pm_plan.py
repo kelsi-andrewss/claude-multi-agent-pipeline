@@ -488,3 +488,11 @@ def register(mcp):
                 "safe_parallel": safe_parallel,
                 "sequential": sequential,
             })
+
+    return {
+        "pm_plan_story": pm_plan_story,
+        "pm_plan_stories": pm_plan_stories,
+        "pm_plan_bulk": pm_plan_bulk,
+        "pm_critique": pm_critique,
+        "pm_check_conflicts": pm_check_conflicts,
+    }

@@ -1,12 +1,13 @@
 ---
 name: scout
 description: >
-  Gemini seed scouting + web validation for implementation details. Finds APIs,
-  packages, architecture patterns, and testable assertions. Accepts upstream
-  knowledge context via --research flag. Parallel subagents (Gemini broad discovery,
-  Claude deep extraction) with conflict detection and agent attribution.
-  Reads .clarify-<slug>.json if provided. Writes .scout-<slug>.json with merged
-  findings, URLs, API shapes, testable assertions, conflicts, and search queries.
+  Project introspection for implementation planning. Reads the codebase, queries
+  recorded decisions and OpenMemory, identifies existing patterns, constraints,
+  and testable assertions. NO web research — that's /research's job. Scout answers
+  "what does THIS project require?" not "what exists in the world?"
+  Reads .clarify-<slug>.json and/or .research-<slug>.json if provided.
+  Writes presearch/.scout-<slug>.json with findings, constraints, patterns, and
+  testable assertions.
   Use when the user says "/scout <topic>", "/scout --clarify presearch/.clarify-foo.json",
   "/scout --research presearch/.research-foo.json", or "/scout --deep <topic>".
 args:
@@ -15,8 +16,8 @@ args:
     description: >
       Topic (quoted string or free text), optional flags: --clarify <path> (path to
       .clarify-<slug>.json), --research <path> (path to .research-<slug>.json
-      knowledge synthesis artifact from upstream deep research), --deep (double
-      search/fetch budgets for both agents).
+      knowledge synthesis artifact from upstream deep research), --deep (increases
+      exploration depth).
 ---
 
 # Scout Skill Invoked
@@ -29,14 +30,13 @@ User has requested: `/scout {{args}}`
 
 Parse `{{args}}` to extract:
 
-- `--clarify <path>` -> path to a `.clarify-<slug>.json` artifact. Optional. The value is the next token after `--clarify`.
-- `--research <path>` -> path to a `presearch/.research-<slug>.json` knowledge synthesis artifact. Optional. The value is the next token after `--research`.
-- `--deep` -> flag to double search/fetch budgets for both agents. Boolean, no value.
+- `--clarify <path>` -> path to a `.clarify-<slug>.json` artifact. Optional.
+- `--research <path>` -> path to a `presearch/.research-<slug>.json` knowledge synthesis artifact. Optional.
+- `--deep` -> increases exploration depth. Boolean.
 - Everything remaining after flag stripping -> `topic`. Required. If empty after stripping flags, ask:
   ```
   AskUserQuestion: "What topic should I scout?"
   ```
-  Wait for the user's response before proceeding.
 
 **Slug derivation:**
 - If `--clarify` was provided and the artifact contains a `slug` field: use that slug.
@@ -45,385 +45,222 @@ Parse `{{args}}` to extract:
 
 ---
 
-## Step 1: Load clarify context (if --clarify)
+## Step 1: Load upstream context
 
-**If `--clarify <path>` was provided:**
+### 1a: Clarify context (if --clarify)
 
-1. Read the file at the given path using the Read tool.
-2. Validate it matches the artifact contract:
-   - Must have `slug` (string)
-   - Must have `skill: "clarify"`
-   - Must have `data` containing `decisions` (array) and `constraints` (array)
-3. If validation fails, stop and report:
-   ```
-   Error: <path> is not a valid clarify artifact. Expected slug, skill="clarify", and data with decisions/constraints.
-   ```
-4. Extract from the artifact:
-   - `data.decisions` -> resolved decisions (these are hard constraints for subagent prompts, not suggestions)
-   - `data.constraints` -> constraints
-   - `scope` -> scope metadata (files, stories, complexity)
-   - `route_hint` -> routing hint
-   - `slug` -> slug (overrides topic-derived slug)
-   - `data.topic` -> use as topic if no topic was provided in args
+Read the file. Validate it has `slug`, `skill: "clarify"`, and `data` with `decisions` and `constraints`.
 
-**If not provided:** standalone mode. No upstream constraints. Proceed with topic only.
+Extract:
+- `data.decisions` -> hard constraints for scouting (these are resolved, not suggestions)
+- `data.constraints` -> project constraints
+- `scope` -> scope metadata
+- `slug` -> slug override
 
----
+If validation fails, stop and report the error.
 
-## Step 1.5: Load research context (if --research)
+### 1b: Research context (if --research)
 
-**If `--research <path>` was provided:**
+Read the file. Validate it has `slug`, `skill: "research"`, and `data` with `synthesized_findings`.
 
-1. Read the file at the given path using the Read tool.
-2. Validate it matches the knowledge synthesis artifact contract:
-   - Must have `slug` (string)
-   - Must have `skill: "research"`
-   - Must have `data` containing `synthesized_findings` (array) and `citations` (array)
-3. If validation fails, stop and report:
-   ```
-   Error: <path> is not a valid research artifact. Expected slug, skill="research", and data with synthesized_findings/citations.
-   ```
-4. Extract from the artifact:
-   - `data.synthesized_findings` -> domain knowledge findings (these inform what APIs/packages to scout for)
-   - `data.citations` -> source URLs already discovered (avoid re-fetching)
-   - `data.conflicts` -> unresolved conflicts to be aware of
-   - `data.gaps` -> knowledge gaps that scout should try to fill
-   - `slug` -> use as slug if no slug derived yet
+Extract:
+- `data.synthesized_findings` -> domain knowledge (informs what patterns to look for)
+- `data.gaps` -> knowledge gaps scout should try to fill from the codebase
+- `slug` -> slug if not already set
 
-**If not provided:** standalone mode. No upstream knowledge context.
+If validation fails, stop and report the error.
+
+### 1c: No upstream
+
+If neither flag provided: standalone mode. Scout based on topic only.
 
 ---
 
-## Step 2: Generate search focus areas
+## Step 2: Project introspection
 
-Analyze the topic (and clarify decisions if present, and research findings if present) to produce **3-5 specific search focus areas**. These focus areas are shared input to both subagent prompts, ensuring both agents cover the same dimensions without anchoring one to the other's findings.
-
-Focus areas are short descriptions of what to investigate, NOT search queries. Agents derive their own queries from these. Examples:
-- "Authentication flow and token management for <service>"
-- "Rate limits and quota constraints for <API>"
-- "Data model and schema requirements for <feature>"
-- "Known breaking changes and migration paths for <package>"
-- "Real-time sync architecture patterns for <use case>"
-
-If `--clarify` was provided, the focus areas must reflect the clarify decisions. For example, if the decision was "use Firebase Auth, not Supabase Auth", the focus area should be about Firebase Auth specifically — not a generic "authentication options" focus area.
-
-If `--research` was provided, prioritize focus areas that address the research gaps. Avoid duplicating focus areas for topics already well-covered by the upstream research findings -- focus on implementation specifics the domain research did not cover.
-
-This is a reasoning-only step. No tool calls.
-
----
-
-## Step 3: Launch parallel agents
-
-Dispatch two background agents using the Agent tool with `run_in_background=true`. Both agents research independently — neither sees the other's work. This eliminates confirmation bias.
-
-### Gemini agent
-
-Launch: `Agent(subagent_type="gemini-researcher", prompt=<prompt below>, run_in_background=true)`
-
-The Gemini agent prompt must be self-contained. Construct it as follows:
+Launch a single foreground `Explore` agent to introspect the project. This agent has access to Glob, Grep, Read, and all search tools — but NOT WebSearch, WebFetch, or Edit/Write.
 
 ```
-You are a technical researcher doing broad discovery on a topic. Your job is to find
-as many relevant facts as possible across official docs, blog posts, StackOverflow,
-GitHub issues, and release notes.
+Agent(subagent_type="Explore", prompt=<prompt below>)
+```
 
-TOOLS: Use gemini_chat for all research. It has native Google Search grounding built in —
-you do NOT need separate search tools.
+**Explore agent prompt:**
+
+```
+You are a codebase analyst. Your job is to understand the project's existing patterns,
+constraints, and architecture relevant to a specific topic. You do NOT search the web.
+You ONLY look at the local project.
 
 TOPIC: <topic text>
 
-SEARCH FOCUS AREAS (investigate all of these):
-<numbered list of focus areas from Step 2>
-
-BUDGET: Ask <BUDGET> research questions via gemini_chat. Each call should target a
-different focus area or drill deeper into a promising finding. Prioritize breadth —
-cover all focus areas before going deep on any one.
-
 <if --clarify>
-HARD CONSTRAINTS (from clarify phase — do NOT contradict these):
-Decisions:
+DECISIONS (hard constraints — do not contradict):
 <list each decision: area, choice, reasoning>
-Constraints:
+
+CONSTRAINTS:
 <list each constraint: type, value>
-</if --clarify>
+</if>
 
 <if --research>
-Upstream knowledge context (from deep research phase):
-Key findings:
-<list synthesized_findings summaries>
+DOMAIN CONTEXT (from web research — use to guide what patterns to look for):
+<list key findings summaries, max 10>
 
-Known gaps (prioritize scouting for these):
+KNOWLEDGE GAPS (try to answer these from the codebase):
 <list gaps>
+</if>
 
-Unresolved conflicts:
-<list conflicts if any>
+INVESTIGATE ALL OF THE FOLLOWING:
 
-Use this domain knowledge to inform your implementation recommendations.
-Focus on concrete APIs, packages, and architecture patterns that align with these findings.
+1. **Relevant files**: Use Glob to find files related to the topic. Map the directory
+   structure. Identify which files would be read vs written for this work.
 
-Already-discovered URLs (skip these, find new sources):
-<list citation URLs from research artifact>
-</if --research>
+2. **Existing patterns**: Use Grep to find how similar features are implemented.
+   Look for naming conventions, error handling patterns, test patterns, import
+   structures. Read 2-3 exemplar files to understand the established approach.
 
-OUTPUT: When done, write your findings to the file presearch/.scout-<slug>-gemini.json
-using the Write tool. The file must be valid JSON matching this exact schema:
+3. **Dependencies and constraints**: Check package.json / pubspec.yaml / requirements.txt /
+   Cargo.toml for relevant dependencies. Note version constraints. Look for existing
+   abstractions or utilities that must be reused.
 
-{
-  "agent": "gemini",
-  "slug": "<slug>",
-  "status": "complete",
-  "error": null,
-  "claims": [
-    {
-      "text": "string — the factual claim, be specific (include numbers, versions, URLs)",
-      "category": "api | package | architecture | data_model | gotcha",
-      "source_urls": ["string — URLs that support this claim"],
-      "search_queries": ["string — the queries that led to this claim"]
-    }
-  ]
-}
+4. **Protected files**: Read .claude/protected-files.md if it exists. Note any protected
+   files relevant to the topic.
 
-If you encounter errors and can only partially complete, set "status": "partial" and
-include whatever claims you gathered. If you fail completely, set "status": "failed"
-and "error": "<what went wrong>".
+5. **Test patterns**: Find existing tests related to the topic area. Note the test
+   framework, assertion style, and what's tested vs what isn't.
 
-RETURN: After writing the file, return ONLY this line:
-DONE: <N> findings written to presearch/.scout-<slug>-gemini.json
+6. **Completeness check**: Find ALL occurrences of the pattern, function, component,
+   or code path being changed. Don't stop at the first match — exhaust the search.
+   Use multiple Grep queries with variations (aliases, re-exports, dynamic references).
+   For each write target, answer: "Are there other places that do the same thing,
+   call the same thing, or depend on the same thing?" List every occurrence found
+   and flag any that might be missed.
 
-Do NOT return the findings themselves. Do NOT ask questions. Do NOT use AskUserQuestion
-or any interactive tools.
+7. **Blast radius**: For each write target, trace what depends on it — imports,
+   callers, consumers, downstream data flows. Identify what could break if this
+   file changes. Include: direct importers, test files that exercise this code,
+   config files that reference it, and any runtime dependencies (e.g., API contracts,
+   event listeners, database queries that assume a specific shape).
+
+DEPTH: <"thorough" if --deep, "medium" otherwise>
+
+OUTPUT: Return a structured summary with these sections:
+
+RELEVANT FILES:
+- List files that exist and are relevant, with one-line descriptions
+- Separate into "read targets" (context) and "likely write targets" (would change)
+
+EXISTING PATTERNS:
+- How does the codebase handle similar concerns today?
+- What abstractions/utilities exist that this work should use?
+- What naming conventions apply?
+
+CONSTRAINTS:
+- Hard requirements from the codebase (must use X, cannot import Y, etc.)
+- Version constraints from package manifests
+- Protected files that cannot be modified
+
+TEST LANDSCAPE:
+- What test framework and patterns are used?
+- What's the test coverage situation for this area?
+- What assertion patterns are established?
+
+COMPLETENESS:
+- For each write target: list ALL occurrences of the pattern/function/component found
+- Flag any search strategies that might miss occurrences (dynamic imports, string references, etc.)
+- Confidence level: "exhaustive" (all variants searched) or "best-effort" (some vectors couldn't be searched)
+
+BLAST RADIUS:
+- For each write target: what files import/call/depend on it?
+- What tests exercise this code?
+- What runtime contracts (APIs, events, DB schemas) could break?
+- Downstream effects: if this change is wrong, what symptoms would appear and where?
+
+GAPS:
+- Areas where the codebase has no established pattern (greenfield)
+- Missing tests or documentation
+- Anything from the research gaps list that the codebase doesn't answer
 ```
-
-**Budget values:**
-- Normal mode: `<BUDGET>` = "2-4"
-- `--deep` mode: `<BUDGET>` = "4-8"
-
-### Claude agent
-
-Launch: `Agent(subagent_type="claude-researcher", prompt=<prompt below>, run_in_background=true)`
-
-The Claude agent prompt must be self-contained. Construct it as follows:
-
-```
-You are a technical researcher doing deep extraction from web sources. Your job is to
-find authoritative sources and extract precise, specific facts — API shapes, version
-numbers, configuration requirements, exact error messages, code examples.
-
-TOOLS: Use WebSearch to find sources, then WebFetch to extract content from the best results.
-
-IMPORTANT — WebFetch needs targeted prompts. Do NOT use generic prompts like "summarize
-this page". Instead, ask specific questions per fetch:
-- "What is the authentication flow? What tokens are required? What are the token lifetimes?"
-- "What are the rate limits? Are there different tiers? What happens when limits are exceeded?"
-- "What is the response shape for the /api/v2/search endpoint? Include all fields."
-
-IMPORTANT — Run WebSearch calls SEQUENTIALLY, not in parallel. Parallel searches trigger
-429 rate limits. Do one search, process results, then do the next.
-
-TOPIC: <topic text>
-
-SEARCH FOCUS AREAS (investigate all of these):
-<numbered list of focus areas from Step 2>
-
-BUDGET:
-- Run <SEARCH_BUDGET> WebSearch calls sequentially (one at a time)
-- WebFetch the top <FETCH_BUDGET> results — prefer official docs, API references, GitHub repos
-- For each fetch, ask specific extraction questions (not generic "summarize")
-
-<if --clarify>
-HARD CONSTRAINTS (from clarify phase — do NOT contradict these):
-Decisions:
-<list each decision: area, choice, reasoning>
-Constraints:
-<list each constraint: type, value>
-</if --clarify>
-
-<if --research>
-Upstream knowledge context (from deep research phase):
-Key findings:
-<list synthesized_findings summaries>
-
-Known gaps (prioritize scouting for these):
-<list gaps>
-
-Unresolved conflicts:
-<list conflicts if any>
-
-Use this domain knowledge to inform your implementation recommendations.
-Focus on concrete APIs, packages, and architecture patterns that align with these findings.
-
-Already-discovered URLs (skip these, find new sources):
-<list citation URLs from research artifact>
-</if --research>
-
-OUTPUT: When done, write your findings to the file presearch/.scout-<slug>-claude.json
-using the Write tool. The file must be valid JSON matching this exact schema:
-
-{
-  "agent": "claude",
-  "slug": "<slug>",
-  "status": "complete",
-  "error": null,
-  "claims": [
-    {
-      "text": "string — the factual claim, be specific (include numbers, versions, URLs)",
-      "category": "api | package | architecture | data_model | gotcha",
-      "source_urls": ["string — URLs that support this claim"],
-      "search_queries": ["string — the queries that led to this claim"]
-    }
-  ]
-}
-
-If you encounter errors and can only partially complete, set "status": "partial" and
-include whatever claims you gathered. If you fail completely, set "status": "failed"
-and "error": "<what went wrong>".
-
-RETURN: After writing the file, return ONLY this line:
-DONE: <N> findings written to presearch/.scout-<slug>-claude.json
-
-Do NOT return the findings themselves. Do NOT ask questions. Do NOT use AskUserQuestion
-or any interactive tools.
-```
-
-**Budget values:**
-- Normal mode: `<SEARCH_BUDGET>` = "2-4", `<FETCH_BUDGET>` = "max 3"
-- `--deep` mode: `<SEARCH_BUDGET>` = "4-8", `<FETCH_BUDGET>` = "max 6"
 
 ---
 
-## Step 4: Wait for agents and read intermediate files
+## Step 3: Query decisions and memory
 
-Both agents were launched with `run_in_background=true`. Wait for notification that each agent has completed.
+While the Explore agent runs (or after, if foreground), query for recorded decisions and semantic memory relevant to the topic.
 
-Once both agents have completed (or timed out), read the intermediate files:
+### 3a: Decisions
 
-1. Read `presearch/.scout-<slug>-gemini.json` using the Read tool.
-2. Read `presearch/.scout-<slug>-claude.json` using the Read tool.
+Load tool: `ToolSearch: select:mcp__gemini__pm_list_decisions`
 
-**Validate each file:**
-- File exists and contains valid JSON
-- Has `agent`, `slug`, `status`, and `claims` fields
-- `status` is one of: `complete`, `partial`, `failed`
+Call `pm_list_decisions` (no filter -- scan all). From the results, extract decisions relevant to the topic. Look for:
+- Technology choices that constrain implementation
+- Architectural decisions about patterns or approaches
+- Rejected alternatives (things NOT to do)
 
-**Handle failure modes:**
+### 3b: OpenMemory
 
-- **Both succeed** (status `complete` or `partial`): Proceed to Step 5 with both datasets.
-- **One fails** (file missing, invalid JSON, or `status: "failed"`): Proceed to Step 5 with the successful agent's data only. Set `partial_research = true`. Add to gaps: `"<agent> agent failed: <error message or 'file not found or invalid JSON'>"`.
-- **Both fail**: Stop. Do not write a canonical artifact. Report:
-  ```
-  Scouting failed — both agents returned errors.
+Load tool: `ToolSearch: select:mcp__openmemory__openmemory_query`
 
-  Gemini: <error or "file not found">
-  Claude: <error or "file not found">
-
-  Suggestions:
-  - Re-run with --deep for increased budgets
-  - Check tool availability (gemini_chat, WebSearch, WebFetch)
-  - Try a more specific topic
-  ```
+Call `openmemory_query` with the topic text. Extract relevant memories:
+- Prior implementation attempts
+- Tool/model learnings relevant to the work
+- Behavioral preferences that affect the approach
 
 ---
 
-## Step 5: Merge findings
+## Step 4: Synthesize findings
 
-Combine both agents' claims into the canonical findings structure. If only one agent succeeded (partial failure), skip deduplication and conflict detection — attribute everything to the surviving agent.
+Combine the Explore agent's results with decisions and memory into the canonical scout artifact.
 
-### 5a: Transform claims to findings
+### 4a: Build findings
 
-Convert each intermediate `claim` to a canonical `finding`:
+Transform the Explore agent's output into structured findings:
 
-- `claim.text` -> split into `finding.summary` (first sentence or key assertion) and `finding.details` (full text)
-- `claim.category` -> `finding.category` (direct mapping — same enum: `api`, `package`, `architecture`, `data_model`, `gotcha`)
-- `claim.source_urls` -> contribute to the top-level `urls` array
-- Set `finding.source`: gemini agent claims get `"gemini"`, claude agent claims get `"web"`
-- Set `finding.agent_attribution`: `"gemini"` for gemini agent claims, `"claude"` for claude agent claims
-
-### 5b: Deduplicate
-
-Two findings are duplicates if they share the same `category` AND their `summary` text is substantially similar (same topic, same assertion, different phrasing).
-
-Comparison method: normalize both summaries (lowercase, strip extra whitespace, remove trailing punctuation) and check if they describe the same fact. This is a structured text comparison — look for matching key terms, numbers, and subjects within the same category. Not NLP similarity scoring.
-
-When duplicates are found:
-- Keep the version with longer/more detailed `details` text
-- Set `agent_attribution: "both"`
-- Set `source: "both"`
-- Merge `source_urls` from both findings
-
-### 5c: Detect conflicts
-
-After deduplication, scan remaining findings for contradictions. A conflict exists when two findings share the same `category` and are about the same subject, but assert different **concrete values**. Examples:
-- Same API, different rate limits (100/min vs 1000/min)
-- Same package, different minimum versions (v2.0 vs v3.0)
-- Same service, different auth requirements (API key vs OAuth)
-
-Conflicts are NOT:
-- Different phrasing of the same fact (that's dedup — handled in 5b)
-- One agent having info the other doesn't (that's complementary — both findings kept)
-- Different aspects of the same topic (that's additive — both findings kept)
-
-For each detected conflict, add to the `conflicts` array:
 ```json
 {
-  "subject": "string — what the conflict is about",
-  "gemini_claim": "string — Gemini's assertion",
-  "claude_claim": "string — Claude's assertion",
-  "source_urls": {
-    "gemini": ["URLs backing Gemini's claim"],
-    "claude": ["URLs backing Claude's claim"]
-  }
+  "category": "pattern | constraint | dependency | test | architecture",
+  "summary": "string -- one-line finding",
+  "details": "string -- full context",
+  "files": ["string -- relevant file paths"],
+  "source": "codebase | decision | memory"
 }
 ```
 
-Conflicts are **surfaced, not resolved**. Both positions are preserved in findings. The downstream `/briefing` skill or human reviewer decides which is correct.
+Categories:
+- `pattern` — existing implementation patterns the work must follow
+- `constraint` — hard requirements (protected files, version locks, must-use abstractions)
+- `dependency` — relevant packages, their versions, and what they provide
+- `test` — test framework, patterns, coverage gaps
+- `architecture` — structural decisions about how the codebase is organized
+- `completeness` — all occurrences of the target pattern/code, with confidence level
+- `blast_radius` — downstream dependencies, callers, and what could break
 
-### 5d: Aggregate search queries
+### 4b: Build testable assertions
 
-Collect all `search_queries` from both agents' claims into a top-level `search_queries` array. Deduplicate by exact string match (case-insensitive).
+From the findings, extract assertions specific enough to verify:
 
-### 5e: Build urls array
-
-Collect all `source_urls` from both agents' claims. Deduplicate by URL. For each URL, include:
-- `url`: the URL string
-- `title`: infer from the URL path or domain if no title available
-- `relevance`: brief description of what this URL confirmed or provided
-
-### 5f: Extract api_shapes and testable_assertions
-
-From the merged findings:
-
-**api_shapes**: Extract from findings with `category: "api"` that describe endpoint shapes. Structure:
 ```json
 {
-  "service": "string",
-  "endpoint": "string",
-  "method": "string",
-  "auth": "string",
-  "response_shape": "string or object"
+  "assertion": "string -- the testable claim",
+  "category": "pattern_conformance | dependency_constraint | test_coverage | architecture_boundary",
+  "verification": "string -- how to verify this assertion",
+  "source": "codebase | decision-<id> | memory"
 }
 ```
 
-**testable_assertions**: Extract from all findings where the claim is specific enough to verify. Structure:
-```json
-{
-  "category": "api_edge_case | data_constraint | integration_boundary | package_constraint",
-  "assertion": "string — the testable claim",
-  "source": "gemini | web:<url> | both",
-  "confidence": "verified | likely | uncertain"
-}
-```
+### 4c: Identify conflicts with research
 
-Confidence levels:
-- `verified`: claim confirmed by both agents or backed by official documentation URL
-- `likely`: claim from one agent with a credible source URL
-- `uncertain`: claim from one agent without source URL or from a non-authoritative source
+If `--research` was provided, check whether any codebase findings contradict the web research:
+- Research says "use library X" but codebase already uses library Y for the same purpose
+- Research suggests a pattern that conflicts with an established codebase convention
+- Research recommends a version that conflicts with what's in the package manifest
+
+Record these in `conflicts`.
 
 ---
 
-## Step 6: Write canonical artifact
+## Step 5: Write canonical artifact
 
-Write the merged output to `presearch/.scout-<slug>.json`.
+Write to `presearch/.scout-<slug>.json`.
 
 **Schema:**
 
@@ -431,103 +268,104 @@ Write the merged output to `presearch/.scout-<slug>.json`.
 {
   "slug": "<slug>",
   "scope": {
-    "files": "<number or null>",
-    "stories": "<number or null>",
+    "files": "<number of likely write-target files, or null>",
+    "stories": null,
     "complexity": "<small | medium | large | null>"
   },
   "route_hint": "<from clarify if available, else null>",
-  "prev": ["<clarify artifact path if --clarify was used>", "<research artifact path if --research was used>"],
+  "prev": ["<clarify artifact path if used>", "<research artifact path if used>"],
   "skill": "scout",
   "data": {
     "topic": "<original topic text>",
     "findings": [
       {
-        "category": "api | package | architecture | data_model | gotcha",
+        "category": "pattern | constraint | dependency | test | architecture",
         "summary": "string",
-        "details": "string — full finding text",
-        "source": "gemini | web | both",
-        "agent_attribution": "gemini | claude | both"
+        "details": "string",
+        "files": ["string"],
+        "source": "codebase | decision | memory"
       }
     ],
-    "conflicts": [
+    "decisions_relevant": [
       {
-        "subject": "string",
-        "gemini_claim": "string",
-        "claude_claim": "string",
-        "source_urls": {
-          "gemini": ["string"],
-          "claude": ["string"]
-        }
-      }
-    ],
-    "search_queries": ["string — all queries used by both agents, deduplicated"],
-    "partial_research": false,
-    "urls": [
-      {
-        "url": "string",
-        "title": "string",
-        "relevance": "string"
-      }
-    ],
-    "api_shapes": [
-      {
-        "service": "string",
-        "endpoint": "string",
-        "method": "string",
-        "auth": "string",
-        "response_shape": "string or object"
+        "id": "string -- decision ID",
+        "summary": "string -- what was decided",
+        "impact": "string -- how it affects this work"
       }
     ],
     "testable_assertions": [
       {
-        "category": "api_edge_case | data_constraint | integration_boundary | package_constraint",
         "assertion": "string",
-        "source": "gemini | web:<url> | both",
-        "confidence": "verified | likely | uncertain"
+        "category": "pattern_conformance | dependency_constraint | test_coverage | architecture_boundary",
+        "verification": "string",
+        "source": "string"
+      }
+    ],
+    "write_targets": ["string -- files that would likely be modified"],
+    "read_targets": ["string -- files needed for context"],
+    "conflicts": [
+      {
+        "subject": "string -- what the conflict is about",
+        "codebase_says": "string -- what the project does/requires",
+        "research_says": "string -- what web research suggested",
+        "resolution": "string -- which should win and why"
+      }
+    ],
+    "completeness": {
+      "confidence": "exhaustive | best-effort",
+      "occurrences": [
+        {
+          "target": "string -- what was searched for",
+          "locations": ["string -- file:line or file paths"],
+          "search_strategies": ["string -- grep patterns, glob patterns used"],
+          "blind_spots": ["string -- search vectors that couldn't be covered"]
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "string -- file being modified",
+        "dependents": ["string -- files that import/call/depend on this"],
+        "test_coverage": ["string -- test files that exercise this code"],
+        "runtime_contracts": ["string -- APIs, events, DB schemas that could break"],
+        "failure_symptoms": "string -- if this change is wrong, what breaks and where"
       }
     ],
     "gaps": [
-      "string — topics where scouting failed or was incomplete"
+      "string -- topics where codebase has no established pattern"
     ]
   }
 }
 ```
 
 **Field rules:**
-- If `scope` and `route_hint` came from the clarify artifact, preserve them as-is.
-- If standalone (no `--clarify`): set scope fields to null, route_hint to null. The briefing skill determines these.
-- `prev`: array containing all upstream artifact paths. Include the clarify artifact path if `--clarify` was used, and the research artifact path if `--research` was used. Empty array if neither was used.
-- `conflicts`: empty array if no conflicts detected.
-- `search_queries`: aggregated from both agents, deduplicated.
-- `partial_research`: `true` only if one agent failed. `false` by default.
-- `gaps`: empty array if all scouting succeeded and both agents completed.
+- `scope`: estimated from write_targets count. null if standalone with no clear file targets.
+- `prev`: array of upstream artifact paths used. Empty array if standalone.
+- `conflicts`: empty array if no research was provided or no contradictions found.
+- `decisions_relevant`: empty array if no relevant decisions found.
+- `gaps`: empty array if all areas had established patterns.
 
 ---
 
-## Step 7: Report
+## Step 6: Report
 
-Print:
 ```
 Scout complete.
 
 Topic: <topic>
-Agents: <which agents completed> (e.g., "gemini + claude" or "claude only (gemini failed)")
-Findings: <count> across <category count> categories (<gemini-only> gemini, <claude-only> claude, <both> both)
-Conflicts: <count> (or "none")
-URLs: <count> sources consulted
-Search queries: <count> used
-Testable assertions: <count> (<verified count> verified, <uncertain count> uncertain)
+Findings: <count> across <category count> categories
+Decisions: <count> relevant recorded decisions
+Write targets: <count> files (<list>)
+Testable assertions: <count>
+Completeness: <exhaustive | best-effort> (<N> occurrences mapped, <M> blind spots)
+Blast radius: <count> write targets with <total dependents> downstream files
+Conflicts: <count> (codebase vs research disagreements)
 Gaps: <list or "none">
 
 Output: presearch/.scout-<slug>.json
 ```
 
-If `partial_research` is true, prepend:
-```
-WARNING: Partial scouting — <agent> agent failed. Results may have reduced coverage.
-```
+If `--research` was used: `Upstream: <research artifact path>`
+If `--clarify` was used: `Upstream: <clarify artifact path>`
 
-If `--research` was used, also print: `Upstream: <research artifact path>`
-If `--clarify` was used, also print: `Upstream: <clarify artifact path>`
-
-Do NOT prompt to run /briefing or any downstream skill. This skill writes its artifact and reports. Routing is the orchestrator's job.
+Do NOT prompt to run /briefing or any downstream skill. Routing is the orchestrator's job.
