@@ -21,6 +21,8 @@ def get_embedding(text):
 
 def cosine_similarity(vec_a, vec_b):
     """Cosine similarity between two vectors."""
+    if len(vec_a) != len(vec_b):
+        return 0.0
     dot = sum(a * b for a, b in zip(vec_a, vec_b))
     norm_a = math.sqrt(sum(a * a for a in vec_a))
     norm_b = math.sqrt(sum(b * b for b in vec_b))
