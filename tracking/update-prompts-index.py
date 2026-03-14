@@ -39,7 +39,7 @@ prompts_dir = os.path.join(tracking_dir, "key-prompts")
 index_file = os.path.join(tracking_dir, "key-prompts.md")
 
 # --- OpenMemory helpers ---
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/embeddings")
 OLLAMA_MODEL = "nomic-embed-text"
 
 
