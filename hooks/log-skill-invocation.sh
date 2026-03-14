@@ -9,8 +9,20 @@ require_profile 2
 INPUT=$(cat)
 
 ENTRY=$(echo "$INPUT" | python3 -c "
-import sys, json, os
+import sys, json, os, re
 from datetime import datetime, timezone
+
+def scrub_credentials(text):
+    patterns = [
+        (r'(Bearer\s+)\S+', r'\1[REDACTED]'),
+        (r'(sk-|ak-|key-)\S+', '[REDACTED]'),
+        (r'(--token\s+)\S+', r'\1[REDACTED]'),
+        (r'(password[=:]\s*)\S+', r'\1[REDACTED]'),
+        (r'AKIA[0-9A-Z]{16}', '[REDACTED]'),
+    ]
+    for pat, repl in patterns:
+        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
+    return text
 
 d = json.load(sys.stdin)
 ti = d.get('tool_input', {})
@@ -18,11 +30,13 @@ skill = ti.get('skill', '')
 if not skill:
     sys.exit(0)
 
+raw_args = ti.get('args', '')
 entry = {
     'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
     'date': datetime.now().strftime('%Y-%m-%d'),
     'skill': skill,
-    'args': ti.get('args', ''),
+    'args': scrub_credentials(raw_args),
+    'args_len': len(raw_args),
     'session_id': os.environ.get('CLAUDE_SESSION_ID', 'unknown')
 }
 print(json.dumps(entry))

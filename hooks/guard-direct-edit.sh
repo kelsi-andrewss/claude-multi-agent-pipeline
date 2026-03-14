@@ -83,7 +83,7 @@ if [[ "$FILE_PATH" == */\.claude/* ]]; then
 fi
 
 # Allow edits to temp files
-if [[ "$FILE_PATH" == /tmp/* || "$FILE_PATH" == "$TMPDIR"* ]]; then
+if [[ "$FILE_PATH" == /tmp/* || "$FILE_PATH" == "$TMPDIR"* || "$FILE_PATH" == "$CLAUDE_TEMP_DIR"* ]]; then
   exit 0
 fi
 
@@ -94,7 +94,7 @@ fi
 
 # Allow edits during active /hotfix — sentinel contains allowed file path
 # Fixed path (not PID-based) because the hook's PPID never matches the skill's $$
-HOTFIX_SENTINEL="/tmp/hotfix-active"
+HOTFIX_SENTINEL="$CLAUDE_TEMP_DIR/hotfix-active"
 if [[ -f "$HOTFIX_SENTINEL" ]]; then
   ALLOWED_FILE=$(cat "$HOTFIX_SENTINEL")
   if [[ "$FILE_PATH" == *"$ALLOWED_FILE"* || "$ALLOWED_FILE" == *"$FILE_PATH"* ]]; then

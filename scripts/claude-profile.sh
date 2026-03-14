@@ -2,7 +2,8 @@
 # Switch hook profile: claude-profile [minimal|standard|strict]
 # Without args, shows current profile.
 
-PROFILE_FILE="/tmp/claude-hook-profile"
+mkdir -p "$HOME/.claude/tmp"
+PROFILE_FILE="$HOME/.claude/tmp/claude-hook-profile"
 VALID_PROFILES=("minimal" "standard" "strict")
 
 if [[ $# -eq 0 ]]; then

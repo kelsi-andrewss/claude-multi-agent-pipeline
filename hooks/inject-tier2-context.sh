@@ -9,8 +9,7 @@ require_profile 1
 INPUT=$(cat)
 
 # Session injection cap — max 3 per session
-SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
-COUNTER_FILE="/tmp/tier2-count-${SESSION_ID}"
+COUNTER_FILE="$CLAUDE_TEMP_DIR/tier2-count-${SESSION_ID}"
 COUNT=0
 if [[ -f "$COUNTER_FILE" ]]; then
   COUNT=$(cat "$COUNTER_FILE" 2>/dev/null)
@@ -20,8 +19,12 @@ if (( COUNT >= 3 )); then
   exit 0
 fi
 
-# Extract prompt text — bash-native JSON parsing (no jq/Python)
-PROMPT=$(echo "$INPUT" | sed -n 's/.*"prompt"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p')
+# Extract prompt text via python3 JSON parsing
+PROMPT=$(echo "$INPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('prompt', ''))
+" 2>/dev/null)
 if [[ -z "$PROMPT" ]]; then
   exit 0
 fi
