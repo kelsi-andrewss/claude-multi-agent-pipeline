@@ -48,6 +48,23 @@ conn.execute(
     "SET text = 'User corrected ' || count || 'x on: ' || substr(theme, 1, 200) "
     "WHERE status = 'promoted' AND (text IS NULL OR text = '')"
 )
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS decision_preferences (
+        id TEXT PRIMARY KEY,
+        decision_type TEXT NOT NULL,
+        context TEXT NOT NULL,
+        chosen_path TEXT NOT NULL,
+        alternatives TEXT,
+        session_id TEXT,
+        confidence REAL DEFAULT 0.5,
+        signal_score REAL DEFAULT 0,
+        signal_count INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )
+""")
+conn.execute("CREATE INDEX IF NOT EXISTS idx_dp_type ON decision_preferences(decision_type)")
+conn.execute("CREATE INDEX IF NOT EXISTS idx_dp_created ON decision_preferences(created_at)")
 conn.commit()
 conn.close()
 MIGRATEEOF
