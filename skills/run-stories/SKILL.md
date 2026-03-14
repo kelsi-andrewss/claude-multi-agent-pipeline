@@ -206,6 +206,34 @@ When `pm_check_conflicts` returns file-level conflicts, check if ALL stories in 
 
 If ANY story uses a bare filename (no symbol), it conflicts with all other stories targeting that file regardless of their annotations.
 
+### 2b-hybrid. Git merge-tree confirmation
+
+After `pm_check_conflicts` classifies stories into `safe_parallel` and `sequential`, run a second pass using `conflict-check.sh` to confirm or reclassify sequential pairs via actual git merge-tree simulation and symbol analysis.
+
+For each pair of stories in the `sequential` list that have branches already pushed:
+
+1. Call `conflict-check.sh` to compare the two story branches:
+   ```bash
+   CONFLICT_RESULT=$(bash ~/.claude/scripts/conflict-check.sh \
+     --branch-a <story-a-branch> \
+     --branch-b <story-b-branch> \
+     --project-root <project-root>)
+   ```
+
+2. Parse the JSON result. Check the `severity` and `conflict` fields.
+
+3. Reclassification:
+   - `severity` is `"green"` or `"yellow"` (`conflict: false`) — move the story pair from `sequential` to `safe_parallel`. Log: `"story-NNN + story-MMM: pm_check_conflicts flagged file overlap but git merge-tree confirms no textual conflict — parallelizing."`
+   - `severity` is `"red"` or `"black"` (`conflict: true`) — keep in `sequential`. Log: `"story-NNN + story-MMM: confirmed conflict in <files> (<symbols if available>)."`
+
+4. If stories don't have branches yet (first run — branches are created during Step 4), skip hybrid check for that pair. Fall back to `pm_check_conflicts` decision. Hybrid confirmation is opportunistic, not blocking.
+
+5. If `conflict-check.sh` returns `status: "error"` (exit code 2), log the error and keep the pair in `sequential` (conservative fallback).
+
+6. After processing all sequential pairs, the updated `safe_parallel` and `sequential` lists are used for batch construction in the remaining steps.
+
+> **Why opportunistic:** On first run, story branches don't exist yet — they're created in Step 4 from the dev branch. `git merge-tree` needs actual refs to compare. The hybrid check adds value on re-runs (branches exist from a previous partial execution), sequential batches (batch 0 creates branches before batch 1 launches), and the merge queue (branches exist by queue ordering time).
+
 ---
 
 ## Step 2c: Build verification (via shared script)
