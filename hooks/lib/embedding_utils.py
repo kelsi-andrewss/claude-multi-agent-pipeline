@@ -1,9 +1,9 @@
 """Shared embedding utilities for OpenMemory and signal processing."""
-import json, math, struct
+import json, math, os, struct
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/embeddings")
 OLLAMA_MODEL = "nomic-embed-text"
 
 

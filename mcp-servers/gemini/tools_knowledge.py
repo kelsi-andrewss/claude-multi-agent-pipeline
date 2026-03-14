@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import struct
 import time
@@ -24,7 +25,7 @@ from tools_pm_helpers import _db_op, _next_id
 
 # OpenMemory constants
 OM_DB = Path.home() / ".claude" / ".claude" / "openmemory.sqlite"
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/embeddings")
 OLLAMA_MODEL = "nomic-embed-text"
 
 
