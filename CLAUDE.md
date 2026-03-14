@@ -77,7 +77,7 @@ These surfaces track patterns across sessions:
 - `correction_groups` table (epics.db) — single source of truth for corrections (manual via `log-correction.sh` + auto-detected by stop hook)
 - `~/.claude/.claude/rendered-prefs.md` — rendered from correction_groups DB at session start (loaded via @import, survives compaction)
 - OpenMemory — queryable semantic store for tool learnings, decisions, prompt patterns
-- `decision_preferences` table (epics.db) — machine-learned preference predictions from correction/decision correlation (see `hooks/lib/signal_processor.py`)
-- `merge_outcomes` table (run-state.db) — post-merge/rejection results (consulted on-demand)
+- `decision_preferences` table (epics.db) — tracks decision outcomes and correlates them with corrections; negative-signal decisions surface in the sidecar at session start (see `hooks/lib/signal_processor.py`)
+- `merge_outcomes` table (run-state.db) — records post-merge/rejection results per story; feeds trust calibration and signal scoring
 
 > Infrastructure details (OpenMemory, pipelines, project structure): see ~/.claude/.claude/CLAUDE.md
