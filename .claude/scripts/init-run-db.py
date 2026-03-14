@@ -65,6 +65,20 @@ SCHEMA_DDL = [
         queued_at TEXT DEFAULT (datetime('now')),
         merged_at TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS merge_outcomes (
+        id INTEGER PRIMARY KEY,
+        story_id TEXT NOT NULL UNIQUE,
+        epic_id TEXT,
+        agent TEXT,
+        model TEXT,
+        domain_tags TEXT,
+        predicted_conflict BOOLEAN,
+        actual_conflict BOOLEAN,
+        success BOOLEAN,
+        cycle_time_s INTEGER,
+        revert_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+    )""",
 ]
 
 
