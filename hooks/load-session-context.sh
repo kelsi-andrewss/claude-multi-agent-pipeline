@@ -165,6 +165,30 @@ if learnings:
 OMCOMPACTEOF
   fi
 
+  # Trust calibration summary
+  RUN_STATE_DB="$HOME/.claude/.claude/run-state.db"
+  if [[ -f "$RUN_STATE_DB" ]]; then
+  python3 - "$RUN_STATE_DB" <<'TRUSTEOF'
+import json, os, sys
+db_path = sys.argv[1]
+try:
+    sys.path.insert(0, os.path.expanduser("~/.claude"))
+    from hooks.lib.signal_processor import compute_trust_scores, get_trust_level
+    report = compute_trust_scores(db_path)
+    level = get_trust_level(report)
+    overrides = {k: v for k, v in report["domains"].items() if v.get("override")}
+    print(f"  Trust: {level} (global: {report['global']:.2f}, {len(report['domains'])} domains, {len(overrides)} overrides)")
+    if overrides:
+        for domain, info in overrides.items():
+            print(f"    Override: {domain}: {info['score']:.2f} ({info['count']} samples)")
+except Exception as e:
+    print(f"  Trust: medium (default — {e})")
+    level = "medium"
+# Export for session use
+print(f"CLAUDE_TRUST_LEVEL={level}")
+TRUSTEOF
+  fi
+
   SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
 
   # OpenMemory health check — warn if Ollama is unreachable

@@ -49,6 +49,22 @@ Before defaulting, query OpenMemory for tool learnings about the model + file ty
 
 Pipeline files are excluded because errors compound — a bad edit affects every future story, not just the current one.
 
+### Trust-informed selection (when merge_outcomes >= 10 records)
+
+Trust scores from merge_outcomes override the static table above:
+
+| Trust Level | Threshold | Model Policy | Approval Policy |
+|---|---|---|---|
+| High | >= 0.85 | Haiku eligible (if Haiku threshold met) | Auto-approve for proven domains |
+| Medium | >= 0.70 | Sonnet default | Standard review flow |
+| Low | < 0.70 | Sonnet default, escalation at 1 BLOCKING | Mandatory approval |
+
+**Domain overrides**: When a domain's success rate diverges from global by >= 0.15 (with 3+ samples), its trust level governs stories touching that domain regardless of global trust.
+
+**Minimum sample**: Trust-informed selection activates after 10 merge_outcomes records. Below that, use the static table above.
+
+Trust scores computed by `hooks/lib/signal_processor.py:compute_trust_scores()`. Populated by `outcomes-parser.py`. See `refs/orch-memory.md § Trust Calibration`.
+
 ---
 
 ## 3. WORKFLOW
