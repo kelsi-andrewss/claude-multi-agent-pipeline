@@ -521,6 +521,102 @@ If the agent result doesn't include usage metadata, skip — merge-worktree hand
 5. Wait for the resumed agent to return DONE or BLOCKED.
 6. If DONE, add to the merge list. If BLOCKED, add to blocked list.
 
+### Step 5.0: Ralph Loop auto-review (coder self-correction)
+
+After each coder agent returns DONE (and before the diff gate in Step 5a), run build verification against the coder's worktree to confirm the code actually works:
+
+```bash
+VERIFY_RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <worktree-path>)
+```
+
+Parse the JSON result using the same logic as Step 2c:
+- **PASS** or **SKIP** (no build system): proceed to Step 5a (diff gate). No retry needed.
+- **FAIL**: enter the Ralph Loop retry below.
+
+If the coder returned BLOCKED, skip build verification entirely (nothing to verify) — the story goes straight to the blocked list.
+
+#### Ralph Loop retry logic
+
+Track three pieces of state per story across retry iterations:
+- `retry_count` (int, starts at 0)
+- `last_error_hash` (SHA-256 of the `build_output` field, initially null)
+- `consecutive_no_progress` (int, starts at 0)
+- `error_hash_counts` (dict mapping hash → count, initially empty)
+
+On each FAIL:
+
+1. **Compute error hash**: `echo "<build_output>" | shasum -a 256 | cut -d' ' -f1`
+
+2. **Update circuit breaker counters**:
+   - If `error_hash == last_error_hash`: increment `consecutive_no_progress`
+   - If `error_hash != last_error_hash`: reset `consecutive_no_progress` to 0, update `last_error_hash`
+   - Increment `retry_count`
+   - Increment `error_hash_counts[error_hash]`
+
+3. **Check circuit breakers** (any triggers = stop retrying, mark BLOCKED):
+
+   | Breaker | Threshold | Condition |
+   |---------|-----------|-----------|
+   | Max retries | 3 | `retry_count >= 3` |
+   | No progress | 3 | `consecutive_no_progress >= 3` |
+   | Same error | 5 | `error_hash_counts[error_hash] >= 5` |
+
+   If any breaker fires: log friction (`category: blocked, type: automatic, skill: run-stories, detail: "Ralph retry exhausted: <breaker name> after <retry_count> attempts"`), mark story BLOCKED with reason "Build verification failed after <retry_count> retries: <last build_output summary>", skip to Step 5a handling for BLOCKED stories.
+
+4. **Re-inject coder**: launch a new `general-purpose` background agent with this prompt:
+
+   ```
+   You are RE-EXECUTING story <story_id>: "<title>" (retry <retry_count> of 3)
+
+   Your previous implementation failed build verification. Fix the errors below.
+
+   WORKTREE: <worktree-path>
+   All reads and writes MUST use paths under this directory.
+   Story branch: <story-branch>
+
+   ## Build errors
+
+   <build_output from build-verify.sh JSON>
+
+   ## Instructions
+
+   1. Read the error output carefully. Identify the root cause.
+   2. Fix ONLY what's broken. Do not refactor working code.
+   3. Stage and commit your fix:
+      git -C <worktree-path> add <changed-files>
+      git -C <worktree-path> commit -m "<story_id>: fix build errors (retry <retry_count>)"
+   4. Push: git -C <worktree-path> push origin <story-branch>
+   5. Return "DONE: <story-branch> pushed. Retry <retry_count> fix applied."
+      or "BLOCKED: <reason>" if you cannot fix the errors.
+
+   ## Tool constraints
+   Do NOT call any mcp__gemini__* tools.
+   Do NOT call any pm_* tools.
+   Focus exclusively on fixing the build errors.
+   ```
+
+5. **Wait for retry agent**, then re-run build verification from the top of this section. Loop until PASS, SKIP, or a circuit breaker fires.
+
+#### Dual-exit gate
+
+A coder's work is only considered complete when BOTH conditions are met:
+1. The coder agent returned DONE (completion indicator)
+2. `build-verify.sh` returns PASS or SKIP against the worktree
+
+If the coder returned DONE but build verification fails, the Ralph Loop retry handles it. If the coder returned BLOCKED, skip the build verification entirely (nothing to verify).
+
+#### Stories without a build system
+
+When `build-verify.sh` returns `build_result: "skip"` (project_type is "unknown"), the dual-exit gate is satisfied by condition 1 alone. The retry loop never fires. This preserves existing behavior for projects without lint/test infrastructure.
+
+#### Interaction with existing steps
+
+The Ralph Loop retry (Step 5.0) runs BEFORE Step 5a (diff gate) and Step 5b (per-story testing). The purpose is different:
+- Step 5.0 catches build/lint failures (does the code compile and pass basic checks?)
+- Step 5b runs acceptance tests (does the code meet the spec?)
+
+A story must pass Step 5.0 before entering Step 5a. If Step 5.0 marks a story BLOCKED, it skips Step 5a and Step 5b entirely.
+
 ### Step 5a: Diff gate (per story)
 
 For each DONE story, verify only expected files changed:
