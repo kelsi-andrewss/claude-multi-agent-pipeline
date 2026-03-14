@@ -562,6 +562,113 @@ def feed_outcomes_to_scoring(db_path):
     return {"domain_rates": domain_rates, "model_rates": model_rates}
 
 
+def compute_trust_scores(db_path):
+    """Compute global and per-domain trust scores from merge_outcomes.
+
+    Opens run-state.db at db_path, queries merge_outcomes for all records
+    with success IS NOT NULL. Global score = success_count / total_count
+    (default 0.5 if no records). Per-domain: parse domain_tags JSON array
+    per row, group by tag, compute score. Mark domain as override when
+    domain_score < global_score - 0.15 AND domain_count >= 3.
+
+    Returns: {"global": float, "domains": {name: {"score": float, "count": int,
+              "override": bool}}, "sample_count": int}
+    """
+    if not os.path.isfile(db_path):
+        return {"global": 0.5, "domains": {}, "sample_count": 0}
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='merge_outcomes'"
+        )
+        if not cursor.fetchone():
+            conn.close()
+            return {"global": 0.5, "domains": {}, "sample_count": 0}
+        rows = cursor.execute(
+            "SELECT domain_tags, success FROM merge_outcomes WHERE success IS NOT NULL"
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error:
+        return {"global": 0.5, "domains": {}, "sample_count": 0}
+
+    if not rows:
+        return {"global": 0.5, "domains": {}, "sample_count": 0}
+
+    # Global score
+    total_count = len(rows)
+    success_count = sum(1 for _, success in rows if success)
+    global_score = success_count / total_count
+
+    # Per-domain scores
+    domain_counts = {}
+    for domain_tags_json, success in rows:
+        try:
+            tags = json.loads(domain_tags_json) if domain_tags_json else []
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for tag in tags:
+            tag = tag.strip()
+            if not tag:
+                continue
+            if tag not in domain_counts:
+                domain_counts[tag] = {"success": 0, "total": 0}
+            domain_counts[tag]["total"] += 1
+            if success:
+                domain_counts[tag]["success"] += 1
+
+    domains = {}
+    for domain, counts in domain_counts.items():
+        if counts["total"] == 0:
+            continue
+        domain_score = counts["success"] / counts["total"]
+        override = domain_score < global_score - 0.15 and counts["total"] >= 3
+        domains[domain] = {
+            "score": domain_score,
+            "count": counts["total"],
+            "override": override,
+        }
+
+    return {"global": global_score, "domains": domains, "sample_count": total_count}
+
+
+def get_trust_level(trust_report, domain=None):
+    """Determine trust level from a trust report.
+
+    If domain provided and domain has override: use min(global, domain_score).
+    Otherwise: use global score.
+
+    Returns "high" (>= 0.85), "medium" (>= 0.70), "low" (< 0.70).
+    """
+    score = trust_report["global"]
+
+    if domain and domain in trust_report.get("domains", {}):
+        domain_info = trust_report["domains"][domain]
+        if domain_info.get("override"):
+            score = min(score, domain_info["score"])
+
+    if score >= 0.85:
+        return "high"
+    elif score >= 0.70:
+        return "medium"
+    else:
+        return "low"
+
+
+def recommend_model(trust_level, agent, file_count):
+    """Recommend model based on trust level, agent type, and file count.
+
+    - "high" + agent=="quick-fixer" + file_count==1: return "haiku"
+    - "high" or "medium": return "sonnet"
+    - "low": return "sonnet" (escalation threshold 1 not 2)
+
+    Returns model string.
+    """
+    if trust_level == "high" and agent == "quick-fixer" and file_count == 1:
+        return "haiku"
+    return "sonnet"
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]", file=sys.stderr)
