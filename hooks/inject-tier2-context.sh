@@ -71,8 +71,15 @@ for cat in "${MATCHED_CATEGORIES[@]}"; do
       if [[ -f "$DB_FILE" ]]; then
         STORY_IDS=$(echo "$PROMPT" | grep -oE 'story-[0-9]+' | sort -u | head -3)
         for SID in $STORY_IDS; do
-          ROW=$(sqlite3 -separator '|' "$DB_FILE" \
-            "SELECT id, title, state, branch, write_files, depends_on, agent FROM stories WHERE id='$SID' AND archived=0;" 2>/dev/null)
+          ROW=$(python3 - "$DB_FILE" "$SID" <<'PYEOF'
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1], timeout=5)
+row = conn.execute("SELECT id, title, state, branch, write_files, depends_on, agent FROM stories WHERE id=? AND archived=0", (sys.argv[2],)).fetchone()
+if row:
+    print("|".join(str(c) if c else "" for c in row))
+conn.close()
+PYEOF
+)
           if [[ -n "$ROW" ]]; then
             IFS='|' read -r s_id s_title s_state s_branch s_writes s_deps s_agent <<< "$ROW"
             FRAGMENTS+=("[$s_id] $s_title | state: $s_state | branch: ${s_branch:-(none)} | writes: ${s_writes:-(none)} | deps: ${s_deps:-(none)} | agent: ${s_agent:-(none)}")

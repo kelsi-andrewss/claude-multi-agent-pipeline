@@ -106,21 +106,21 @@ fi
 DB_FILE="$HOME/.claude/.claude/epics.db"
 
 if [[ -f "$DB_FILE" ]]; then
-  RESULT=$(python3 -c "
-import subprocess, sys
+  RESULT=$(python3 - "$DB_FILE" "$FILE_PATH" <<'PYEOF'
+import sqlite3, sys
 
-db_path = '$DB_FILE'
-file_path = '$FILE_PATH'
+db_path = sys.argv[1]
+file_path = sys.argv[2]
 
-running_states = \"('in-progress','in-review','approved','running','testing','reviewing','merging')\"
+running_states = ('in-progress','in-review','approved','running','testing','reviewing','merging')
 
 try:
-    r = subprocess.run(
-        ['sqlite3', db_path,
-         f'SELECT write_targets FROM stories WHERE state IN {running_states} AND archived=0;'],
-        capture_output=True, text=True, timeout=5
-    )
-    rows = [line.strip() for line in r.stdout.strip().splitlines() if line.strip()]
+    conn = sqlite3.connect(db_path, timeout=5)
+    placeholders = ','.join('?' for _ in running_states)
+    query = f'SELECT write_targets FROM stories WHERE state IN ({placeholders}) AND archived=0'
+    cursor = conn.execute(query, running_states)
+    rows = [r[0].strip() for r in cursor.fetchall() if r[0] and r[0].strip()]
+    conn.close()
 except Exception:
     print('EPICS_UNAVAILABLE')
     sys.exit(0)
@@ -143,7 +143,8 @@ for wf in all_write_files:
         sys.exit(0)
 
 print('OUT_OF_SCOPE')
-" 2>/dev/null)
+PYEOF
+)
 
   case "$RESULT" in
     "IN_WRITE_FILES")
