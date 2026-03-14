@@ -385,7 +385,7 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
         List of correction dicts: [{"turn_idx": int, "content": str, "weight": float}]
     """
     if project_root is None:
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_file)))
+        project_root = os.path.dirname(os.path.dirname(db_file))
 
     all_corrections = []
     seen_themes = set()
@@ -688,17 +688,34 @@ def recommend_model(trust_level, agent, file_count):
     return "sonnet"
 
 
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]", file=sys.stderr)
-        sys.exit(1)
+def main_logic(transcript_path, db_path, session_id=""):
+    """Core signal processing: correlate corrections with decision_preferences.
 
-    transcript_path = sys.argv[1]
-    db_path = sys.argv[2]
-    session_id = sys.argv[3] if len(sys.argv) > 3 else ""
+    Performs:
+    1. Connect to db_path, query recent decision_preferences
+    2. Parse transcript turns, find decision mention turns
+    3. Run process_session_corrections (correction detection + DB upsert)
+    4. For matched corrections: decrement signal_score by correction weight
+    5. For unmatched decisions: increment signal_score by 0.5 (implicit approval)
+    6. Commit and close
 
+    Args:
+        transcript_path: Path to JSONL transcript file.
+        db_path: Path to epics.db.
+        session_id: Session identifier for filtering decisions.
+
+    Returns:
+        None. Side effects: updates decision_preferences.signal_score/signal_count
+        in db_path, upserts correction_groups via process_session_corrections.
+
+    Exits silently (returns None) when:
+        - transcript_path or db_path don't exist
+        - decision_preferences table missing
+        - No recent decisions found
+        - No transcript turns parsed
+    """
     if not os.path.isfile(transcript_path) or not os.path.isfile(db_path):
-        sys.exit(0)
+        return
 
     try:
         conn = sqlite3.connect(db_path)
@@ -710,9 +727,9 @@ def main():
         )
         if not cursor.fetchone():
             conn.close()
-            sys.exit(0)
+            return
     except Exception:
-        sys.exit(0)
+        return
 
     now = int(time.time())
     day_ago = now - 86400
@@ -735,20 +752,20 @@ def main():
         decisions = [dict(row) for row in cursor.fetchall()]
     except Exception:
         conn.close()
-        sys.exit(0)
+        return
 
     if not decisions:
         conn.close()
-        sys.exit(0)
+        return
 
     turns = parse_transcript_turns(transcript_path)
     if not turns:
         conn.close()
-        sys.exit(0)
+        return
 
     find_decision_mention_turns(decisions, turns)
 
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_path)))
+    project_root = os.path.dirname(os.path.dirname(db_path))
     corrections = process_session_corrections(transcript_path, db_path, session_id, project_root)
 
     matched_decision_ids = set()
@@ -791,6 +808,17 @@ def main():
 
     conn.commit()
     conn.close()
+
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]", file=sys.stderr)
+        sys.exit(1)
+
+    transcript_path = sys.argv[1]
+    db_path = sys.argv[2]
+    session_id = sys.argv[3] if len(sys.argv) > 3 else ""
+    main_logic(transcript_path, db_path, session_id)
 
 
 if __name__ == "__main__":

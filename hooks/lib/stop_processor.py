@@ -8,11 +8,12 @@ session summary, auto-distillation, and compliance hook generation.
 Usage:
     stop_processor.py --transcript <path> --db <path> --session <id> --project <path> --cwd <path>
 """
-import argparse, json, os, signal, sqlite3, sys, time
+import argparse, fcntl, json, os, signal, sqlite3, sys, time
 
 
-LOCKFILE_TEMPLATE = "/tmp/stop-processor-{session}.pid"
-STALE_THRESHOLD = 300  # 5 minutes
+LOCKFILE_TEMPLATE = "/tmp/stop-processor-{session}.lock"
+
+_lock_fd = None
 
 
 def _lockfile_path(session_id):
@@ -21,40 +22,38 @@ def _lockfile_path(session_id):
 
 
 def _acquire_lock(session_id):
-    path = _lockfile_path(session_id)
-    if os.path.exists(path):
-        try:
-            with open(path) as f:
-                old_pid = int(f.read().strip())
-            # Check if process is still running
-            try:
-                os.kill(old_pid, 0)
-                # Process exists -- check age
-                mtime = os.path.getmtime(path)
-                if time.time() - mtime > STALE_THRESHOLD:
-                    print(f"Cleaning stale lockfile for PID {old_pid}", file=sys.stderr)
-                    os.remove(path)
-                else:
-                    print(f"Active process {old_pid} already running, exiting", file=sys.stderr)
-                    return False
-            except OSError:
-                # Process not running, clean up stale lockfile
-                print(f"Cleaning lockfile for dead PID {old_pid}", file=sys.stderr)
-                os.remove(path)
-        except (ValueError, OSError):
-            os.remove(path)
+    """Acquire advisory lock via fcntl.flock(). Non-blocking.
 
-    with open(path, "w") as f:
-        f.write(str(os.getpid()))
-    return True
+    Opens /tmp/stop-processor-{session}.lock and attempts LOCK_EX | LOCK_NB.
+    Returns True if lock acquired, False if another process holds it.
+    File descriptor stored in module-level _lock_fd for process-lifetime hold.
+    Lock auto-releases on process exit/crash (kernel-managed).
+    """
+    global _lock_fd
+    path = _lockfile_path(session_id)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd = fd
+        os.write(fd, str(os.getpid()).encode())
+        return True
+    except (BlockingIOError, OSError):
+        return False
 
 
 def _release_lock(session_id):
-    path = _lockfile_path(session_id)
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+    """Release advisory lock and close file descriptor.
+
+    Called via atexit. Safe to call multiple times (checks _lock_fd is not None).
+    """
+    global _lock_fd
+    if _lock_fd is not None:
+        try:
+            fcntl.flock(_lock_fd, fcntl.LOCK_UN)
+            os.close(_lock_fd)
+        except OSError:
+            pass
+        _lock_fd = None
 
 
 def _connect_db(db_path):
@@ -88,102 +87,8 @@ def stage_correction_detection(transcript_path, db_file, session_id, project_roo
 
 def stage_signal_processing(transcript_path, db_file, session_id):
     print("Stage 2: Signal processing", file=sys.stderr)
-    from hooks.lib.signal_processor import (
-        parse_transcript_turns, find_decision_mention_turns,
-        match_correction_to_decisions, process_session_corrections,
-    )
-
-    if not os.path.isfile(transcript_path) or not os.path.isfile(db_file):
-        print("Stage 2: skipped (missing files)", file=sys.stderr)
-        return
-
-    conn = _connect_db(db_file)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='decision_preferences'"
-    )
-    if not cursor.fetchone():
-        conn.close()
-        print("Stage 2: skipped (no decision_preferences table)", file=sys.stderr)
-        return
-
-    now = int(time.time())
-    day_ago = now - 86400
-
-    if session_id:
-        cursor.execute(
-            "SELECT id, decision_type, context, chosen_path, session_id "
-            "FROM decision_preferences "
-            "WHERE session_id = ? OR created_at >= ?",
-            (session_id, day_ago),
-        )
-    else:
-        cursor.execute(
-            "SELECT id, decision_type, context, chosen_path, session_id "
-            "FROM decision_preferences "
-            "WHERE created_at >= ?",
-            (day_ago,),
-        )
-    decisions = [dict(row) for row in cursor.fetchall()]
-
-    if not decisions:
-        conn.close()
-        print("Stage 2: skipped (no recent decisions)", file=sys.stderr)
-        return
-
-    turns = parse_transcript_turns(transcript_path)
-    if not turns:
-        conn.close()
-        print("Stage 2: skipped (no turns)", file=sys.stderr)
-        return
-
-    find_decision_mention_turns(decisions, turns)
-
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_file)))
-    corrections = process_session_corrections(transcript_path, db_file, session_id, project_root)
-
-    matched_decision_ids = set()
-
-    for correction in corrections:
-        matched_id = match_correction_to_decisions(correction, decisions, turns)
-        if matched_id:
-            matched_decision_ids.add(matched_id)
-            weight = correction["weight"]
-            try:
-                cursor.execute(
-                    "UPDATE decision_preferences "
-                    "SET signal_score = signal_score - ?, signal_count = signal_count + 1, updated_at = ? "
-                    "WHERE id = ?",
-                    (weight, now, matched_id),
-                )
-                print(
-                    f"Signal: decision {matched_id} score -= {weight} "
-                    f"(correction: {correction['content'][:60]}...)",
-                    file=sys.stderr,
-                )
-            except Exception as e:
-                print(f"Signal update failed for {matched_id}: {e}", file=sys.stderr)
-
-    for dec in decisions:
-        if dec["id"] not in matched_decision_ids:
-            try:
-                cursor.execute(
-                    "UPDATE decision_preferences "
-                    "SET signal_score = signal_score + 0.5, signal_count = signal_count + 1, updated_at = ? "
-                    "WHERE id = ?",
-                    (now, dec["id"]),
-                )
-                print(
-                    f"Signal: decision {dec['id']} score += 0.5 (implicit approval)",
-                    file=sys.stderr,
-                )
-            except Exception as e:
-                print(f"Signal update failed for {dec['id']}: {e}", file=sys.stderr)
-
-    conn.commit()
-    conn.close()
+    from hooks.lib.signal_processor import main_logic
+    main_logic(transcript_path, db_file, session_id)
     print("Stage 2 complete", file=sys.stderr)
 
 
