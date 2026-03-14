@@ -1,10 +1,10 @@
 ---
 name: presearch
-description: "Thin orchestrator: routes /scope -> /research -> /clarify+/scout (parallel) -> /briefing, with scope-based /quickfix shortcuts. Produces a structured briefing (presearch/<slug>.md) for /ship. Use when the user says \"/presearch <topic>\", \"/presearch path/to/requirements.md\", \"/presearch presearch/existing-briefing.md\", or \"/presearch --deep <topic>\"."
+description: "Core project research pipeline: routes /scope -> /clarify+/scout (parallel) -> /briefing. No web search — that's /research's job. Produces a structured briefing (presearch/<slug>.md) for /ship. Use when the user says \"/presearch <topic>\", \"/presearch path/to/requirements.md\", \"/presearch presearch/existing-briefing.md\", or \"/presearch --deep <topic>\"."
 args:
   - name: args
     type: string
-    description: "Topic (quoted string or free text), requirements file path, presearch briefing path (refine mode), or flags (--deep, --quick, --no-ship)."
+    description: "Topic (quoted string or free text), requirements file path, presearch briefing path (refine mode), or flags (--deep, --quick, --no-ship, --scope <path>, --research <path>)."
 ---
 
 # Presearch Skill Invoked
@@ -18,16 +18,18 @@ User has requested: `/presearch {{args}}`
 Parse `{{args}}` to determine mode and flags:
 
 **Flags** (strip from args after detection):
-- `--deep` -> extra research rounds (passed to /research and /scout)
+- `--deep` -> extra depth (passed to /scout)
 - `--quick` -> skip Q&A phase (passed to /clarify)
-- `--no-ship` -> produce the doc but don't prompt to ship (handled locally in Step 5)
+- `--no-ship` -> produce the doc but don't prompt to ship (handled locally in Step 4)
+- `--scope <path>` -> path to a pre-existing `.scope-<slug>.json` artifact. Skip Step 1 (scope).
+- `--research <path>` -> path to a pre-existing `.research-<slug>.json` artifact. Passed to /clarify and /scout.
 
 **Mode detection** (after stripping flags):
 1. **Refine mode**: remaining arg is a path starting with `presearch/` and ending `.md`, and the file exists -> read it as existing briefing. Any text after the path is the refinement instruction.
 2. **Requirements mode**: remaining arg is a path ending `.md` (not under `presearch/`), and the file exists -> treat path as the topic for /scope.
 3. **Idea mode**: everything else -> treat as the topic/idea.
 
-**Slug derivation**: from the topic text, generate a slug -- lowercase, hyphenated, max 40 chars. Strip articles and filler words. Examples:
+**Slug derivation**: from the topic text, generate a slug -- lowercase, hyphenated, max 40 chars. Strip articles and filler words. If `--scope` provided, use the slug from the scope artifact instead. Examples:
 - "Add presence cursors to the canvas" -> `add-presence-cursors`
 - "path/to/auth-requirements.md" -> slug from the filename stem
 
@@ -35,15 +37,16 @@ Hold `topic`, `slug`, `flags`, and `mode` for routing.
 
 ---
 
-## Step 1: Scope (skip if refine mode)
+## Step 1: Scope (skip if refine mode or --scope provided)
 
-If refine mode: skip to Step 3. Decisions are already established in the existing briefing.
+If refine mode: skip to Step 2. Decisions are already established in the existing briefing.
+If `--scope <path>` provided: read the scope artifact to get `slug`, `scope`, and `route_hint`. Update the local slug if different. Skip to Router A.
 
 Invoke the /scope skill:
 
 `Skill: scope, args: "<topic>"`
 
-After /scope completes, read `.scope-<slug>.json` to get `needs_research`, `slug`, `scope`, and `route_hint`. Update the local slug if the artifact produced a different one.
+After /scope completes, read `.scope-<slug>.json` to get `slug`, `scope`, and `route_hint`. Update the local slug if the artifact produced a different one.
 
 ---
 
@@ -59,56 +62,26 @@ Read `.scope-<slug>.json` and check `scope.complexity` and `route_hint`:
 
 ---
 
-## Step 2: Research (conditional)
-
-Check `.scope-<slug>.json` field `data.needs_research`:
-
-- If `needs_research == false`: skip to Step 3.
-- If `needs_research == true`: invoke /research.
-
-**Invoke /research:**
-- Base args: `--scope .scope-<slug>.json <topic>`
-- If `--deep` flag is set: `Skill: research, args: "--deep --scope .scope-<slug>.json <topic>"`
-- Otherwise: `Skill: research, args: "--scope .scope-<slug>.json <topic>"`
-
-After /research completes, read `presearch/.research-<slug>.json`.
-
----
-
-## Router B: Post-research scope check
-
-**Skip this router in refine mode** -- scope is already established.
-
-Read `presearch/.research-<slug>.json` and check `scope.complexity` (may have been updated from scope's estimate):
-
-- If `small` (<=3 files):
-  Ask the user: `"Research confirms small scope (<scope.files> files). Use /quickfix instead? (y/n)"`
-  - **y** -> `Skill: quickfix, args: "--context presearch/.research-<slug>.json <topic>"` then **STOP**.
-  - **n** -> continue to Step 3.
-- If not `small` -> continue to Step 3.
-
----
-
-## Step 3: Clarify + Scout (parallel)
+## Step 2: Clarify + Scout (parallel)
 
 Launch BOTH simultaneously:
 
 **Foreground (clarify):**
-- If research ran: `Skill: clarify, args: "--research presearch/.research-<slug>.json <topic>"`
-- If research skipped: `Skill: clarify, args: "<topic>"`
+- If `--research <path>` provided: `Skill: clarify, args: "--research <path> <topic>"`
+- Otherwise: `Skill: clarify, args: "<topic>"`
 - If `--quick` flag is set: add `--quick` flag to whichever variant above
 
 **Background (scout):**
 - Use Agent tool with `run_in_background: true`
-- If research ran: `Skill: scout, args: "--research presearch/.research-<slug>.json <topic>"`
-- If research skipped: `Skill: scout, args: "--scope .scope-<slug>.json <topic>"`
+- If `--research <path>` provided: `Skill: scout, args: "--research <path> <topic>"`
+- Otherwise: `Skill: scout, args: "--scope .scope-<slug>.json <topic>"`
 - If `--deep` flag is set: add `--deep` flag
 
 Wait for both to complete. Read `.clarify-<slug>.json` and `presearch/.scout-<slug>.json`.
 
 ---
 
-## Step 4: Briefing
+## Step 3: Briefing
 
 Invoke the /briefing skill.
 
@@ -120,7 +93,7 @@ Invoke the /briefing skill.
 
 ---
 
-## Step 5: Report
+## Step 4: Report
 
 After /briefing completes:
 
@@ -139,7 +112,6 @@ Ship it? (/ship presearch/<slug>.md)
 
 When refine mode is detected (Step 0):
 - Skip scope (decisions already established)
-- Skip research (context already exists)
 - Run clarify in refine-compatible mode + scout in background
 - Proceed to briefing with `--refine`
 
@@ -148,8 +120,8 @@ When refine mode is detected (Step 0):
 ## What this orchestrator does NOT do
 
 These are child skill responsibilities -- never call them directly from here:
-- `gemini_chat` or any `mcp__gemini__*` tools (scope/research/scout handle their own Gemini calls)
-- `WebSearch` / `WebFetch`
+- `gemini_chat` or any `mcp__gemini__*` tools (scope/scout handle their own Gemini calls)
+- `WebSearch` / `WebFetch` (web research is /research's job -- /research calls /presearch, not the other way around)
 - `AskUser` for Q&A (only for router y/n prompts)
 - `pm_add_decision` / `openmemory_store` (decision recording is /briefing's job)
 

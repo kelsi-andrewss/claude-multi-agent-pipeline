@@ -1,19 +1,18 @@
 ---
 name: research
 description: >
-  Deep web research via fan-out/fan-in parallelism. Claude and Gemini independently
-  suggest research angles, deduped into 4-6. Both models then research simultaneously:
-  Gemini via gemini_chat (native Google Search grounding), Claude via general-purpose
-  subagents with WebSearch/WebFetch. Findings merged with conflict detection and
-  citation tracking. Writes presearch/.research-<slug>.json knowledge synthesis
-  artifact. Use when the user says "/research <topic>",
+  Deep web research + full presearch pipeline. Runs /scope, then fan-out/fan-in web
+  research (Claude + Gemini in parallel), then calls /presearch with the research
+  artifact to complete the pipeline (clarify+scout -> briefing). Use when web research
+  is needed before building. Use when the user says "/research <topic>",
   "/research --scope .scope-foo.json <topic>", or "/research --deep <topic>".
 args:
   - name: args
     type: string
     description: >
       Topic (quoted string or free text), optional flags: --scope <path> (path to
-      .scope-<slug>.json), --deep (increases research budgets for both models).
+      .scope-<slug>.json), --deep (increases research budgets for both models),
+      --no-ship (produce briefing but don't prompt to ship), --quick (skip Q&A in clarify).
 ---
 
 # Research Skill Invoked
@@ -28,7 +27,9 @@ Parse `{{args}}` to extract:
 
 **Flags** (strip from args after detection):
 - `--scope <path>` -- path to a `.scope-<slug>.json` artifact. Optional.
-- `--deep` -- increases research budgets. Boolean.
+- `--deep` -- increases research budgets. Boolean. Also passed to /presearch.
+- `--no-ship` -- produce briefing but don't prompt to ship. Passed to /presearch.
+- `--quick` -- skip Q&A in clarify. Passed to /presearch.
 
 Everything remaining after flag stripping is the `topic`.
 
@@ -38,16 +39,20 @@ Everything remaining after flag stripping is the `topic`.
 
 ---
 
-## Step 1: Load scope context (if --scope)
+## Step 1: Scope
 
 If `--scope <path>` provided:
 1. Read the file. Validate it has `skill: "scope"` and `data` with `topic`, `needs_research`.
 2. Extract: `data.topic` (use as topic if none in args), `data.stack_detected`, `data.in_scope`, `data.out_of_scope`.
 3. These become context constraints for angle generation -- angles must respect scope boundaries.
 
-If `--scope` not provided: standalone mode. No upstream constraints.
+If `--scope` NOT provided:
+1. Invoke: `Skill: scope, args: "<topic>"`
+2. After /scope completes, read `.scope-<slug>.json`. Update the local slug if the artifact produced a different one.
+3. Set `scope_path = ".scope-<slug>.json"` for later use.
+4. Extract the same fields as above for angle generation constraints.
 
-If the file does not exist: error with "File not found: <path>. Run /scope first or provide a topic directly." and stop.
+If the scope file does not exist (when --scope was explicitly provided): error with "File not found: <path>." and stop.
 
 ---
 
@@ -321,7 +326,7 @@ Write to `presearch/.research-<slug>.json`.
 
 ---
 
-## Step 8: Report
+## Step 8: Report research phase
 
 ```
 Research complete.
@@ -336,10 +341,28 @@ Gaps: <list or "none">
 Output: presearch/.research-<slug>.json
 ```
 
-If `--scope` was used: `Upstream: <scope artifact path>`
 If `partial_research` is true: `Warning: partial results -- some angles failed. Gaps noted in artifact.`
 
-Do NOT prompt to run downstream skills. Routing is the orchestrator's job.
+---
+
+## Step 9: Invoke /presearch with research artifact
+
+Build the presearch args:
+- Start with: `--scope <scope_path> --research presearch/.research-<slug>.json`
+- If `--deep` flag is set: add `--deep`
+- If `--quick` flag is set: add `--quick`
+- If `--no-ship` flag is set: add `--no-ship`
+- Append the topic at the end
+
+Invoke:
+
+```
+Skill: presearch, args: "<constructed args> <topic>"
+```
+
+/presearch handles clarify+scout (parallel) -> briefing -> report internally. It will skip its own scope step because `--scope` is provided.
+
+When /presearch completes, the full pipeline is done. Do NOT print an additional report -- /presearch already reported the briefing path and ship prompt.
 
 ---
 
