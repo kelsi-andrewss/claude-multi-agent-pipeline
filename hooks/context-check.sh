@@ -4,7 +4,7 @@
 # have been closed in a single session, prints the standardized clearing
 # message so the user knows it's time to /clear.
 #
-# Counter file: /tmp/stories-closed-${SESSION_ID}
+# Counter file: $CLAUDE_TEMP_DIR/stories-closed-${SESSION_ID}
 # Exit 0 always (advisory only).
 
 source "$(dirname "$0")/lib/profile.sh"
@@ -24,9 +24,7 @@ if [[ "$STATUS" != "completed" ]]; then
   exit 0
 fi
 
-# Use a session ID based on the parent PID chain (stable within a session)
-SESSION_ID="${PPID:-$$}"
-COUNTER_FILE="/tmp/stories-closed-${SESSION_ID}"
+COUNTER_FILE="$CLAUDE_TEMP_DIR/stories-closed-${SESSION_ID}"
 
 # Increment counter
 COUNT=0
