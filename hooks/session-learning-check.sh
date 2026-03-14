@@ -25,28 +25,21 @@ d = json.load(sys.stdin)
 print(d.get('cwd', ''))
 " 2>/dev/null)
 
-# ── Section 1: Mtime comparison (SYNC, <100ms) ──
+# ── Section 1: Check for new outcomes since session start (SYNC, <100ms) ──
 SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
-SNAPSHOT="/tmp/session-mtimes-${SESSION_ID}"
 
 OUTCOMES_CHANGED=false
+RUN_STATE_DB="$HOME/.claude/.claude/run-state.db"
+SESSION_START_FILE="/tmp/session-start-${SESSION_ID}"
 
-if [[ -f "$SNAPSHOT" ]]; then
-  source "$SNAPSHOT"
-
-  if stat -f %m / >/dev/null 2>&1; then
-    mtime() { stat -f %m "$1" 2>/dev/null || echo "0"; }
-  elif stat -c %Y / >/dev/null 2>&1; then
-    mtime() { stat -c %Y "$1" 2>/dev/null || echo "0"; }
-  else
-    mtime() { python3 -c "import os; print(int(os.path.getmtime('$1')))" 2>/dev/null || echo "0"; }
-  fi
-
-  CURRENT_OUTCOMES=$(mtime "$HOME/.claude/outcomes.md")
-  [[ "$CURRENT_OUTCOMES" != "${OUTCOMES_MTIME:-0}" ]] && OUTCOMES_CHANGED=true
-
-  if [[ "$OUTCOMES_CHANGED" == true ]]; then
-    echo "outcomes.md updated"
+if [[ -f "$RUN_STATE_DB" && -f "$SESSION_START_FILE" ]]; then
+  SESSION_START_EPOCH=$(cat "$SESSION_START_FILE")
+  NEW_OUTCOMES=$(sqlite3 "$RUN_STATE_DB" \
+    "SELECT count(*) FROM merge_outcomes WHERE created_at > datetime($SESSION_START_EPOCH, 'unixepoch');" \
+    2>/dev/null || echo "0")
+  if [[ "$NEW_OUTCOMES" -gt 0 ]]; then
+    OUTCOMES_CHANGED=true
+    echo "outcomes updated ($NEW_OUTCOMES new since session start)"
   fi
 fi
 
@@ -57,7 +50,7 @@ fi
 
 # ── Section 3: Spawn background processor ──
 if [[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]]; then
-  rm -f "$SNAPSHOT" "/tmp/session-start-${SESSION_ID}"
+  rm -f "/tmp/session-start-${SESSION_ID}"
   exit 0
 fi
 
@@ -69,7 +62,7 @@ PIDFILE="/tmp/stop-processor-${SAFE_SESSION}.pid"
 if [[ -f "$PIDFILE" ]]; then
   OLD_PID=$(cat "$PIDFILE" 2>/dev/null)
   if kill -0 "$OLD_PID" 2>/dev/null; then
-    rm -f "$SNAPSHOT" "/tmp/session-start-${SESSION_ID}"
+    rm -f "/tmp/session-start-${SESSION_ID}"
     exit 0
   fi
 fi
@@ -84,6 +77,5 @@ nohup python3 "$HOME/.claude/hooks/lib/stop_processor.py" \
 disown
 
 # Cleanup
-rm -f "$SNAPSHOT"
 rm -f "/tmp/session-start-${SESSION_ID}"
 exit 0

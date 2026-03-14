@@ -44,7 +44,6 @@ if [[ "$FILE_PATH" == "$HOME/.claude/"* ]]; then
     # Working IN ~/.claude as a project — only allow orchestration artifacts
     case "$FILE_PATH" in
       # Behavioral/logging files the main session writes
-      "$HOME/.claude/outcomes.md"|\
       "$HOME/.claude/session-handoff.md"|\
       "$HOME/.claude/todos.md"|\
       "$HOME/.claude/skill-changelog.md")
