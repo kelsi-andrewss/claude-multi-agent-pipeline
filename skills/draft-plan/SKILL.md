@@ -62,7 +62,12 @@ Classify each token in `{{args}}`:
 4. `fast_path` stories skip directly to Step 5.
 
 **Gather past failure context:**
-Before launching the planner agent, read `~/.claude/outcomes.md`. Extract the last 10 outcome entries where "What failed" is not "nothing". Build a `PAST_FAILURES` block with format:
+Before launching the planner agent, query `~/.claude/.claude/run-state.db`:
+```bash
+sqlite3 -separator "\t" ~/.claude/.claude/run-state.db \
+  "SELECT story_id, what_failed FROM merge_outcomes WHERE what_failed != 'nothing' AND what_failed != '' ORDER BY created_at DESC LIMIT 10;"
+```
+If the DB file is missing, skip this step. Build a `PAST_FAILURES` block with format:
 ```
 PAST_FAILURES:
   story-NNN (agent, model): <what failed>
