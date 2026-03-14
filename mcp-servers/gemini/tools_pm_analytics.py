@@ -216,3 +216,9 @@ def register(mcp):
                     "trend": trend,
                 },
             })
+
+    return {
+        "pm_cycle_time": pm_cycle_time,
+        "pm_throughput": pm_throughput,
+        "pm_wip": pm_wip,
+    }

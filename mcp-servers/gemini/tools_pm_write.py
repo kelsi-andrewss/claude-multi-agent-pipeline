@@ -623,3 +623,13 @@ def register(mcp):
                 "SELECT * FROM tasks WHERE story_id = ? AND id = ?", (story_id, task_id)
             ).fetchone()
             return fmt_update_task(dict(updated))
+
+    return {
+        "pm_create_epic": pm_create_epic,
+        "pm_create_story": pm_create_story,
+        "pm_add_task": pm_add_task,
+        "pm_plan_items": pm_plan_items,
+        "pm_update_story": pm_update_story,
+        "pm_update_epic": pm_update_epic,
+        "pm_update_task": pm_update_task,
+    }

@@ -463,3 +463,13 @@ def register(mcp):
             if not slug:
                 slug = epic_id
             return fmt_dev_branch({"dev_branch": "dev", "epic_title": title, "epic_slug": slug})
+
+    return {
+        "pm_get_epic": pm_get_epic,
+        "pm_get_story": pm_get_story,
+        "pm_list_stories": pm_list_stories,
+        "pm_search": pm_search,
+        "pm_view": pm_view,
+        "pm_roadmap": pm_roadmap,
+        "pm_dev_branch": pm_dev_branch,
+    }

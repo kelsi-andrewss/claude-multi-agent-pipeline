@@ -98,3 +98,5 @@ def register(mcp):
             f"## Test Output\n\n{combined_output}"
         )
         return await _gemini(full_prompt)
+
+    return {"test": test, "_run_tests": _run_tests}

@@ -11,7 +11,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import gemini_client
 import server
+import tools_analysis
+import tools_gemini
+import tools_pm_helpers
+import tools_pm_plan
+import tools_test as tools_test_mod
 
 
 # ---------------------------------------------------------------------------
@@ -27,7 +33,7 @@ def mock_subprocess():
         json.dumps({"response": "test response"}).encode(),
         b"",
     ))
-    with patch("server.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+    with patch("gemini_client.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
         yield mock_exec, proc
 
 
@@ -83,10 +89,9 @@ class TestGemini:
         proc.returncode = 1
         proc.communicate = AsyncMock(return_value=(b"", b"something went wrong"))
 
-        result = asyncio.get_event_loop().run_until_complete(server._gemini("hi"))
-
-        assert "[gemini error (exit 1)]" in result
-        assert "something went wrong" in result
+        from gemini_client import GeminiCLIError
+        with pytest.raises(GeminiCLIError, match="something went wrong"):
+            asyncio.get_event_loop().run_until_complete(server._gemini("hi"))
 
     def test_parses_json_response(self, mock_subprocess):
         _, proc = mock_subprocess
@@ -174,7 +179,7 @@ class TestFetchDoc:
 
 class TestPlan:
     def test_reads_default_docs(self, mock_subprocess):
-        with patch.object(server, "_read_doc", return_value="doc content") as mock_read:
+        with patch.object(tools_gemini, "_read_doc", return_value="doc content") as mock_read:
             asyncio.get_event_loop().run_until_complete(
                 server.plan("build a widget")
             )
@@ -187,7 +192,7 @@ class TestPlan:
     def test_includes_system_instruction(self, mock_subprocess):
         _, proc = mock_subprocess
 
-        with patch.object(server, "_read_doc", return_value="doc content"):
+        with patch.object(tools_gemini, "_read_doc", return_value="doc content"):
             asyncio.get_event_loop().run_until_complete(
                 server.plan("build a widget")
             )
@@ -203,7 +208,7 @@ class TestPlan:
 
 class TestAnalyze:
     def test_reads_claude_doc(self, mock_subprocess):
-        with patch.object(server, "_read_doc", return_value="conventions") as mock_read:
+        with patch.object(tools_gemini, "_read_doc", return_value="conventions") as mock_read:
             asyncio.get_event_loop().run_until_complete(
                 server.analyze("def foo(): pass")
             )
@@ -213,7 +218,7 @@ class TestAnalyze:
     def test_includes_context_when_provided(self, mock_subprocess):
         _, proc = mock_subprocess
 
-        with patch.object(server, "_read_doc", return_value="conventions"):
+        with patch.object(tools_gemini, "_read_doc", return_value="conventions"):
             asyncio.get_event_loop().run_until_complete(
                 server.analyze("def foo(): pass", context="This is a helper function")
             )
@@ -234,7 +239,7 @@ class TestRunTests:
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"all passed", None))
 
-        with patch("server.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+        with patch("gemini_client.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
             output, passed = asyncio.get_event_loop().run_until_complete(
                 server._run_tests("backend")
             )
@@ -252,7 +257,7 @@ class TestRunTests:
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"ok", None))
 
-        with patch("server.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+        with patch("gemini_client.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
             asyncio.get_event_loop().run_until_complete(
                 server._run_tests("backend", tests=["tests/test_a.py::test_one", "tests/test_b.py"])
             )
@@ -268,7 +273,7 @@ class TestRunTests:
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"all passed", None))
 
-        with patch("server.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+        with patch("gemini_client.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
             output, passed = asyncio.get_event_loop().run_until_complete(
                 server._run_tests("frontend")
             )
@@ -284,7 +289,7 @@ class TestRunTests:
         proc.returncode = 1
         proc.communicate = AsyncMock(return_value=(b"FAILED test_something", None))
 
-        with patch("server.asyncio.create_subprocess_exec", return_value=proc):
+        with patch("gemini_client.asyncio.create_subprocess_exec", return_value=proc):
             output, passed = asyncio.get_event_loop().run_until_complete(
                 server._run_tests("backend")
             )
@@ -298,7 +303,7 @@ class TestRunTests:
         proc.kill = MagicMock()
         proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
 
-        with patch("server.asyncio.create_subprocess_exec", return_value=proc):
+        with patch("gemini_client.asyncio.create_subprocess_exec", return_value=proc):
             output, passed = asyncio.get_event_loop().run_until_complete(
                 server._run_tests("backend", timeout=5)
             )
@@ -310,7 +315,7 @@ class TestRunTests:
     def test_missing_executable(self):
         """FileNotFoundError when executable doesn't exist."""
         with patch(
-            "server.asyncio.create_subprocess_exec",
+            "gemini_client.asyncio.create_subprocess_exec",
             side_effect=FileNotFoundError,
         ):
             output, passed = asyncio.get_event_loop().run_until_complete(
@@ -338,8 +343,8 @@ class TestTestTool:
     def test_all_pass_skips_gemini(self):
         """When all tests pass, return summary directly without calling Gemini."""
         with patch.object(
-            server, "_run_tests", return_value=("all good", True)
-        ) as mock_run, patch.object(server, "_gemini") as mock_gemini:
+            tools_test_mod, "_run_tests", return_value=("all good", True)
+        ) as mock_run, patch.object(tools_test_mod, "_gemini") as mock_gemini:
             result = asyncio.get_event_loop().run_until_complete(
                 server.test(suite="backend")
             )
@@ -351,9 +356,9 @@ class TestTestTool:
     def test_failure_triggers_gemini_analysis(self):
         """When tests fail, output is sent to Gemini for analysis."""
         with patch.object(
-            server, "_run_tests", return_value=("FAILED test_foo", False)
+            tools_test_mod, "_run_tests", return_value=("FAILED test_foo", False)
         ), patch.object(
-            server, "_gemini", return_value="Structured analysis here"
+            tools_test_mod, "_gemini", return_value="Structured analysis here"
         ) as mock_gemini:
             result = asyncio.get_event_loop().run_until_complete(
                 server.test(suite="backend")
@@ -374,7 +379,7 @@ class TestTestTool:
     def test_backend_only(self):
         """suite='backend' only runs backend tests."""
         with patch.object(
-            server, "_run_tests", return_value=("ok", True)
+            tools_test_mod, "_run_tests", return_value=("ok", True)
         ) as mock_run:
             asyncio.get_event_loop().run_until_complete(
                 server.test(suite="backend")
@@ -385,7 +390,7 @@ class TestTestTool:
     def test_frontend_only(self):
         """suite='frontend' only runs frontend tests."""
         with patch.object(
-            server, "_run_tests", return_value=("ok", True)
+            tools_test_mod, "_run_tests", return_value=("ok", True)
         ) as mock_run:
             asyncio.get_event_loop().run_until_complete(
                 server.test(suite="frontend")
@@ -402,7 +407,7 @@ class TestTestTool:
             call_count += 1
             return ("ok", True)
 
-        with patch.object(server, "_run_tests", side_effect=mock_run):
+        with patch.object(tools_test_mod, "_run_tests", side_effect=mock_run):
             asyncio.get_event_loop().run_until_complete(
                 server.test(suite="all")
             )
@@ -413,7 +418,7 @@ class TestTestTool:
         """tests parameter is forwarded to _run_tests for backend."""
         specific = ["tests/test_a.py::test_one"]
         with patch.object(
-            server, "_run_tests", return_value=("ok", True)
+            tools_test_mod, "_run_tests", return_value=("ok", True)
         ) as mock_run:
             asyncio.get_event_loop().run_until_complete(
                 server.test(suite="backend", tests=specific)
@@ -440,7 +445,7 @@ class TestNoCodeEnforcement:
     def test_plan_includes_no_code(self, mock_subprocess):
         _, proc = mock_subprocess
 
-        with patch.object(server, "_read_doc", return_value="doc content"):
+        with patch.object(tools_gemini, "_read_doc", return_value="doc content"):
             asyncio.get_event_loop().run_until_complete(
                 server.plan("build something")
             )
@@ -451,7 +456,7 @@ class TestNoCodeEnforcement:
     def test_analyze_includes_no_code(self, mock_subprocess):
         _, proc = mock_subprocess
 
-        with patch.object(server, "_read_doc", return_value="conventions"):
+        with patch.object(tools_gemini, "_read_doc", return_value="conventions"):
             asyncio.get_event_loop().run_until_complete(
                 server.analyze("review this")
             )
@@ -483,7 +488,7 @@ class TestDiscoverFiles:
         # Nested source
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "app.dart").write_text("main() {}")
-        self._patcher = patch.object(server, "PROJECT_ROOT", tmp_path)
+        self._patcher = patch.object(gemini_client, "PROJECT_ROOT", tmp_path)
         self._patcher.start()
 
     @pytest.fixture(autouse=True)
@@ -545,7 +550,7 @@ class TestReadFilesWithinBudget:
     @pytest.fixture(autouse=True)
     def _setup_tmpdir(self, tmp_path):
         self.root = tmp_path
-        self._patcher = patch.object(server, "PROJECT_ROOT", tmp_path)
+        self._patcher = patch.object(gemini_client, "PROJECT_ROOT", tmp_path)
         self._patcher.start()
 
     @pytest.fixture(autouse=True)
@@ -612,7 +617,7 @@ class TestLoadAuditContext:
     @pytest.fixture(autouse=True)
     def _setup_tmpdir(self, tmp_path):
         self.root = tmp_path
-        self._patcher = patch.object(server, "PROJECT_ROOT", tmp_path)
+        self._patcher = patch.object(gemini_client, "PROJECT_ROOT", tmp_path)
         self._patcher.start()
 
     @pytest.fixture(autouse=True)
@@ -655,20 +660,20 @@ class TestLoadAuditPrompt:
         prompt_file = tmp_path / "AUDIT-PROMPT.md"
         prompt_file.write_text("Custom audit instructions")
 
-        with patch.object(server, "AUDIT_PROMPT_PATH", prompt_file):
+        with patch.object(gemini_client, "AUDIT_PROMPT_PATH", prompt_file):
             result = server._load_audit_prompt()
         assert result == "Custom audit instructions"
 
     def test_fallback_when_missing(self, tmp_path):
         missing = tmp_path / "nonexistent.md"
-        with patch.object(server, "AUDIT_PROMPT_PATH", missing):
+        with patch.object(gemini_client, "AUDIT_PROMPT_PATH", missing):
             result = server._load_audit_prompt()
         assert "comprehensive code audit" in result
         assert "Executive Summary" in result
 
     def test_fallback_covers_all_sections(self, tmp_path):
         missing = tmp_path / "nonexistent.md"
-        with patch.object(server, "AUDIT_PROMPT_PATH", missing):
+        with patch.object(gemini_client, "AUDIT_PROMPT_PATH", missing):
             result = server._load_audit_prompt()
         assert "Code Quality" in result
         assert "Bug Audit" in result
@@ -688,13 +693,16 @@ class TestAuditTool:
         self.root = tmp_path
         (tmp_path / "main.py").write_text("print('hello')")
         (tmp_path / "lib.ts").write_text("export const x = 1;")
-        self._root_patcher = patch.object(server, "PROJECT_ROOT", tmp_path)
+        self._root_patcher = patch.object(tools_analysis, "PROJECT_ROOT", tmp_path)
+        self._gc_patcher = patch.object(gemini_client, "PROJECT_ROOT", tmp_path)
         self._root_patcher.start()
+        self._gc_patcher.start()
 
     @pytest.fixture(autouse=True)
     def _teardown(self):
         yield
         self._root_patcher.stop()
+        self._gc_patcher.stop()
 
     def test_invalid_sections_returns_error(self):
         result = asyncio.get_event_loop().run_until_complete(
@@ -721,21 +729,21 @@ class TestAuditTool:
         assert "Error: no source files found" in result
 
     def test_full_audit_calls_gemini(self):
-        with patch.object(server, "_gemini", return_value="Audit report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="Audit report") as mock_gem:
             result = asyncio.get_event_loop().run_until_complete(server.audit())
 
         mock_gem.assert_called_once()
         assert result == "Audit report"
 
     def test_no_code_instruction_in_prompt(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             asyncio.get_event_loop().run_until_complete(server.audit())
 
         prompt = mock_gem.call_args[0][0]
         assert server.NO_CODE_INSTRUCTION in prompt
 
     def test_section_filter_in_prompt(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             asyncio.get_event_loop().run_until_complete(
                 server.audit(sections=["bugs"])
             )
@@ -744,7 +752,7 @@ class TestAuditTool:
         assert "Focus ONLY on these sections: bugs" in prompt
 
     def test_summary_only_in_prompt(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             asyncio.get_event_loop().run_until_complete(
                 server.audit(summary_only=True)
             )
@@ -754,7 +762,7 @@ class TestAuditTool:
         assert "Do not include detailed findings" in prompt
 
     def test_model_passthrough(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             asyncio.get_event_loop().run_until_complete(
                 server.audit(model="gemini-2.0-flash")
             )
@@ -762,7 +770,7 @@ class TestAuditTool:
         assert mock_gem.call_args[1]["model"] == "gemini-2.0-flash"
 
     def test_writes_report_to_disk(self):
-        with patch.object(server, "_gemini", return_value="# Audit Report\nGood code."):
+        with patch.object(tools_analysis, "_gemini", return_value="# Audit Report\nGood code."):
             asyncio.get_event_loop().run_until_complete(server.audit())
 
         output = self.root / "AUDIT-GEMINI.md"
@@ -770,7 +778,7 @@ class TestAuditTool:
         assert output.read_text() == "# Audit Report\nGood code."
 
     def test_scoped_audit_only_includes_specified_files(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             asyncio.get_event_loop().run_until_complete(
                 server.audit(paths=["main.py"])
             )
@@ -783,15 +791,15 @@ class TestAuditTool:
         # Create a file that won't fit in a tiny budget
         (self.root / "big.py").write_text("z" * 500)
 
-        with patch.object(server, "MAX_CODE_BYTES", 100):
-            with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "MAX_CODE_BYTES", 100):
+            with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
                 asyncio.get_event_loop().run_until_complete(server.audit())
 
         prompt = mock_gem.call_args[0][0]
         assert "Skipped Files" in prompt
 
     def test_audit_prompt_included(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             asyncio.get_event_loop().run_until_complete(server.audit())
 
         prompt = mock_gem.call_args[0][0]
@@ -801,7 +809,7 @@ class TestAuditTool:
     def test_context_included_when_available(self):
         (self.root / "REQUIREMENTS.md").write_text("Must support feature X")
 
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             asyncio.get_event_loop().run_until_complete(server.audit())
 
         prompt = mock_gem.call_args[0][0]
@@ -860,7 +868,7 @@ class TestCollectRedesignFiles:
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
         self.root = tmp_path
-        self._patcher = patch.object(server, "PROJECT_ROOT", tmp_path)
+        self._patcher = patch.object(gemini_client, "PROJECT_ROOT", tmp_path)
         self._patcher.start()
 
     @pytest.fixture(autouse=True)
@@ -967,7 +975,7 @@ class TestGeminiRedesignTool:
         self.root = tmp_path
         (tmp_path / "pubspec.yaml").write_text("name: my_app\n")
         (tmp_path / "main.dart").write_text("void main() {}")
-        self._root_patcher = patch.object(server, "PROJECT_ROOT", tmp_path)
+        self._root_patcher = patch.object(tools_analysis, "PROJECT_ROOT", tmp_path)
         self._root_patcher.start()
 
     @pytest.fixture(autouse=True)
@@ -989,7 +997,7 @@ class TestGeminiRedesignTool:
         assert "Error: path not found" in result
 
     def test_calls_gemini_with_prompt(self):
-        with patch.object(server, "_gemini", return_value="# Redesign Report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="# Redesign Report") as mock_gem:
             asyncio.get_event_loop().run_until_complete(
                 server.gemini_redesign()
             )
@@ -997,7 +1005,7 @@ class TestGeminiRedesignTool:
 
     def test_writes_redesign_md(self, tmp_path):
         output_file = tmp_path / "REDESIGN.md"
-        with patch.object(server, "_gemini", return_value="# Redesign Report\nContent."):
+        with patch.object(tools_analysis, "_gemini", return_value="# Redesign Report\nContent."):
             asyncio.get_event_loop().run_until_complete(
                 server.gemini_redesign(output=str(output_file))
             )
@@ -1005,9 +1013,9 @@ class TestGeminiRedesignTool:
         assert output_file.read_text() == "# Redesign Report\nContent."
 
     def test_return_message_includes_framework(self):
-        with patch.object(server, "_gemini", return_value="report"), \
+        with patch.object(tools_analysis, "_gemini", return_value="report"), \
              patch("builtins.open", side_effect=None), \
-             patch.object(server.Path, "write_text", return_value=None):
+             patch.object(Path, "write_text", return_value=None):
             # Use a custom output path so we don't need to mock Path.cwd()
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
@@ -1018,7 +1026,7 @@ class TestGeminiRedesignTool:
         assert "flutter" in result.lower()
 
     def test_return_message_includes_section_count(self):
-        with patch.object(server, "_gemini", return_value="report"):
+        with patch.object(tools_analysis, "_gemini", return_value="report"):
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
                 out = f.name
@@ -1028,7 +1036,7 @@ class TestGeminiRedesignTool:
         assert "2 sections" in result
 
     def test_model_passthrough(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
                 out = f.name
@@ -1038,7 +1046,7 @@ class TestGeminiRedesignTool:
         assert mock_gem.call_args[1]["model"] == "gemini-2.0-flash"
 
     def test_prompt_includes_redesign_system_instruction(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
                 out = f.name
@@ -1050,7 +1058,7 @@ class TestGeminiRedesignTool:
 
     def test_prompt_does_not_contain_no_code_instruction(self):
         """Redesign tool uses its own system instruction, not NO_CODE_INSTRUCTION."""
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
                 out = f.name
@@ -1061,7 +1069,7 @@ class TestGeminiRedesignTool:
         assert server.NO_CODE_INSTRUCTION not in prompt
 
     def test_uses_default_sections_when_none_specified(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
                 out = f.name
@@ -1077,7 +1085,7 @@ class TestGeminiRedesignTool:
         assert "HapticFeedback" in prompt or "DynamicColorBuilder" in prompt  # platform
 
     def test_section_filtering_icons_only(self):
-        with patch.object(server, "_gemini", return_value="report") as mock_gem:
+        with patch.object(tools_analysis, "_gemini", return_value="report") as mock_gem:
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
                 out = f.name
@@ -1095,8 +1103,8 @@ class TestGeminiRedesignTool:
         (empty_dir / "README.txt").write_text("not a source file")
 
         # Patch PROJECT_ROOT to the empty dir so _collect_redesign_files scans it
-        with patch.object(server, "PROJECT_ROOT", empty_dir), \
-             patch.object(server, "_gemini", return_value="report"):
+        with patch.object(tools_analysis, "PROJECT_ROOT", empty_dir), \
+             patch.object(tools_analysis, "_gemini", return_value="report"):
             result = asyncio.get_event_loop().run_until_complete(
                 server.gemini_redesign(path=str(empty_dir))
             )
@@ -1198,7 +1206,7 @@ def _create_test_db(tmp_path):
 def test_db(tmp_path):
     """Create a test DB and patch EPICS_DB to point to it."""
     db_path = _create_test_db(tmp_path)
-    with patch.object(server, "EPICS_DB", db_path):
+    with patch.object(tools_pm_helpers, "EPICS_DB", db_path):
         yield db_path
 
 
@@ -1519,7 +1527,7 @@ MOCK_BULK_ROADMAP = {
 
 class TestPmPlan:
     def test_story_mode_writes_tasks(self, test_db):
-        with patch.object(server, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)):
+        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)):
             result = asyncio.get_event_loop().run_until_complete(
                 server.pm_plan(story_id="story-001")
             )
@@ -1533,7 +1541,7 @@ class TestPmPlan:
 
     def test_story_mode_updates_agent(self, test_db):
         plan = {**MOCK_STORY_PLAN, "agent": "architect"}
-        with patch.object(server, "_gemini", return_value=json.dumps(plan)):
+        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(plan)):
             asyncio.get_event_loop().run_until_complete(
                 server.pm_plan(story_id="story-002")
             )
@@ -1553,7 +1561,7 @@ class TestPmPlan:
     def test_epic_mode_plans_draft_stories(self, test_db):
         # story-002 is the only draft story in epic-001
         plans = [MOCK_STORY_PLAN]
-        with patch.object(server, "_gemini", return_value=json.dumps(plans)):
+        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(plans)):
             result = asyncio.get_event_loop().run_until_complete(
                 server.pm_plan(epic_id="epic-001")
             )
@@ -1565,7 +1573,7 @@ class TestPmPlan:
 
     def test_epic_mode_writes_tasks(self, test_db):
         plans = [MOCK_STORY_PLAN]
-        with patch.object(server, "_gemini", return_value=json.dumps(plans)):
+        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(plans)):
             result = asyncio.get_event_loop().run_until_complete(
                 server.pm_plan(epic_id="epic-001")
             )
@@ -1577,7 +1585,7 @@ class TestPmPlan:
         assert count == 2  # two tasks from MOCK_STORY_PLAN
 
     def test_bulk_mode_returns_all_epics(self, test_db):
-        with patch.object(server, "_gemini", return_value=json.dumps(MOCK_BULK_ROADMAP)):
+        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_BULK_ROADMAP)):
             result = asyncio.get_event_loop().run_until_complete(server.pm_plan())
         data = json.loads(result)
         assert data["mode"] == "bulk"
@@ -1585,14 +1593,14 @@ class TestPmPlan:
         assert len(data["epics"]) >= 1
 
     def test_bulk_mode_includes_execution_plan(self, test_db):
-        with patch.object(server, "_gemini", return_value=json.dumps(MOCK_BULK_ROADMAP)):
+        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_BULK_ROADMAP)):
             result = asyncio.get_event_loop().run_until_complete(server.pm_plan())
         data = json.loads(result)
         assert "execution_plan" in data
         assert "parallel_groups" in data["execution_plan"]
 
     def test_story_id_takes_priority_over_epic_id(self, test_db):
-        with patch.object(server, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)) as mock_gem:
+        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)) as mock_gem:
             result = asyncio.get_event_loop().run_until_complete(
                 server.pm_plan(story_id="story-001", epic_id="epic-001")
             )
@@ -1601,7 +1609,7 @@ class TestPmPlan:
         assert data["story_id"] == "story-001"
 
     def test_malformed_gemini_json_returns_error_gracefully(self, test_db):
-        with patch.object(server, "_gemini", return_value="not valid json }{{{"):
+        with patch.object(tools_pm_plan, "_gemini", return_value="not valid json }{{{"):
             result = asyncio.get_event_loop().run_until_complete(
                 server.pm_plan(story_id="story-001")
             )
@@ -1612,8 +1620,8 @@ class TestPmPlan:
 
     def test_passes_file_context_to_gemini(self, test_db, tmp_path):
         (tmp_path / "foo.py").write_text("def hello(): pass")
-        with patch.object(server, "PROJECT_ROOT", tmp_path), \
-             patch.object(server, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)) as mock_gem:
+        with patch.object(tools_pm_plan, "PROJECT_ROOT", tmp_path), \
+             patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)) as mock_gem:
             asyncio.get_event_loop().run_until_complete(
                 server.pm_plan(story_id="story-001")
             )
