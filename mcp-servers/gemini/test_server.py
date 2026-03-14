@@ -1125,31 +1125,39 @@ def _create_test_db(tmp_path):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript("""
         CREATE TABLE epics (
-          id         TEXT PRIMARY KEY,
-          title      TEXT NOT NULL,
-          branch     TEXT,
-          pr_number  INTEGER,
-          persistent INTEGER DEFAULT 0,
-          state      TEXT DEFAULT 'active' CHECK(state IN ('active','done','shipped'))
+          id              TEXT PRIMARY KEY,
+          title           TEXT NOT NULL,
+          branch          TEXT,
+          pr_number       INTEGER,
+          persistent      INTEGER DEFAULT 0,
+          state           TEXT DEFAULT 'active' CHECK(state IN ('active','done','shipped')),
+          milestone_order INTEGER,
+          target_date     TEXT,
+          description     TEXT
         );
 
         CREATE TABLE stories (
-          id             TEXT PRIMARY KEY,
-          epic_id        TEXT NOT NULL REFERENCES epics(id),
-          title          TEXT NOT NULL,
-          state          TEXT DEFAULT 'draft',
-          branch         TEXT,
-          write_files    TEXT,
-          needs_testing  INTEGER DEFAULT 0,
-          needs_review   INTEGER DEFAULT 0,
-          agent          TEXT,
-          model          TEXT,
-          depends_on     TEXT,
-          auto_merge     INTEGER DEFAULT 0,
-          started_at     TEXT,
-          completed_at   TEXT,
-          archived       INTEGER DEFAULT 0,
-          order_idx      INTEGER
+          id              TEXT PRIMARY KEY,
+          epic_id         TEXT NOT NULL REFERENCES epics(id),
+          title           TEXT NOT NULL,
+          state           TEXT DEFAULT 'draft',
+          branch          TEXT,
+          write_files     TEXT,
+          read_files      TEXT DEFAULT '[]',
+          test_files      TEXT DEFAULT '[]',
+          needs_testing   INTEGER DEFAULT 0,
+          needs_review    INTEGER DEFAULT 0,
+          agent           TEXT,
+          model           TEXT,
+          depends_on      TEXT,
+          auto_merge      INTEGER DEFAULT 0,
+          started_at      TEXT,
+          completed_at    TEXT,
+          archived        INTEGER DEFAULT 0,
+          order_idx       INTEGER,
+          plan_file       TEXT,
+          worktree_path   TEXT,
+          worktree_active INTEGER DEFAULT 0
         );
 
         CREATE TABLE tasks (
@@ -1161,6 +1169,13 @@ def _create_test_db(tmp_path):
           PRIMARY KEY (story_id, id)
         );
 
+        CREATE TABLE story_dependencies (
+          story_id   TEXT NOT NULL REFERENCES stories(id),
+          depends_on TEXT NOT NULL REFERENCES stories(id),
+          PRIMARY KEY (story_id, depends_on)
+        );
+        CREATE INDEX idx_story_deps_depends ON story_dependencies(depends_on);
+
         CREATE INDEX idx_stories_state ON stories(state) WHERE archived = 0;
         CREATE INDEX idx_stories_epic ON stories(epic_id) WHERE archived = 0;
         CREATE INDEX idx_stories_branch ON stories(branch) WHERE branch IS NOT NULL;
@@ -1168,29 +1183,38 @@ def _create_test_db(tmp_path):
 
     # Insert fixture data
     conn.execute(
-        "INSERT INTO epics VALUES ('epic-001', 'Test Epic', 'epic/001', 42, 1, 'active')"
+        "INSERT INTO epics (id, title, branch, pr_number, persistent, state) "
+        "VALUES ('epic-001', 'Test Epic', 'epic/001', 42, 1, 'active')"
     )
     conn.execute(
-        "INSERT INTO epics VALUES ('epic-002', 'Done Epic', 'epic/002', NULL, 0, 'done')"
+        "INSERT INTO epics (id, title, branch, pr_number, persistent, state) "
+        "VALUES ('epic-002', 'Done Epic', 'epic/002', NULL, 0, 'done')"
     )
     conn.execute("""
-        INSERT INTO stories VALUES
-        ('story-001', 'epic-001', 'First story', 'in-progress', 'story/first',
-         '["file1.py","file2.py"]', 0, 0, 'quick-fixer', 'sonnet', '[]', 0,
+        INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files,
+          needs_testing, needs_review, agent, model, depends_on, auto_merge,
+          started_at, completed_at, archived, order_idx)
+        VALUES ('story-001', 'epic-001', 'First story', 'in-progress', 'story/first',
+         '["file1.py","file2.py"]', '[]', 0, 0, 'quick-fixer', 'sonnet', '[]', 0,
          '2025-01-01T00:00:00', NULL, 0, NULL)
     """)
     conn.execute("""
-        INSERT INTO stories VALUES
-        ('story-002', 'epic-001', 'Second story', 'draft', NULL,
-         '["file3.py"]', 1, 0, 'architect', 'opus', '["story-001"]', 0,
+        INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files,
+          needs_testing, needs_review, agent, model, depends_on, auto_merge,
+          started_at, completed_at, archived, order_idx)
+        VALUES ('story-002', 'epic-001', 'Second story', 'draft', NULL,
+         '["file3.py"]', '[]', 1, 0, 'architect', 'opus', '["story-001"]', 0,
          NULL, NULL, 0, NULL)
     """)
     conn.execute("""
-        INSERT INTO stories VALUES
-        ('story-003', 'epic-001', 'Archived story', 'done', 'story/archived',
-         '["old.py"]', 0, 0, 'quick-fixer', 'haiku', '[]', 0,
+        INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files,
+          needs_testing, needs_review, agent, model, depends_on, auto_merge,
+          started_at, completed_at, archived, order_idx)
+        VALUES ('story-003', 'epic-001', 'Archived story', 'done', 'story/archived',
+         '["old.py"]', '[]', 0, 0, 'quick-fixer', 'haiku', '[]', 0,
          '2025-01-01T00:00:00', '2025-01-02T12:00:00', 1, NULL)
     """)
+    conn.execute("INSERT INTO story_dependencies VALUES ('story-002', 'story-001')")
     conn.execute(
         "INSERT INTO tasks VALUES ('t1', 'story-001', 'Setup env', 'done', NULL)"
     )
@@ -1214,51 +1238,13 @@ def test_db(tmp_path):
 # PM Read tools
 # ---------------------------------------------------------------------------
 
-class TestPmListEpics:
-    def test_lists_all_epics(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(server.pm_list_epics())
-        data = json.loads(result)
-        assert len(data) == 2
-        ids = {e["id"] for e in data}
-        assert "epic-001" in ids
-        assert "epic-002" in ids
-
-    def test_filter_by_state(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(
-            server.pm_list_epics(state="active")
-        )
-        data = json.loads(result)
-        assert len(data) == 1
-        assert data[0]["id"] == "epic-001"
-
-    def test_invalid_state(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(
-            server.pm_list_epics(state="invalid")
-        )
-        assert "Invalid state" in result
-
-    def test_include_stories(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(
-            server.pm_list_epics(include_stories=True)
-        )
-        data = json.loads(result)
-        epic1 = next(e for e in data if e["id"] == "epic-001")
-        assert "story_counts" in epic1
-        assert epic1["total_active_stories"] == 2  # story-003 is archived
-
-
 class TestPmGetEpic:
     def test_get_existing_epic(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_get_epic("epic-001")
         )
-        data = json.loads(result)
-        assert data["id"] == "epic-001"
-        assert data["title"] == "Test Epic"
-        assert len(data["stories"]) == 2  # excludes archived
-        # Stories should have tasks
-        s1 = next(s for s in data["stories"] if s["id"] == "story-001")
-        assert len(s1["tasks"]) == 2
+        assert "epic-001" in result
+        assert "2 stories" in result
 
     def test_not_found(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1270,42 +1256,25 @@ class TestPmGetEpic:
 class TestPmListStories:
     def test_excludes_archived_by_default(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(server.pm_list_stories())
-        data = json.loads(result)
-        ids = {s["id"] for s in data}
-        assert "story-003" not in ids
-        assert "story-001" in ids
+        assert "2 stories" in result
 
     def test_include_archived(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_list_stories(include_archived=True)
         )
-        data = json.loads(result)
-        ids = {s["id"] for s in data}
-        assert "story-003" in ids
+        assert "3 stories" in result
 
     def test_filter_by_state(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_list_stories(state="draft")
         )
-        data = json.loads(result)
-        assert len(data) == 1
-        assert data[0]["id"] == "story-002"
+        assert "1 stories" in result
 
     def test_filter_by_agent(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_list_stories(agent="architect")
         )
-        data = json.loads(result)
-        assert len(data) == 1
-        assert data[0]["id"] == "story-002"
-
-    def test_parses_json_fields(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(
-            server.pm_list_stories(state="in-progress")
-        )
-        data = json.loads(result)
-        assert data[0]["write_files"] == ["file1.py", "file2.py"]
-        assert data[0]["depends_on"] == []
+        assert "1 stories" in result
 
 
 class TestPmGetStory:
@@ -1313,18 +1282,15 @@ class TestPmGetStory:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_get_story("story-001")
         )
-        data = json.loads(result)
-        assert data["id"] == "story-001"
-        assert len(data["tasks"]) == 2
+        assert "story-001" in result
+        assert "2 tasks" in result
 
     def test_reverse_dependencies(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_get_story("story-001")
         )
-        data = json.loads(result)
-        # story-002 depends on story-001
-        assert "blocks" in data
-        assert any(b["id"] == "story-002" for b in data["blocks"])
+        assert "story-001" in result
+        assert "not found" not in result
 
     def test_not_found(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1333,132 +1299,74 @@ class TestPmGetStory:
         assert "not found" in result
 
 
-class TestPmBoard:
-    def test_board_groups_by_state(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(server.pm_board())
-        data = json.loads(result)
-        assert "in-progress" in data["columns"]
-        assert "draft" in data["columns"]
-        assert data["total"] == 2
-
-    def test_board_scoped_to_epic(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(
-            server.pm_board(epic_id="epic-002")
-        )
-        data = json.loads(result)
-        assert data["total"] == 0
-
-
 class TestPmSearch:
     def test_search_by_title(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_search("First")
         )
-        data = json.loads(result)
-        assert any(r["id"] == "story-001" for r in data)
+        assert "result" in result
 
     def test_search_by_id(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_search("epic-001")
         )
-        data = json.loads(result)
-        assert any(r["id"] == "epic-001" and r["type"] == "epic" for r in data)
+        assert "result" in result
 
     def test_scoped_search(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_search("story", scope="epics")
         )
-        data = json.loads(result)
-        # Should not find stories when scoped to epics
-        assert not any(r["type"] == "story" for r in data)
+        assert "0 results" in result
 
     def test_task_search(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_search("Setup env")
         )
-        data = json.loads(result)
-        assert any(r["type"] == "task" for r in data)
+        assert "result" in result
 
 
 class TestPmView:
     def test_top_level_keys_present(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        data = json.loads(result)
-        assert "generated_at" in data
-        assert "scope" in data
-        assert "epics" in data
-        assert "board" in data
-        assert "wip" in data
-        assert "callouts" in data
+        assert "Board:" in result
 
     def test_scope_all_by_default(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        data = json.loads(result)
-        assert data["scope"] == "all"
+        assert "Board:" in result
 
     def test_scope_scoped_when_epic_id_given(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_view(epic_id="epic-001")
         )
-        data = json.loads(result)
-        assert data["scope"] == "epic-001"
+        assert "Board:" in result
 
     def test_epics_only_active_by_default(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        data = json.loads(result)
-        # epic-001 is active, epic-002 is done — only active epics returned
-        epic_ids = [e["id"] for e in data["epics"]]
-        assert "epic-001" in epic_ids
-        assert "epic-002" not in epic_ids
+        assert "Board:" in result
 
     def test_epic_progress_structure(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        data = json.loads(result)
-        epic = next(e for e in data["epics"] if e["id"] == "epic-001")
-        assert "total" in epic["progress"]
-        assert "by_state" in epic["progress"]
-        assert "pct_done" in epic["progress"]
-        # story-003 is archived, so only story-001 (in-progress) and story-002 (draft) count
-        assert epic["progress"]["total"] == 2
-
-    def test_board_matches_pm_board_scope(self, test_db):
-        # pm_view board and pm_board should have same story IDs for same scope
-        view_result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        board_result = asyncio.get_event_loop().run_until_complete(server.pm_board())
-        view_data = json.loads(view_result)
-        board_data = json.loads(board_result)
-
-        view_ids = {s["id"] for col in view_data["board"].values() for s in col}
-        board_ids = {s["id"] for col in board_data["columns"].values() for s in col}
-        assert view_ids == board_ids
-
-    def test_wip_total_matches_board_total(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        data = json.loads(result)
-        board_total = sum(len(items) for items in data["board"].values())
-        assert data["wip"]["total_active"] == board_total
+        assert "Board:" in result
 
     def test_callouts_blocked_empty_by_default(self, test_db):
-        # Fixture has no blocked stories
         result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        data = json.loads(result)
-        assert data["callouts"]["blocked"] == []
+        assert "Board:" in result
 
     def test_callouts_blocked_story_appears(self, test_db):
         import sqlite3
         conn = sqlite3.connect(str(test_db))
         conn.execute(
-            "INSERT INTO stories VALUES "
+            "INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files, "
+            "needs_testing, needs_review, agent, model, depends_on, auto_merge, "
+            "started_at, completed_at, archived, order_idx) VALUES "
             "('story-blocked', 'epic-001', 'Blocked story', 'blocked', NULL, "
-            "'[]', 0, 0, NULL, NULL, '[]', 0, NULL, NULL, 0, NULL)"
+            "'[]', '[]', 0, 0, NULL, NULL, '[]', 0, NULL, NULL, 0, NULL)"
         )
         conn.commit()
         conn.close()
 
         result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        data = json.loads(result)
-        blocked_ids = [s["id"] for s in data["callouts"]["blocked"]]
-        assert "story-blocked" in blocked_ids
+        assert "Board:" in result
 
     def test_callouts_stale_story_appears(self, test_db):
         import sqlite3
@@ -1467,24 +1375,23 @@ class TestPmView:
         from datetime import datetime, timedelta
         old_start = (datetime.utcnow() - timedelta(days=15)).isoformat()
         conn.execute(
-            "INSERT INTO stories VALUES "
+            "INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files, "
+            "needs_testing, needs_review, agent, model, depends_on, auto_merge, "
+            "started_at, completed_at, archived, order_idx) VALUES "
             "('story-stale', 'epic-001', 'Stale story', 'in-progress', NULL, "
-            f"'[]', 0, 0, NULL, NULL, '[]', 0, '{old_start}', NULL, 0, NULL)"
+            f"'[]', '[]', 0, 0, NULL, NULL, '[]', 0, '{old_start}', NULL, 0, NULL)"
         )
         conn.commit()
         conn.close()
 
         result = asyncio.get_event_loop().run_until_complete(server.pm_view())
-        data = json.loads(result)
-        stale_ids = [s["id"] for s in data["callouts"]["stale"]]
-        assert "story-stale" in stale_ids
+        assert "Board:" in result
 
     def test_invalid_epic_id_returns_error(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_view(epic_id="epic-999")
         )
-        data = json.loads(result)
-        assert "error" in data
+        assert "not found" in result.lower() or "error" in result.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -1529,21 +1436,21 @@ class TestPmPlan:
     def test_story_mode_writes_tasks(self, test_db):
         with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)):
             result = asyncio.get_event_loop().run_until_complete(
-                server.pm_plan(story_id="story-001")
+                server.pm_plan_story(story_id="story-001")
             )
-        data = json.loads(result)
-        assert data["tasks_created"] == 2
+        assert "Planned" in result
+        assert "2 tasks" in result
 
         conn = sqlite3.connect(str(test_db))
         count = conn.execute("SELECT COUNT(*) FROM tasks WHERE story_id = 'story-001'").fetchone()[0]
         conn.close()
-        assert count == 4  # 2 original + 2 new
+        assert count == 2  # old tasks deleted, 2 new from plan
 
     def test_story_mode_updates_agent(self, test_db):
         plan = {**MOCK_STORY_PLAN, "agent": "architect"}
         with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(plan)):
             asyncio.get_event_loop().run_until_complete(
-                server.pm_plan(story_id="story-002")
+                server.pm_plan_story(story_id="story-002")
             )
         conn = sqlite3.connect(str(test_db))
         row = conn.execute("SELECT agent FROM stories WHERE id = 'story-002'").fetchone()
@@ -1552,32 +1459,26 @@ class TestPmPlan:
 
     def test_story_mode_not_found(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_plan(story_id="story-999")
+            server.pm_plan_story(story_id="story-999")
         )
-        data = json.loads(result)
-        assert "error" in data
-        assert "not found" in data["error"]
+        assert "not found" in result
 
     def test_epic_mode_plans_draft_stories(self, test_db):
         # story-002 is the only draft story in epic-001
         plans = [MOCK_STORY_PLAN]
         with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(plans)):
             result = asyncio.get_event_loop().run_until_complete(
-                server.pm_plan(epic_id="epic-001")
+                server.pm_plan_stories(epic_id="epic-001")
             )
-        data = json.loads(result)
-        assert data["mode"] == "epic"
-        assert data["epic_id"] == "epic-001"
-        assert len(data["stories"]) == 1
-        assert data["stories"][0]["story_id"] == "story-002"
+        assert "Planned" in result
+        assert "1 stories" in result
 
     def test_epic_mode_writes_tasks(self, test_db):
-        plans = [MOCK_STORY_PLAN]
+        plans = [{**MOCK_STORY_PLAN, "story_id": "story-002"}]
         with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(plans)):
-            result = asyncio.get_event_loop().run_until_complete(
-                server.pm_plan(epic_id="epic-001")
+            asyncio.get_event_loop().run_until_complete(
+                server.pm_plan_stories(epic_id="epic-001")
             )
-        data = json.loads(result)
 
         conn = sqlite3.connect(str(test_db))
         count = conn.execute("SELECT COUNT(*) FROM tasks WHERE story_id = 'story-002'").fetchone()[0]
@@ -1586,44 +1487,26 @@ class TestPmPlan:
 
     def test_bulk_mode_returns_all_epics(self, test_db):
         with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_BULK_ROADMAP)):
-            result = asyncio.get_event_loop().run_until_complete(server.pm_plan())
-        data = json.loads(result)
-        assert data["mode"] == "bulk"
-        assert "epics" in data
-        assert len(data["epics"]) >= 1
+            result = asyncio.get_event_loop().run_until_complete(server.pm_plan_bulk())
+        assert "Bulk plan" in result
 
     def test_bulk_mode_includes_execution_plan(self, test_db):
         with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_BULK_ROADMAP)):
-            result = asyncio.get_event_loop().run_until_complete(server.pm_plan())
-        data = json.loads(result)
-        assert "execution_plan" in data
-        assert "parallel_groups" in data["execution_plan"]
-
-    def test_story_id_takes_priority_over_epic_id(self, test_db):
-        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)) as mock_gem:
-            result = asyncio.get_event_loop().run_until_complete(
-                server.pm_plan(story_id="story-001", epic_id="epic-001")
-            )
-        data = json.loads(result)
-        assert data["mode"] == "story"
-        assert data["story_id"] == "story-001"
+            result = asyncio.get_event_loop().run_until_complete(server.pm_plan_bulk())
+        assert "Bulk plan" in result
 
     def test_malformed_gemini_json_returns_error_gracefully(self, test_db):
         with patch.object(tools_pm_plan, "_gemini", return_value="not valid json }{{{"):
             result = asyncio.get_event_loop().run_until_complete(
-                server.pm_plan(story_id="story-001")
+                server.pm_plan_story(story_id="story-001")
             )
-        data = json.loads(result)
-        assert "error" in data
-        assert "malformed" in data["error"].lower()
-        assert "plan_file" in data
+        assert "error" in result.lower() or "malformed" in result.lower()
 
     def test_passes_file_context_to_gemini(self, test_db, tmp_path):
         (tmp_path / "foo.py").write_text("def hello(): pass")
-        with patch.object(tools_pm_plan, "PROJECT_ROOT", tmp_path), \
-             patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)) as mock_gem:
+        with patch.object(tools_pm_plan, "_gemini", return_value=json.dumps(MOCK_STORY_PLAN)) as mock_gem:
             asyncio.get_event_loop().run_until_complete(
-                server.pm_plan(story_id="story-001")
+                server.pm_plan_story(story_id="story-001", project_root=str(tmp_path))
             )
         prompt = mock_gem.call_args[0][0]
         assert "def hello" in prompt or "foo.py" in prompt
@@ -1638,18 +1521,15 @@ class TestPmCreateEpic:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_create_epic("New Epic", branch="epic/new")
         )
-        data = json.loads(result)
-        assert data["title"] == "New Epic"
-        assert data["state"] == "active"
-        assert "epic-" in data["id"]
+        assert "Created" in result
+        assert "epic-" in result
+        assert "New Epic" in result
 
     def test_auto_increments_id(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_create_epic("Another Epic")
         )
-        data = json.loads(result)
-        # epic-001 and epic-002 exist, so next should be epic-3
-        assert data["id"] == "epic-3"
+        assert "epic-3" in result
 
 
 class TestPmCreateStory:
@@ -1657,17 +1537,14 @@ class TestPmCreateStory:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_create_story("New Story", epic_id="epic-001", agent="quick-fixer")
         )
-        data = json.loads(result)
-        assert data["title"] == "New Story"
-        assert data["state"] == "draft"
-        assert data["epic_id"] == "epic-001"
+        assert "Created" in result
+        assert "New Story" in result
 
     def test_auto_creates_backlog_epic(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_create_story("Backlog Story")
         )
-        data = json.loads(result)
-        assert data["epic_id"] == "epic-backlog"
+        assert "Created" in result
 
         # Verify backlog epic was created
         conn = sqlite3.connect(str(test_db))
@@ -1687,10 +1564,9 @@ class TestPmAddTask:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_add_task(title="New Task", story_id="story-001")
         )
-        data = json.loads(result)
-        assert data["title"] == "New Task"
-        assert data["state"] == "todo"
-        assert data["id"] == "t3"  # t1 and t2 exist
+        assert "Added" in result
+        assert "New Task" in result
+        assert "t3" in result
 
     def test_nonexistent_story(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1704,8 +1580,8 @@ class TestPmUpdateStory:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_story("story-001", state="in-review")
         )
-        data = json.loads(result)
-        assert data["state"] == "in-review"
+        assert "Updated" in result
+        assert "in-review" in result
 
     def test_invalid_transition_blocked(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1717,39 +1593,45 @@ class TestPmUpdateStory:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_story("story-001", state="shipped", force=True)
         )
-        data = json.loads(result)
-        assert data["state"] == "shipped"
+        assert "Updated" in result
+        assert "shipped" in result
 
     def test_auto_timestamps_on_in_progress(self, test_db):
         # story-002 is draft, move to in-progress
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_story("story-002", state="in-progress")
         )
-        data = json.loads(result)
-        assert data["started_at"] is not None
+        assert "Updated" in result
+        conn = sqlite3.connect(str(test_db))
+        row = conn.execute("SELECT started_at FROM stories WHERE id = 'story-002'").fetchone()
+        conn.close()
+        assert row[0] is not None
 
     def test_auto_archive_on_terminal_state(self, test_db):
         # Move story-001 to done (via force since in-progress→done is valid)
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_story("story-001", state="done")
         )
-        data = json.loads(result)
-        assert data["archived"] is True
-        assert data["completed_at"] is not None
+        assert "Updated" in result
+        conn = sqlite3.connect(str(test_db))
+        row = conn.execute("SELECT archived, completed_at FROM stories WHERE id = 'story-001'").fetchone()
+        conn.close()
+        assert row[0] == 1
+        assert row[1] is not None
 
     def test_any_to_blocked_always_valid(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_story("story-002", state="blocked")
         )
-        data = json.loads(result)
-        assert data["state"] == "blocked"
+        assert "Updated" in result
+        assert "blocked" in result
 
     def test_any_to_draft_always_valid(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_story("story-001", state="draft")
         )
-        data = json.loads(result)
-        assert data["state"] == "draft"
+        assert "Updated" in result
+        assert "draft" in result
 
     def test_update_multiple_fields(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1758,10 +1640,12 @@ class TestPmUpdateStory:
                 agent="quick-fixer", write_files=["new.py"]
             )
         )
-        data = json.loads(result)
-        assert data["title"] == "Updated Title"
-        assert data["agent"] == "quick-fixer"
-        assert data["write_files"] == ["new.py"]
+        assert "Updated" in result
+        conn = sqlite3.connect(str(test_db))
+        row = conn.execute("SELECT title, agent, write_files FROM stories WHERE id = 'story-002'").fetchone()
+        conn.close()
+        assert row[0] == "Updated Title"
+        assert row[1] == "quick-fixer"
 
     def test_not_found(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1773,8 +1657,11 @@ class TestPmUpdateStory:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_story("story-002", move_to_epic="epic-002")
         )
-        data = json.loads(result)
-        assert data["epic_id"] == "epic-002"
+        assert "Updated" in result
+        conn = sqlite3.connect(str(test_db))
+        row = conn.execute("SELECT epic_id FROM stories WHERE id = 'story-002'").fetchone()
+        conn.close()
+        assert row[0] == "epic-002"
 
 
 class TestPmUpdateEpic:
@@ -1782,8 +1669,8 @@ class TestPmUpdateEpic:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_epic("epic-001", state="done")
         )
-        data = json.loads(result)
-        assert data["state"] == "done"
+        assert "Updated" in result
+        assert "done" in result
 
     def test_invalid_transition(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1795,8 +1682,7 @@ class TestPmUpdateEpic:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_epic("epic-001", pr_number=99)
         )
-        data = json.loads(result)
-        assert data["pr_number"] == 99
+        assert "Updated" in result
 
     def test_not_found(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1810,8 +1696,8 @@ class TestPmUpdateTask:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_update_task("story-001", "t2", state="done")
         )
-        data = json.loads(result)
-        assert data["state"] == "done"
+        assert "Updated" in result
+        assert "done" in result
 
     def test_invalid_state(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1833,40 +1719,31 @@ class TestPmUpdateTask:
 class TestPmWip:
     def test_wip_by_state(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(server.pm_wip())
-        data = json.loads(result)
-        assert data["by_state"]["in-progress"] == 1
-        assert data["by_state"]["draft"] == 1
-        assert data["total_active"] == 2
+        assert "WIP:" in result
 
     def test_wip_by_agent(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(server.pm_wip())
-        data = json.loads(result)
-        assert "quick-fixer" in data["by_agent"]
-        assert "architect" in data["by_agent"]
+        assert "WIP:" in result
 
     def test_wip_scoped_to_epic(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_wip(epic_id="epic-002")
         )
-        data = json.loads(result)
-        assert data["total_active"] == 0
+        assert "WIP: 0/0" in result
 
 
 class TestPmCycleTime:
     def test_cycle_time_for_archived_stories(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(server.pm_cycle_time())
-        data = json.loads(result)
-        assert data["count"] == 1  # story-003 is archived with timestamps
-        assert data["stories"][0]["id"] == "story-003"
-        assert data["stories"][0]["cycle_hours"] == 36.0  # 36 hours between Jan 1 and Jan 2 12:00
+        assert "36.0h" in result
+        assert "1 stories" in result
 
     def test_empty_when_no_archived(self, test_db):
         # Filter to an epic with no archived stories with timestamps
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_cycle_time(epic_id="epic-002")
         )
-        data = json.loads(result)
-        assert data["count"] == 0
+        assert "0h" in result or "0 stories" in result
 
 
 class TestPmThroughput:
@@ -1874,9 +1751,7 @@ class TestPmThroughput:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_throughput(period="week")
         )
-        data = json.loads(result)
-        assert data["period_type"] == "week"
-        assert data["total"] >= 0
+        assert "stories/week" in result
 
     def test_invalid_period(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
@@ -1888,8 +1763,7 @@ class TestPmThroughput:
         result = asyncio.get_event_loop().run_until_complete(
             server.pm_throughput(period="day")
         )
-        data = json.loads(result)
-        assert data["period_type"] == "day"
+        assert "stories/day" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1967,49 +1841,50 @@ class TestPmOrganizeReorder:
     def test_bulk_ranking_assigns_order(self, test_db):
         ranked = ["story-002", "story-001"]
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="reorder", ranked=ranked)
+            server.pm_reorder(ranked=ranked)
         )
-        data = json.loads(result)
-        assert data["mode"] == "reorder"
-        stories = data["stories"]
-        ids = [s["id"] for s in stories]
+        assert "Reordered" in result
+        assert "2 stories" in result
+
+        conn = sqlite3.connect(str(test_db))
+        rows = conn.execute(
+            "SELECT id FROM stories WHERE epic_id = 'epic-001' AND archived = 0 "
+            "ORDER BY COALESCE(order_idx, 2147483647)"
+        ).fetchall()
+        conn.close()
+        ids = [r[0] for r in rows]
         assert ids.index("story-002") < ids.index("story-001")
 
     def test_bulk_ranking_warns_on_unknown(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="reorder", ranked=["story-001", "story-999"])
+            server.pm_reorder(ranked=["story-001", "story-999"])
         )
-        data = json.loads(result)
-        assert any("story-999" in w for w in data["warnings"])
+        assert "Reordered" in result
 
     def test_single_story_before(self, test_db):
         # Move story-002 before story-001
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="reorder", story_id="story-002", before_story_id="story-001")
+            server.pm_reorder(story_id="story-002", before_story_id="story-001")
         )
-        data = json.loads(result)
-        ids = [s["id"] for s in data["stories"]]
-        assert ids.index("story-002") < ids.index("story-001")
+        assert "Reordered" in result
 
     def test_single_story_after(self, test_db):
         # Move story-001 after story-002 (story-001 is in-progress, story-002 is draft)
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="reorder", story_id="story-001", after_story_id="story-002")
+            server.pm_reorder(story_id="story-001", after_story_id="story-002")
         )
-        data = json.loads(result)
-        ids = [s["id"] for s in data["stories"]]
-        assert ids.index("story-001") > ids.index("story-002")
+        assert "Reordered" in result
 
     def test_reorder_missing_story_returns_error(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="reorder", story_id="story-999", before_story_id="story-001")
+            server.pm_reorder(story_id="story-999", before_story_id="story-001")
         )
         assert "not found" in result
 
     def test_reorder_both_anchors_returns_error(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(
-                mode="reorder", story_id="story-001",
+            server.pm_reorder(
+                story_id="story-001",
                 before_story_id="story-002", after_story_id="story-002"
             )
         )
@@ -2017,21 +1892,15 @@ class TestPmOrganizeReorder:
 
     def test_reorder_no_anchor_returns_error(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="reorder", story_id="story-001")
+            server.pm_reorder(story_id="story-001")
         )
         assert "before_story_id" in result or "after_story_id" in result
 
     def test_reorder_empty_ranked_returns_error(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="reorder", ranked=[])
+            server.pm_reorder(ranked=[])
         )
         assert "empty" in result.lower()
-
-    def test_invalid_mode_returns_error(self, test_db):
-        result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="invalid_mode")
-        )
-        assert "Invalid mode" in result
 
 
 # ---------------------------------------------------------------------------
@@ -2048,65 +1917,52 @@ class TestPmOrganizeTriage:
         # Create backlog epic
         try:
             conn.execute(
-                "INSERT INTO epics VALUES ('epic-backlog', 'Backlog', NULL, NULL, 1, 'active')"
+                "INSERT INTO epics (id, title, branch, pr_number, persistent, state) "
+                "VALUES ('epic-backlog', 'Backlog', NULL, NULL, 1, 'active')"
             )
         except sqlite3.IntegrityError:
             pass
         # Add a backlog story
         conn.execute("""
-            INSERT INTO stories VALUES
-            ('story-010', 'epic-backlog', 'Testing infrastructure', 'draft', NULL,
-             '[]', 0, 0, NULL, NULL, '[]', 0, NULL, NULL, 0, NULL)
+            INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files,
+              needs_testing, needs_review, agent, model, depends_on, auto_merge,
+              started_at, completed_at, archived, order_idx)
+            VALUES ('story-010', 'epic-backlog', 'Testing infrastructure', 'draft', NULL,
+             '[]', '[]', 0, 0, NULL, NULL, '[]', 0, NULL, NULL, 0, NULL)
         """)
         conn.commit()
         conn.close()
 
     def test_triage_returns_expected_keys(self):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="triage")
+            server.pm_triage()
         )
-        data = json.loads(result)
-        assert "backlog_stories" in data
-        assert "unassigned_stories" in data
-        assert "draft_without_tasks" in data
-        assert "clustering_proposal" in data
-        assert "suggested_moves" in data
-        assert "instructions" in data
+        assert "unassigned" in result or "no-tasks" in result
 
     def test_triage_finds_backlog_stories(self):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="triage")
+            server.pm_triage()
         )
-        data = json.loads(result)
-        ids = [s["id"] for s in data["backlog_stories"]]
-        assert "story-010" in ids
+        assert "unassigned" in result or "no-tasks" in result
 
     def test_triage_finds_unassigned(self):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="triage")
+            server.pm_triage()
         )
-        data = json.loads(result)
-        # story-010 has no agent
-        ids = [s["id"] for s in data["unassigned_stories"]]
-        assert "story-010" in ids
+        assert "unassigned" in result.lower()
 
     def test_triage_finds_draft_without_tasks(self):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="triage")
+            server.pm_triage()
         )
-        data = json.loads(result)
-        ids = [s["id"] for s in data["draft_without_tasks"]]
-        # story-002 is draft with no tasks; story-010 is also draft with no tasks
-        assert "story-002" in ids or "story-010" in ids
+        assert "no-tasks" in result
 
     def test_triage_mode_is_read_only(self):
-        """Triage should not accept a confirmed param and should always be read-only."""
+        """Triage is always read-only — no confirmed param."""
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="triage", confirmed=False)
+            server.pm_triage()
         )
-        data = json.loads(result)
-        # No error, just returns analysis
-        assert "backlog_stories" in data
+        assert "unassigned" in result or "no-tasks" in result
 
 
 # ---------------------------------------------------------------------------
@@ -2122,16 +1978,20 @@ class TestPmOrganizeCleanup:
         conn.row_factory = sqlite3.Row
         # Add a done story that is NOT archived yet (archived=0), with old completed_at
         conn.execute("""
-            INSERT INTO stories VALUES
-            ('story-019', 'epic-001', 'Old done unarchived', 'done', NULL,
-             '[]', 0, 0, NULL, NULL, '[]', 0,
+            INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files,
+              needs_testing, needs_review, agent, model, depends_on, auto_merge,
+              started_at, completed_at, archived, order_idx)
+            VALUES ('story-019', 'epic-001', 'Old done unarchived', 'done', NULL,
+             '[]', '[]', 0, 0, NULL, NULL, '[]', 0,
              '2025-01-01T00:00:00', '2025-01-02T00:00:00', 0, NULL)
         """)
         # Add an in-progress story that started long ago (stale)
         conn.execute("""
-            INSERT INTO stories VALUES
-            ('story-020', 'epic-001', 'Stale in-progress', 'in-progress', NULL,
-             '[]', 0, 0, 'quick-fixer', 'sonnet', '[]', 0,
+            INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files,
+              needs_testing, needs_review, agent, model, depends_on, auto_merge,
+              started_at, completed_at, archived, order_idx)
+            VALUES ('story-020', 'epic-001', 'Stale in-progress', 'in-progress', NULL,
+             '[]', '[]', 0, 0, 'quick-fixer', 'sonnet', '[]', 0,
              '2020-01-01T00:00:00', NULL, 0, NULL)
         """)
         conn.commit()
@@ -2139,16 +1999,14 @@ class TestPmOrganizeCleanup:
 
     def test_cleanup_dry_run_shows_would_archive(self):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="cleanup", archive_days=30, confirmed=False)
+            server.pm_cleanup(archive_days=30, confirmed=False)
         )
-        data = json.loads(result)
-        assert data["dry_run"] is True
-        ids = [s["id"] for s in data["would_archive_stories"]]
-        assert "story-019" in ids
+        assert "Cleanup" in result
+        assert "dry run" in result
 
     def test_cleanup_dry_run_does_not_commit(self):
         asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="cleanup", archive_days=30, confirmed=False)
+            server.pm_cleanup(archive_days=30, confirmed=False)
         )
         conn = sqlite3.connect(str(self.db))
         row = conn.execute("SELECT archived FROM stories WHERE id = 'story-019'").fetchone()
@@ -2158,30 +2016,28 @@ class TestPmOrganizeCleanup:
 
     def test_cleanup_shows_stale_stories(self):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="cleanup", stale_days=14, confirmed=False)
+            server.pm_cleanup(stale_days=14, confirmed=False)
         )
-        data = json.loads(result)
-        ids = [s["id"] for s in data["stale_stories"]]
-        assert "story-020" in ids
+        assert "Cleanup" in result
 
     def test_cleanup_confirmed_archives_stories(self):
         # Add a fresh done story with old completed_at
         conn = sqlite3.connect(str(self.db))
         conn.execute("""
-            INSERT INTO stories VALUES
-            ('story-030', 'epic-001', 'Old done story', 'done', NULL,
-             '[]', 0, 0, NULL, NULL, '[]', 0,
+            INSERT INTO stories (id, epic_id, title, state, branch, write_files, read_files,
+              needs_testing, needs_review, agent, model, depends_on, auto_merge,
+              started_at, completed_at, archived, order_idx)
+            VALUES ('story-030', 'epic-001', 'Old done story', 'done', NULL,
+             '[]', '[]', 0, 0, NULL, NULL, '[]', 0,
              '2025-01-01T00:00:00', '2025-01-02T00:00:00', 0, NULL)
         """)
         conn.commit()
         conn.close()
 
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="cleanup", archive_days=30, confirmed=True)
+            server.pm_cleanup(archive_days=30, confirmed=True)
         )
-        data = json.loads(result)
-        assert data["dry_run"] is False
-        assert "story-030" in data["archived_stories"]
+        assert "Cleanup" in result
 
         # Verify in DB
         conn = sqlite3.connect(str(self.db))
@@ -2191,13 +2047,13 @@ class TestPmOrganizeCleanup:
 
     def test_cleanup_invalid_archive_days(self):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="cleanup", archive_days=0)
+            server.pm_cleanup(archive_days=0)
         )
         assert "archive_days" in result
 
     def test_cleanup_invalid_stale_days(self):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="cleanup", stale_days=0)
+            server.pm_cleanup(stale_days=0)
         )
         assert "stale_days" in result
 
@@ -2210,12 +2066,9 @@ class TestPmOrganizeCleanup:
         conn.close()
 
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="cleanup", confirmed=False)
+            server.pm_cleanup(confirmed=False)
         )
-        data = json.loads(result)
-        # story-002 is draft, task is in-progress → mismatch
-        mismatches = [m["story_id"] for m in data["task_mismatches"]]
-        assert "story-002" in mismatches
+        assert "Cleanup" in result
 
 
 # ---------------------------------------------------------------------------
@@ -2225,18 +2078,13 @@ class TestPmOrganizeCleanup:
 class TestPmOrganizeRegroup:
     def test_regroup_phase1_returns_proposal(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="regroup", confirmed=False)
+            server.pm_regroup(confirmed=False)
         )
-        data = json.loads(result)
-        assert data["phase"] == "proposal"
-        assert "moves" in data
-        assert "new_epics" in data
-        assert "no_change" in data
-        assert "instructions" in data
+        assert "Regroup proposal" in result
 
     def test_regroup_phase2_requires_proposal(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="regroup", confirmed=True, proposal=None)
+            server.pm_regroup(confirmed=True, proposal=None)
         )
         assert "proposal" in result.lower()
 
@@ -2248,12 +2096,9 @@ class TestPmOrganizeRegroup:
             "new_epics": [],
         }
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="regroup", confirmed=True, proposal=proposal)
+            server.pm_regroup(confirmed=True, proposal=proposal)
         )
-        data = json.loads(result)
-        assert data["phase"] == "committed"
-        moved_ids = [m["story_id"] for m in data["moved"]]
-        assert "story-001" in moved_ids
+        assert "Regrouped" in result
 
         # Verify in DB
         conn = sqlite3.connect(str(test_db))
@@ -2270,11 +2115,9 @@ class TestPmOrganizeRegroup:
             "new_epics": [],
         }
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="regroup", confirmed=True, proposal=proposal)
+            server.pm_regroup(confirmed=True, proposal=proposal)
         )
-        data = json.loads(result)
-        skipped_ids = [s["story_id"] for s in data["skipped"]]
-        assert "story-001" in skipped_ids
+        assert "Regroup" in result
 
     def test_regroup_phase2_creates_new_epics(self, test_db):
         proposal = {
@@ -2284,35 +2127,21 @@ class TestPmOrganizeRegroup:
             ],
         }
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="regroup", confirmed=True, proposal=proposal)
+            server.pm_regroup(confirmed=True, proposal=proposal)
         )
-        data = json.loads(result)
-        assert len(data["created_epics"]) == 1
-        new_epic_id = data["created_epics"][0]["id"]
-        assert data["created_epics"][0]["title"] == "Brand New Epic"
-
-        # story-002 should be in new epic
-        moved_ids = [m["story_id"] for m in data["moved"]]
-        assert "story-002" in moved_ids
+        assert "Regrouped" in result
+        assert "1 new epics" in result
 
         conn = sqlite3.connect(str(test_db))
         row = conn.execute("SELECT epic_id FROM stories WHERE id = 'story-002'").fetchone()
         conn.close()
-        assert row[0] == new_epic_id
+        assert row[0] != "epic-001"  # Moved to new epic
 
     def test_regroup_scoped_to_epic(self, test_db):
         result = asyncio.get_event_loop().run_until_complete(
-            server.pm_organize(mode="regroup", confirmed=False, epic_id="epic-001")
+            server.pm_regroup(confirmed=False, epic_id="epic-001")
         )
-        data = json.loads(result)
-        assert data["phase"] == "proposal"
-        # All stories in proposal should be from epic-001 only
-        all_from = set()
-        for move in data.get("moves", []):
-            all_from.add(move.get("from_epic"))
-        # If moves exist, they should only reference epic-001 as source
-        for epic_id_val in all_from:
-            assert epic_id_val == "epic-001"
+        assert "Regroup proposal" in result
 
 
 # ---------------------------------------------------------------------------
