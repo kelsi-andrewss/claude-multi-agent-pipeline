@@ -542,6 +542,21 @@ class TestDiscoverFiles:
         files = server._discover_files(paths=["nonexistent"])
         assert files == []
 
+    def test_directory_traversal_rejected(self):
+        files = server._discover_files(paths=["../../../etc/passwd"])
+        names = {f.name for f in files}
+        assert "passwd" not in names
+
+    def test_absolute_path_outside_root_rejected(self):
+        files = server._discover_files(paths=["/etc/passwd"])
+        names = {f.name for f in files}
+        assert "passwd" not in names
+
+    def test_nested_traversal_rejected(self):
+        files = server._discover_files(paths=["src/../../etc/passwd"])
+        names = {f.name for f in files}
+        assert "passwd" not in names
+
 
 # ---------------------------------------------------------------------------
 # _read_files_within_budget
@@ -1834,6 +1849,36 @@ class TestHelpers:
             assert d["persistent"] is True
         finally:
             conn.close()
+
+    def test_next_id_concurrency(self, test_db):
+        from concurrent.futures import ThreadPoolExecutor
+
+        def generate_ids(_):
+            conn = sqlite3.connect(str(test_db), timeout=10)
+            conn.row_factory = sqlite3.Row
+            ids = []
+            try:
+                for _ in range(10):
+                    conn.execute("BEGIN IMMEDIATE")
+                    next_id = server._next_id(conn, "stories", "story-")
+                    conn.execute(
+                        "INSERT INTO stories (id, epic_id, title, state, write_files, "
+                        "read_files, needs_testing, needs_review, depends_on, auto_merge, archived) "
+                        "VALUES (?, 'epic-001', 'concurrent', 'draft', '[]', '[]', 0, 0, '[]', 0, 0)",
+                        (next_id,)
+                    )
+                    conn.commit()
+                    ids.append(next_id)
+                return ids
+            finally:
+                conn.close()
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            results = list(pool.map(generate_ids, range(10)))
+
+        all_ids = [sid for batch in results for sid in batch]
+        assert len(all_ids) == 100
+        assert len(set(all_ids)) == 100, f"Expected 100 unique IDs, got {len(set(all_ids))}"
 
 
 # ---------------------------------------------------------------------------
