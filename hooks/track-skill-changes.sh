@@ -66,7 +66,10 @@ else:
 " 2>/dev/null)
 fi
 
-# Append entry
+# Dedup: skip if same skill+action+date already logged
+if [[ -f "$CHANGELOG" ]] && grep -qF "- ${TODAY} ${ACTION} /${SKILL_NAME}" "$CHANGELOG"; then
+  exit 0
+fi
 echo "- ${TODAY} ${ACTION} /${SKILL_NAME} — ${DESC}" >> "$CHANGELOG"
 
 exit 0

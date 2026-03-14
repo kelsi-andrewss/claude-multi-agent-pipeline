@@ -20,7 +20,7 @@ User has requested: `/prefs {{args}}`
 
 **DB path:** `~/.claude/.claude/epics.db`
 
-**SQL injection guard:** All user-provided text inserted into SQL must have single quotes escaped by doubling them (`'` to `''`).
+**SQL injection guard:** All SQL operations use python3 with parameterized queries (`cursor.execute` with `?` placeholders). Never use string interpolation for user input.
 
 ---
 
@@ -41,7 +41,21 @@ Parse the first token of `{{args}}`:
 
 Display live preferences from the database:
 
-!`sqlite3 ~/.claude/.claude/epics.db "SELECT printf('%d. [%s] %s', ROW_NUMBER() OVER (ORDER BY updated_at DESC), source, text) FROM correction_groups WHERE (status IN ('promoted','pending_promotion') OR source='manual') AND text != '' ORDER BY updated_at DESC"`
+```bash
+python3 -c "
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1], timeout=5)
+rows = conn.execute(
+    'SELECT source, text FROM correction_groups '
+    'WHERE (status IN (?,?) OR source=?) AND text != ? '
+    'ORDER BY updated_at DESC',
+    ('promoted', 'pending_promotion', 'manual', '')
+).fetchall()
+conn.close()
+for i, (source, text) in enumerate(rows, 1):
+    print(f'{i}. [{source}] {text}')
+" ~/.claude/.claude/epics.db
+```
 
 > If the query returns empty output, say: "No preferences found. Use `/prefs add \"<text>\"` to add one."
 
@@ -63,17 +77,27 @@ Stop.
 Parse everything after `add` as the preference text. Strip outer quotes if present.
 
 1. If text is empty, say: "Usage: `/prefs add \"<preference text>\"`" and stop.
-2. Sanitize the text (escape single quotes by doubling them).
-3. Derive a theme: first 60 characters of text, lowercased.
-4. Run:
+2. Derive a theme: first 60 characters of text, lowercased.
+3. Run:
    ```bash
-   sqlite3 ~/.claude/.claude/epics.db "INSERT INTO correction_groups (theme, status, source, text, count, created_at, updated_at) VALUES ('<theme>', 'promoted', 'manual', '<sanitized-text>', NULL, strftime('%s','now'), strftime('%s','now'))"
+   python3 -c "
+   import sqlite3, sys, time
+   conn = sqlite3.connect(sys.argv[1], timeout=5)
+   now = int(time.time())
+   conn.execute(
+       'INSERT INTO correction_groups (theme, status, source, text, count, created_at, updated_at) '
+       'VALUES (?, ?, ?, ?, NULL, ?, ?)',
+       (sys.argv[2], 'promoted', 'manual', sys.argv[3], now, now)
+   )
+   conn.commit()
+   conn.close()
+   " ~/.claude/.claude/epics.db "<theme>" "<text>"
    ```
-5. Shadow to OpenMemory:
+4. Shadow to OpenMemory:
    ```bash
    python3 ~/.claude/.claude/hooks/lib/om_write.py "behavioral-pref" "<text>" "global"
    ```
-6. Confirm: "Added preference." then show the updated list by running the **List** query.
+5. Confirm: "Added preference." then show the updated list by running the **List** query.
 
 Stop.
 
@@ -84,17 +108,33 @@ Stop.
 Parse `edit N "<new text>"` where N is a 1-based row number and the rest is the new text.
 
 1. If N is not a positive integer or text is empty, say: "Usage: `/prefs edit N \"<new text>\"`" and stop.
-2. Sanitize the new text. Derive a theme from it.
-3. Resolve row number N to the actual `id`:
+2. Derive a theme from the new text.
+3. Resolve row number N to the actual `id` and update in one script:
    ```bash
-   sqlite3 ~/.claude/.claude/epics.db "SELECT id FROM correction_groups WHERE (status IN ('promoted','pending_promotion') OR source='manual') AND text != '' ORDER BY updated_at DESC LIMIT 1 OFFSET $((N-1))"
+   python3 -c "
+   import sqlite3, sys, time
+   conn = sqlite3.connect(sys.argv[1], timeout=5)
+   row = conn.execute(
+       'SELECT id FROM correction_groups '
+       'WHERE (status IN (?,?) OR source=?) AND text != ? '
+       'ORDER BY updated_at DESC LIMIT 1 OFFSET ?',
+       ('promoted', 'pending_promotion', 'manual', '', int(sys.argv[2]) - 1)
+   ).fetchone()
+   if not row:
+       print('NOT_FOUND')
+       sys.exit(0)
+   now = int(time.time())
+   conn.execute(
+       'UPDATE correction_groups SET text=?, theme=?, updated_at=? WHERE id=?',
+       (sys.argv[3], sys.argv[4], now, row[0])
+   )
+   conn.commit()
+   conn.close()
+   print(f'UPDATED:{row[0]}')
+   " ~/.claude/.claude/epics.db "<N>" "<new-text>" "<theme>"
    ```
-4. If no row returned, say: "Preference #N does not exist. Run `/prefs list` to see current preferences." and stop.
-5. Update:
-   ```bash
-   sqlite3 ~/.claude/.claude/epics.db "UPDATE correction_groups SET text='<sanitized-text>', theme='<theme>', updated_at=strftime('%s','now') WHERE id=<resolved-id>"
-   ```
-6. Confirm: "Updated preference #N." then show the updated list by running the **List** query.
+4. If output is `NOT_FOUND`, say: "Preference #N does not exist. Run `/prefs list` to see current preferences." and stop.
+5. Confirm: "Updated preference #N." then show the updated list by running the **List** query.
 
 Stop.
 
@@ -105,17 +145,28 @@ Stop.
 Parse `remove N` where N is a 1-based row number.
 
 1. If N is not a positive integer, say: "Usage: `/prefs remove N`" and stop.
-2. Resolve row number N to the actual `id` using the same query as Edit step 3.
-3. If no row returned, say: "Preference #N does not exist." and stop.
-4. Read the text of the row before deleting:
+2. Resolve row number N, read the text, and delete in one script:
    ```bash
-   sqlite3 ~/.claude/.claude/epics.db "SELECT text FROM correction_groups WHERE id=<resolved-id>"
+   python3 -c "
+   import sqlite3, sys
+   conn = sqlite3.connect(sys.argv[1], timeout=5)
+   row = conn.execute(
+       'SELECT id, text FROM correction_groups '
+       'WHERE (status IN (?,?) OR source=?) AND text != ? '
+       'ORDER BY updated_at DESC LIMIT 1 OFFSET ?',
+       ('promoted', 'pending_promotion', 'manual', '', int(sys.argv[2]) - 1)
+   ).fetchone()
+   if not row:
+       print('NOT_FOUND')
+       sys.exit(0)
+   conn.execute('DELETE FROM correction_groups WHERE id=?', (row[0],))
+   conn.commit()
+   conn.close()
+   print(f'DELETED:{row[1][:80]}')
+   " ~/.claude/.claude/epics.db "<N>"
    ```
-5. Delete:
-   ```bash
-   sqlite3 ~/.claude/.claude/epics.db "DELETE FROM correction_groups WHERE id=<resolved-id>"
-   ```
-6. Confirm: "Removed preference #N: \"<text snippet (first 80 chars)>\"."
+3. If output is `NOT_FOUND`, say: "Preference #N does not exist." and stop.
+4. Confirm: "Removed preference #N: \"<text snippet (first 80 chars)>\"."
 
 Stop.
 
@@ -127,11 +178,21 @@ Parse optional path after `export`. Default: `~/.claude/prefs-export.json`.
 
 1. Run:
    ```bash
-   sqlite3 ~/.claude/.claude/epics.db "SELECT json_group_array(json_object('theme',theme,'source',source,'text',text,'status',status,'count',count)) FROM correction_groups WHERE status != 'dismissed'"
+   python3 -c "
+   import json, sqlite3, sys
+   conn = sqlite3.connect(sys.argv[1], timeout=5)
+   rows = conn.execute(
+       'SELECT theme, source, text, status, count FROM correction_groups WHERE status != ?',
+       ('dismissed',)
+   ).fetchall()
+   conn.close()
+   data = [{'theme': r[0], 'source': r[1], 'text': r[2], 'status': r[3], 'count': r[4]} for r in rows]
+   with open(sys.argv[2], 'w') as f:
+       json.dump(data, f, indent=2)
+   print(f'Exported {len(data)} preferences to {sys.argv[2]}')
+   " ~/.claude/.claude/epics.db "<target-path>"
    ```
-2. Write the JSON output to the target path.
-3. Count entries in the JSON array.
-4. Confirm: "Exported N preferences to <path>."
+2. Confirm with the output message.
 
 Stop.
 
@@ -144,14 +205,35 @@ Parse `import <path>` where path is required.
 1. If path is empty, say: "Usage: `/prefs import <path>`" and stop.
 2. Verify the file exists. If not, say: "File not found: <path>" and stop.
 3. Read the JSON file. Validate it is a JSON array of objects each containing at least `theme` and `text` fields. If not, say: "Invalid JSON format. Expected an array of objects with 'theme' and 'text' fields." and stop.
-4. For each entry in the array:
-   - Check for existing row with the same theme:
-     ```bash
-     sqlite3 ~/.claude/.claude/epics.db "SELECT id FROM correction_groups WHERE theme='<sanitized-theme>'"
-     ```
-   - **If exists:** skip (dedup by theme). Increment skipped count.
-   - **If not:** INSERT with the entry's fields. Default `source` to `'manual'`, `status` to `'promoted'`, `created_at` and `updated_at` to now. Increment imported count.
-5. Confirm: "Imported N new preferences (M skipped as duplicates)."
+4. Run the import:
+   ```bash
+   python3 -c "
+   import json, sqlite3, sys, time
+   with open(sys.argv[2]) as f:
+       data = json.load(f)
+   conn = sqlite3.connect(sys.argv[1], timeout=5)
+   now = int(time.time())
+   imported = skipped = 0
+   for entry in data:
+       existing = conn.execute(
+           'SELECT id FROM correction_groups WHERE theme=?', (entry['theme'],)
+       ).fetchone()
+       if existing:
+           skipped += 1
+           continue
+       conn.execute(
+           'INSERT INTO correction_groups (theme, status, source, text, count, created_at, updated_at) '
+           'VALUES (?, ?, ?, ?, ?, ?, ?)',
+           (entry['theme'], entry.get('status','promoted'), entry.get('source','manual'),
+            entry['text'], entry.get('count'), now, now)
+       )
+       imported += 1
+   conn.commit()
+   conn.close()
+   print(f'Imported {imported} new preferences ({skipped} skipped as duplicates).')
+   " ~/.claude/.claude/epics.db "<path>"
+   ```
+5. Confirm with the output message.
 6. Show the updated list by running the **List** query.
 
 Stop.

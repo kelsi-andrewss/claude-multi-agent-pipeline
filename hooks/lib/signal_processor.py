@@ -410,7 +410,7 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
 
         for correction in all_corrections:
             theme_text = correction["content"]
-            theme_key = theme_text[:40].strip().lower()
+            theme_key = theme_text[:300]
 
             # Per-session rate limit: skip DB increment if theme already seen this session
             if theme_key in seen_themes:
@@ -420,7 +420,7 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
             # Check for existing group by text prefix match
             row = cursor.execute(
                 "SELECT id, count, correction_dates, status FROM correction_groups "
-                "WHERE LOWER(SUBSTR(theme, 1, 40)) = LOWER(SUBSTR(?, 1, 40))",
+                "WHERE theme = ?",
                 (theme_key,)
             ).fetchone()
 

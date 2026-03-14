@@ -1,12 +1,12 @@
 #!/bin/bash
 # PreToolUse hook for Edit and Write.
 # Blocks edits to protected Konva files unless explicit per-session permission
-# has been granted via a /tmp sentinel file.
+# has been granted via a $CLAUDE_TEMP_DIR sentinel file.
 #
 # Protected files:
 #   BoardCanvas.jsx, StickyNote.jsx, Frame.jsx, Shape.jsx, LineShape.jsx, Cursors.jsx
 #
-# Permission signal: /tmp/konva-permission-<SESSION_ID>-<basename>
+# Permission signal: $CLAUDE_TEMP_DIR/konva-permission-<SESSION_ID>-<basename>
 # Grant permission: main session writes that file when user says "I grant permission to edit X"
 #
 # Exit 0 = allow
@@ -52,8 +52,7 @@ if [[ "$IS_PROTECTED" == "0" ]]; then
 fi
 
 # Check for permission sentinel file
-SESSION_ID="${PPID:-$$}"
-PERMISSION_FILE="/tmp/konva-permission-${SESSION_ID}-${PROTECTED_NAME}"
+PERMISSION_FILE="$CLAUDE_TEMP_DIR/konva-permission-${SESSION_ID}-${PROTECTED_NAME}"
 
 if [[ -f "$PERMISSION_FILE" ]]; then
   # Permission granted for this session
@@ -63,5 +62,5 @@ fi
 # Block — no permission
 echo "BLOCKED: $PROTECTED_NAME is a protected Konva file." >&2
 echo "Grant explicit permission first by saying: \"I grant permission to edit $PROTECTED_NAME\"" >&2
-echo "This causes the main session to write: /tmp/konva-permission-${SESSION_ID}-${PROTECTED_NAME}" >&2
+echo "This causes the main session to write: $CLAUDE_TEMP_DIR/konva-permission-${SESSION_ID}-${PROTECTED_NAME}" >&2
 exit 2

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 from constants import NO_CODE_INSTRUCTION, PROJECT_ROOT, TEST_ANALYSIS_PROMPT
@@ -15,7 +16,7 @@ async def _run_tests(
 ) -> tuple[str, bool]:
     """Run project tests and return (output_text, all_passed)."""
     if suite == "backend":
-        venv_python = str(PROJECT_ROOT / ".venv" / "bin" / "python3")
+        venv_python = sys.executable
         cmd = [venv_python, "-m", "pytest"]
         if tests:
             cmd.extend(tests)
