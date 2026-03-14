@@ -345,6 +345,9 @@ def stage_hook_generation(db_file, project_root):
         print("Stage 5: skipped (no newly promoted entries today)", file=sys.stderr)
         return
 
+    # Ensure compliance directory exists before generating hooks
+    os.makedirs(os.path.join(project_root, 'hooks', 'compliance'), exist_ok=True)
+
     sys.path.insert(0, project_root)
     from hooks.lib.hook_generator import generate_hook
 
