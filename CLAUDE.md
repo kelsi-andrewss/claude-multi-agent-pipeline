@@ -78,6 +78,6 @@ These surfaces track patterns across sessions:
 - `~/.claude/.claude/rendered-prefs.md` — rendered from correction_groups DB at session start (loaded via @import, survives compaction)
 - OpenMemory — queryable semantic store for tool learnings, decisions, prompt patterns
 - `decision_preferences` table (epics.db) — machine-learned preference predictions from correction/decision correlation (see `hooks/lib/signal_processor.py`)
-- `~/.claude/outcomes.md` — post-merge/rejection results (consulted on-demand)
+- `merge_outcomes` table (run-state.db) — post-merge/rejection results (consulted on-demand)
 
 > Infrastructure details (OpenMemory, pipelines, project structure): see ~/.claude/.claude/CLAUDE.md
