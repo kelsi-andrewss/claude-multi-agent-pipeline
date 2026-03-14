@@ -56,6 +56,40 @@ SCHEMA_DDL = [
         merged_at INTEGER,
         PRIMARY KEY (session_id, story_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS merge_queue (
+        id INTEGER PRIMARY KEY,
+        story_id TEXT NOT NULL,
+        priority INTEGER DEFAULT 0,
+        write_targets TEXT,
+        status TEXT DEFAULT 'queued' CHECK(status IN ('queued','merging','merged','blocked','cancelled')),
+        queued_at TEXT DEFAULT (datetime('now')),
+        merged_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS merge_outcomes (
+        id INTEGER PRIMARY KEY,
+        story_id TEXT NOT NULL UNIQUE,
+        epic_id TEXT,
+        agent TEXT,
+        model TEXT,
+        domain_tags TEXT,
+        predicted_conflict BOOLEAN,
+        actual_conflict BOOLEAN,
+        success BOOLEAN,
+        cycle_time_s INTEGER,
+        revert_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+    )""",
+    """CREATE TABLE IF NOT EXISTS agent_heartbeats (
+        id INTEGER PRIMARY KEY,
+        story_id TEXT NOT NULL,
+        agent_id TEXT,
+        last_tool_call TEXT,
+        tool_call_hash TEXT,
+        repeat_count INTEGER DEFAULT 0,
+        token_estimate INTEGER DEFAULT 0,
+        last_heartbeat TEXT DEFAULT (datetime('now'))
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_heartbeats_story ON agent_heartbeats(story_id)""",
 ]
 
 

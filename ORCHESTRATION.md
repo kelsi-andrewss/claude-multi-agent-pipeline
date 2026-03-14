@@ -12,7 +12,7 @@ These are decision rules and constraints for the main Claude Code session. Spawn
 
 **No direct commits to main or dev**: All work — including hotfixes and quickfixes — must happen on a named feature branch (`hotfix/<slug>`, `quickfix/<slug>`, or story branch). Never commit directly to main or dev from any session.
 
-**Branch merge hierarchy**: `main` is production. The ONLY thing that merges to main is `dev`. Everything else (story branches, hotfixes, quickfixes, epic dev branches) merges to `dev`.
+**Branch merge hierarchy**: `main` is production. The ONLY thing that merges to main is `dev`. Everything else (story branches, hotfixes, quickfixes) merges to `dev`. Stories from different epics execute in parallel — epics are organizational grouping only, not execution boundaries. Conflict detection and dependency ordering operate at the story level across all epics.
 
 **Gemini** — research and planning via MCP tools (`pm_*`, `gemini_*`). Writes to `epics.db`.
 **Coders** (`quick-fixer`, `architect`) — execute approved plan files in worktrees. Never plan. Always `run_in_background: true`.
@@ -48,6 +48,22 @@ Before defaulting, query OpenMemory for tool learnings about the model + file ty
 - Target file is not a pipeline file (ORCHESTRATION.md, skills/, hooks/, settings.json, CLAUDE.md)
 
 Pipeline files are excluded because errors compound — a bad edit affects every future story, not just the current one.
+
+### Trust-informed selection (when merge_outcomes >= 10 records)
+
+Trust scores from merge_outcomes override the static table above:
+
+| Trust Level | Threshold | Model Policy | Approval Policy |
+|---|---|---|---|
+| High | >= 0.85 | Haiku eligible (if Haiku threshold met) | Auto-approve for proven domains |
+| Medium | >= 0.70 | Sonnet default | Standard review flow |
+| Low | < 0.70 | Sonnet default, escalation at 1 BLOCKING | Mandatory approval |
+
+**Domain overrides**: When a domain's success rate diverges from global by >= 0.15 (with 3+ samples), its trust level governs stories touching that domain regardless of global trust.
+
+**Minimum sample**: Trust-informed selection activates after 10 merge_outcomes records. Below that, use the static table above.
+
+Trust scores computed by `hooks/lib/signal_processor.py:compute_trust_scores()`. Populated by `outcomes-parser.py`. See `refs/orch-memory.md § Trust Calibration`.
 
 ---
 

@@ -159,8 +159,8 @@ Build an execution plan from two analyses:
 - **Group 0**: stories with no `depends_on`, or all dependencies already `done`
 - **Group 1**: stories whose `depends_on` entries are all in Group 0
 - **Group N**: stories whose `depends_on` entries are all in earlier groups
-- If a story's dependency is in a **different epic** and not yet `done`, place it in a named deferred group and explain when it will run:
-  > "story-NNN deferred: depends on story-MMM (different epic, not done). Will run after story-MMM is merged."
+- If a story's dependency (same or different epic) is not yet `done` and is not in the current run batch, place it in a named deferred group and explain when it will run:
+  > "story-NNN deferred: depends on story-MMM (not done, not in this run). Will run after story-MMM is merged."
 - **Never skip a story just because it has dependencies** — place it in the correct dependency group. Every story passed to `/run-stories` MUST appear in the execution plan, either in a parallel batch or a sequential deferred group with a clear "runs after story-NNN merges" label.
 
 ### 2a-post. Bootstrap detection
@@ -168,23 +168,24 @@ Build an execution plan from two analyses:
 After building dependency groups, scan Group 0 for bootstrap stories:
 
 1. A story is a **bootstrap story** if its title matches `/bootstrap/i` AND it has no `depends_on` of its own.
-2. If a bootstrap story is found: move all other Group 0 stories (non-bootstrap) to Group 1, with an implicit dependency on the bootstrap story. Log: "Auto-serialized: story-NNN (bootstrap) runs before all others in this epic"
+2. If a bootstrap story is found: move all other Group 0 stories **from the same epic** (non-bootstrap) to Group 1, with an implicit dependency on the bootstrap story. Stories from other epics in Group 0 are unaffected. Log: "Auto-serialized: story-NNN (bootstrap) runs before all others in epic-MMM"
 3. A story titled like "Bootstrap payment provider" that has `depends_on` entries is NOT treated as bootstrap — it runs normally in its dependency group.
 4. If no bootstrap story exists in the batch, no change to execution order.
 
-### 2b. File conflict detection (within each dependency group)
+### 2b. File conflict detection (across all stories in the run)
 
-Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then for each dependency group:
+Load `ToolSearch: select:mcp__gemini__pm_check_conflicts`, then:
 
-1. Collect all story IDs in the group and call `pm_check_conflicts(story_ids=[...])`.
-2. Read the detail file. It contains:
+1. Collect ALL story IDs across all dependency groups and call `pm_check_conflicts(story_ids=[...])` once. This catches write-target overlaps regardless of which epic a story belongs to.
+2. Apply the conflict results to each dependency group: stories within the same group that conflict get serialized; stories in different groups already run sequentially by dependency ordering.
+3. Read the detail file. It contains:
    - `conflicts`: list of `{file, stories}` write-write overlap entries
    - `read_conflicts`: list of `{file, writer, reader}` write-read overlap entries
    - `safe_parallel`: story IDs with no write-file overlaps (launch together)
    - `sequential`: story IDs that must run after conflicting stories merge
-3. Use `safe_parallel` as batch 0. For `sequential` stories, chain them after their conflicting partner from `safe_parallel` finishes.
-4. For `read_conflicts`: ensure the `reader` story runs in a batch after the `writer` story's batch. This prevents a reader from seeing stale file content.
-5. Within each batch, order stories by ID (lowest first) for determinism.
+4. Use `safe_parallel` as batch 0. For `sequential` stories, chain them after their conflicting partner from `safe_parallel` finishes.
+5. For `read_conflicts`: ensure the `reader` story runs in a batch after the `writer` story's batch. This prevents a reader from seeing stale file content.
+6. Within each batch, order stories by ID (lowest first) for determinism.
 
 > **Note:** A story may be placed in a later sequential batch even if it doesn't directly conflict with the story immediately before it. This happens when a downstream story conflicts with *both*, forcing them into a strict order. Stories are always chained safely to prevent merge conflicts.
 
@@ -204,6 +205,34 @@ Write targets support optional symbol annotations using colon syntax:
 When `pm_check_conflicts` returns file-level conflicts, check if ALL stories in the conflict use symbol-annotated targets for that file. If so, compare symbols — if all symbols are distinct, reclassify as `safe_parallel` for that file.
 
 If ANY story uses a bare filename (no symbol), it conflicts with all other stories targeting that file regardless of their annotations.
+
+### 2b-hybrid. Git merge-tree confirmation
+
+After `pm_check_conflicts` classifies stories into `safe_parallel` and `sequential`, run a second pass using `conflict-check.sh` to confirm or reclassify sequential pairs via actual git merge-tree simulation and symbol analysis.
+
+For each pair of stories in the `sequential` list that have branches already pushed:
+
+1. Call `conflict-check.sh` to compare the two story branches:
+   ```bash
+   CONFLICT_RESULT=$(bash ~/.claude/scripts/conflict-check.sh \
+     --branch-a <story-a-branch> \
+     --branch-b <story-b-branch> \
+     --project-root <project-root>)
+   ```
+
+2. Parse the JSON result. Check the `severity` and `conflict` fields.
+
+3. Reclassification:
+   - `severity` is `"green"` or `"yellow"` (`conflict: false`) — move the story pair from `sequential` to `safe_parallel`. Log: `"story-NNN + story-MMM: pm_check_conflicts flagged file overlap but git merge-tree confirms no textual conflict — parallelizing."`
+   - `severity` is `"red"` or `"black"` (`conflict: true`) — keep in `sequential`. Log: `"story-NNN + story-MMM: confirmed conflict in <files> (<symbols if available>)."`
+
+4. If stories don't have branches yet (first run — branches are created during Step 4), skip hybrid check for that pair. Fall back to `pm_check_conflicts` decision. Hybrid confirmation is opportunistic, not blocking.
+
+5. If `conflict-check.sh` returns `status: "error"` (exit code 2), log the error and keep the pair in `sequential` (conservative fallback).
+
+6. After processing all sequential pairs, the updated `safe_parallel` and `sequential` lists are used for batch construction in the remaining steps.
+
+> **Why opportunistic:** On first run, story branches don't exist yet — they're created in Step 4 from the dev branch. `git merge-tree` needs actual refs to compare. The hybrid check adds value on re-runs (branches exist from a previous partial execution), sequential batches (batch 0 creates branches before batch 1 launches), and the merge queue (branches exist by queue ordering time).
 
 ---
 
@@ -450,6 +479,26 @@ Write tests from the plan's acceptance criteria and function signatures ONLY. Yo
 
 **When `has-test-files` is false**, skip test agent launch entirely. The coder runs solo with the standard worktree path (no `--code` suffix). This preserves the existing flow for stories without test files.
 
+### Agent health monitoring
+
+After launching all agents in a parallel batch, start the watchdog in the background:
+
+```bash
+python3 ~/.claude/scripts/agent-watchdog.py \
+  --session-id "$SESSION_ID" \
+  --story-ids "<comma-separated story IDs in this batch>" \
+  --agent-pids "<comma-separated PIDs from launched agents, same order>" \
+  --agent-types "<comma-separated agent types: quick-fixer|architect, same order>"
+```
+
+Run this in the background (do not wait for it). Store the watchdog PID.
+
+When collecting results in Step 5, also check watchdog output:
+- If the watchdog killed any agents, those stories are BLOCKED with the kill reason.
+- Include killed agents in the Step 6 report under "Blocked during execution" with prefix "Watchdog killed: ".
+
+On early exit or cleanup, send SIGTERM to the watchdog PID if it's still running.
+
 ### For sequential batches (conflict serialization)
 
 After the previous batch completes, before launching the next story:
@@ -519,6 +568,102 @@ If the agent result doesn't include usage metadata, skip — merge-worktree hand
 4. Resume the agent using its agent ID: "Decision: Option <X>. Continue from where you left off."
 5. Wait for the resumed agent to return DONE or BLOCKED.
 6. If DONE, add to the merge list. If BLOCKED, add to blocked list.
+
+### Step 5.0: Ralph Loop auto-review (coder self-correction)
+
+After each coder agent returns DONE (and before the diff gate in Step 5a), run build verification against the coder's worktree to confirm the code actually works:
+
+```bash
+VERIFY_RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <worktree-path>)
+```
+
+Parse the JSON result using the same logic as Step 2c:
+- **PASS** or **SKIP** (no build system): proceed to Step 5a (diff gate). No retry needed.
+- **FAIL**: enter the Ralph Loop retry below.
+
+If the coder returned BLOCKED, skip build verification entirely (nothing to verify) — the story goes straight to the blocked list.
+
+#### Ralph Loop retry logic
+
+Track three pieces of state per story across retry iterations:
+- `retry_count` (int, starts at 0)
+- `last_error_hash` (SHA-256 of the `build_output` field, initially null)
+- `consecutive_no_progress` (int, starts at 0)
+- `error_hash_counts` (dict mapping hash → count, initially empty)
+
+On each FAIL:
+
+1. **Compute error hash**: `echo "<build_output>" | shasum -a 256 | cut -d' ' -f1`
+
+2. **Update circuit breaker counters**:
+   - If `error_hash == last_error_hash`: increment `consecutive_no_progress`
+   - If `error_hash != last_error_hash`: reset `consecutive_no_progress` to 0, update `last_error_hash`
+   - Increment `retry_count`
+   - Increment `error_hash_counts[error_hash]`
+
+3. **Check circuit breakers** (any triggers = stop retrying, mark BLOCKED):
+
+   | Breaker | Threshold | Condition |
+   |---------|-----------|-----------|
+   | Max retries | 3 | `retry_count >= 3` |
+   | No progress | 3 | `consecutive_no_progress >= 3` |
+   | Same error | 5 | `error_hash_counts[error_hash] >= 5` |
+
+   If any breaker fires: log friction (`category: blocked, type: automatic, skill: run-stories, detail: "Ralph retry exhausted: <breaker name> after <retry_count> attempts"`), mark story BLOCKED with reason "Build verification failed after <retry_count> retries: <last build_output summary>", skip to Step 5a handling for BLOCKED stories.
+
+4. **Re-inject coder**: launch a new `general-purpose` background agent with this prompt:
+
+   ```
+   You are RE-EXECUTING story <story_id>: "<title>" (retry <retry_count> of 3)
+
+   Your previous implementation failed build verification. Fix the errors below.
+
+   WORKTREE: <worktree-path>
+   All reads and writes MUST use paths under this directory.
+   Story branch: <story-branch>
+
+   ## Build errors
+
+   <build_output from build-verify.sh JSON>
+
+   ## Instructions
+
+   1. Read the error output carefully. Identify the root cause.
+   2. Fix ONLY what's broken. Do not refactor working code.
+   3. Stage and commit your fix:
+      git -C <worktree-path> add <changed-files>
+      git -C <worktree-path> commit -m "<story_id>: fix build errors (retry <retry_count>)"
+   4. Push: git -C <worktree-path> push origin <story-branch>
+   5. Return "DONE: <story-branch> pushed. Retry <retry_count> fix applied."
+      or "BLOCKED: <reason>" if you cannot fix the errors.
+
+   ## Tool constraints
+   Do NOT call any mcp__gemini__* tools.
+   Do NOT call any pm_* tools.
+   Focus exclusively on fixing the build errors.
+   ```
+
+5. **Wait for retry agent**, then re-run build verification from the top of this section. Loop until PASS, SKIP, or a circuit breaker fires.
+
+#### Dual-exit gate
+
+A coder's work is only considered complete when BOTH conditions are met:
+1. The coder agent returned DONE (completion indicator)
+2. `build-verify.sh` returns PASS or SKIP against the worktree
+
+If the coder returned DONE but build verification fails, the Ralph Loop retry handles it. If the coder returned BLOCKED, skip the build verification entirely (nothing to verify).
+
+#### Stories without a build system
+
+When `build-verify.sh` returns `build_result: "skip"` (project_type is "unknown"), the dual-exit gate is satisfied by condition 1 alone. The retry loop never fires. This preserves existing behavior for projects without lint/test infrastructure.
+
+#### Interaction with existing steps
+
+The Ralph Loop retry (Step 5.0) runs BEFORE Step 5a (diff gate) and Step 5b (per-story testing). The purpose is different:
+- Step 5.0 catches build/lint failures (does the code compile and pass basic checks?)
+- Step 5b runs acceptance tests (does the code meet the spec?)
+
+A story must pass Step 5.0 before entering Step 5a. If Step 5.0 marks a story BLOCKED, it skips Step 5a and Step 5b entirely.
 
 ### Step 5a: Diff gate (per story)
 
@@ -655,6 +800,7 @@ Deferred (dependency not yet merged):
 
 Blocked during execution:
   story-005: plan file references missing utility function `buildSearchIndex`
+  story-008: Watchdog killed: stuck (Read x7) + 68% budget elapsed
 ```
 
 **Example with batch verification failure:**
@@ -669,7 +815,7 @@ Batch verification:
   batch 1: BLOCKED (batch 0 failed)
 ```
 
-The `batch` column shows the parallel batch each story ran in (batch 0 = first parallel wave; batch 1 = ran after batch 0 due to conflict; `deferred` = cross-epic dependency not yet merged).
+The `batch` column shows the parallel batch each story ran in (batch 0 = first parallel wave; batch 1 = ran after batch 0 due to conflict; `deferred` = dependency not in this run, not yet merged).
 
 The `verify` column shows the batch verification result for each story's batch. Stories in batches that were blocked by a prior verification failure show `verify: batch N failed`.
 
