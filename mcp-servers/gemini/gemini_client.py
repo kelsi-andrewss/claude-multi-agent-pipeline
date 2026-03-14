@@ -6,7 +6,6 @@ import asyncio
 import fnmatch
 import json
 import os
-import signal
 from pathlib import Path
 
 from constants import (
@@ -59,10 +58,11 @@ async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_inst
         )
     except asyncio.TimeoutError:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+            proc.terminate()
+            await asyncio.wait_for(proc.wait(), timeout=3)
+        except (ProcessLookupError, asyncio.TimeoutError):
             proc.kill()
-        await proc.wait()
+            await proc.wait()
         raise GeminiTimeoutError(f"No response after {GEMINI_TIMEOUT}s")
     if proc.returncode != 0:
         err = stderr.decode().strip()
@@ -79,7 +79,9 @@ def _read_doc(key: str) -> str:
     """Read a project document by DOCUMENTS key. Returns content or error note."""
     if key not in DOCUMENTS:
         return f"[Document '{key}' not found]"
-    file_path = PROJECT_ROOT / DOCUMENTS[key]["path"]
+    file_path = (PROJECT_ROOT / DOCUMENTS[key]["path"]).resolve()
+    if not file_path.is_relative_to(PROJECT_ROOT.resolve()):
+        return f"[Document '{key}' outside project root]"
     if not file_path.exists():
         return f"[File not found: {DOCUMENTS[key]['path']}]"
     return file_path.read_text(encoding="utf-8")
@@ -99,6 +101,8 @@ def _discover_files(
         for p in paths:
             resolved = (_root / p).resolve()
             if not resolved.exists():
+                continue
+            if not resolved.is_relative_to(_root.resolve()):
                 continue
             roots.append(resolved)
     else:

@@ -47,6 +47,12 @@ def startup_migrate(db_path: Path | None = None) -> None:
                 applied_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS id_sequences (
+                prefix TEXT PRIMARY KEY,
+                last_id INTEGER NOT NULL DEFAULT 0
+            )
+        """)
         _ensure_knowledge_tables(conn)
         _ensure_epic_columns(conn)
         _ensure_order_idx_column(conn)
@@ -151,6 +157,24 @@ def startup_migrate(db_path: Path | None = None) -> None:
                 """)
             conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (5)")
 
+        if current < 6:
+            for table, prefix in [
+                ("stories", "story-"),
+                ("epics", "epic-"),
+                ("decisions", "decision-"),
+                ("patterns", "pattern-"),
+            ]:
+                prefix_len = len(prefix)
+                row = conn.execute(
+                    f"SELECT MAX(CAST(SUBSTR(id, {prefix_len + 1}) AS INTEGER)) FROM {table}"
+                ).fetchone()
+                max_val = row[0] or 0
+                conn.execute(
+                    "INSERT OR REPLACE INTO id_sequences (prefix, last_id) VALUES (?, ?)",
+                    (prefix, max_val),
+                )
+            conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (6)")
+
         conn.commit()
     finally:
         conn.close()
@@ -169,13 +193,20 @@ def _validate_dependencies(conn: sqlite3.Connection, story_ids: list[str]) -> li
 
 
 def _next_id(conn: sqlite3.Connection, table: str, prefix: str) -> str:
-    """Generate the next sequential ID for a table (e.g., 'story-186')."""
-    prefix_len = len(prefix)
+    """Generate the next sequential ID for a table (e.g., 'story-186').
+
+    Uses an atomic INSERT...ON CONFLICT DO UPDATE...RETURNING against the
+    id_sequences table to prevent race conditions under concurrent access.
+    The `table` parameter is accepted for backward compatibility but the
+    sequence is keyed on `prefix` alone.
+    """
     row = conn.execute(
-        f"SELECT MAX(CAST(SUBSTR(id, {prefix_len + 1}) AS INTEGER)) FROM {table}"
+        """INSERT INTO id_sequences (prefix, last_id) VALUES (?, 1)
+           ON CONFLICT(prefix) DO UPDATE SET last_id = last_id + 1
+           RETURNING last_id""",
+        (prefix,),
     ).fetchone()
-    next_num = (row[0] or 0) + 1
-    return f"{prefix}{next_num}"
+    return f"{prefix}{row[0]}"
 
 
 def _validate_transition(
