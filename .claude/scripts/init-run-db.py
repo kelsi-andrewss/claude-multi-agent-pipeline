@@ -79,6 +79,17 @@ SCHEMA_DDL = [
         revert_count INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
     )""",
+    """CREATE TABLE IF NOT EXISTS agent_heartbeats (
+        id INTEGER PRIMARY KEY,
+        story_id TEXT NOT NULL,
+        agent_id TEXT,
+        last_tool_call TEXT,
+        tool_call_hash TEXT,
+        repeat_count INTEGER DEFAULT 0,
+        token_estimate INTEGER DEFAULT 0,
+        last_heartbeat TEXT DEFAULT (datetime('now'))
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_heartbeats_story ON agent_heartbeats(story_id)""",
 ]
 
 
