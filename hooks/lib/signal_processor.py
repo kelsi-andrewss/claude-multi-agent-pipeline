@@ -408,6 +408,8 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
         _ensure_correction_groups_table(cursor)
         now = int(time.time())
 
+        grouping_embedding_calls = 0
+
         for correction in all_corrections:
             theme_text = correction["content"]
             theme_key = theme_text[:300]
@@ -417,12 +419,28 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 continue
             seen_themes.add(theme_key)
 
-            # Check for existing group by text prefix match
-            row = cursor.execute(
-                "SELECT id, count, correction_dates, status FROM correction_groups "
-                "WHERE theme = ?",
-                (theme_key,)
-            ).fetchone()
+            # Try semantic matching via embedding before falling back to exact text match
+            matched_group_id = None
+            correction_embedding = None
+            if grouping_embedding_calls < MAX_EMBEDDING_CALLS_PER_SESSION:
+                grouping_embedding_calls += 1
+                correction_embedding = get_embedding(theme_key)
+                if correction_embedding is not None:
+                    matched_group_id = _find_matching_group(cursor, correction_embedding, SIMILARITY_THRESHOLD)
+
+            if matched_group_id is not None:
+                # Semantic match found -- use that group for the update
+                row = cursor.execute(
+                    "SELECT id, count, correction_dates, status FROM correction_groups WHERE id = ?",
+                    (matched_group_id,)
+                ).fetchone()
+            else:
+                # Fallback: exact text prefix match (original behavior)
+                row = cursor.execute(
+                    "SELECT id, count, correction_dates, status FROM correction_groups "
+                    "WHERE theme = ?",
+                    (theme_key,)
+                ).fetchone()
 
             if row:
                 if row[3] in ('promoted', 'dismissed'):
@@ -436,10 +454,11 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                     (new_count, json.dumps(old_dates), new_status, now, row[0])
                 )
             else:
+                embedding_blob = embedding_to_blob(correction_embedding) if correction_embedding is not None else None
                 cursor.execute(
-                    "INSERT INTO correction_groups (theme, status, count, correction_dates, source, created_at, updated_at) "
-                    "VALUES (?, 'accumulating', 1, ?, 'auto', ?, ?)",
-                    (theme_text[:300], json.dumps([today]), now, now)
+                    "INSERT INTO correction_groups (theme, status, count, correction_dates, embedding, source, created_at, updated_at) "
+                    "VALUES (?, 'accumulating', 1, ?, ?, 'auto', ?, ?)",
+                    (theme_text[:300], json.dumps([today]), embedding_blob, now, now)
                 )
 
         conn.commit()
