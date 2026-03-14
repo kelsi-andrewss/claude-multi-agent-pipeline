@@ -53,8 +53,9 @@ Build a prompt containing:
    - `worktree-path` (already known from coder agent)
    - `dev-branch`: `dev`
    - `test_result` from run-stories Step 5b (pass, skip, or pass (spec tests))
+   - `write_files` (JSON array of file paths from the story's write_files field)
 3. ToolSearch instructions: `select:mcp__gemini__pm_update_story,mcp__gemini__pm_update_epic,mcp__gemini__pm_get_story`
-4. The serialization constraint: stories MUST merge sequentially (one `git merge` at a time into dev) to prevent stale-push race conditions. Order by story ID ascending.
+4. The queue-based merge coordination instructions (Phase 0 through Phase 3 below).
 5. The return format (see below)
 
 ### Diff gate (per story, inside subagent)
@@ -69,22 +70,68 @@ Parse the JSON result. If `unexpected_files` is non-empty:
 - Log the discrepancy in the return summary
 - Continue with the merge (non-blocking, same as current behavior)
 
-### Subagent execution loop
+### Subagent execution loop (queue-based)
 
-For each story in the batch (sequential):
+Merges are coordinated through `merge-queue.py`. Non-conflicting stories (no write-target overlap with anything actively merging) proceed immediately; conflicting stories wait until the conflicting predecessor finishes.
+
+**Phase 0 — Stale cleanup** (before enqueuing):
+
+```bash
+STALE=$(python3 ~/.claude/scripts/merge-queue.py status)
+```
+
+Parse the JSON result. For any row with status `merging` or `queued`, cancel it:
+```bash
+python3 ~/.claude/scripts/merge-queue.py cancel --story-id <story_id>
+```
+This prevents stale rows from previous sessions from blocking the current batch.
+
+**Phase 1 — Enqueue all stories:**
+
+For each validated story:
 
 1. **Diff gate** — as above
-2. **Step 2**: set `dev-branch` = `dev`, verify with `git fetch origin dev`
-3. **Step 2.5**: skip smoke test — run-stories already validated in Step 5b. Use the passed-in `test_result`.
-4. **Step 3**: merge story branch into dev (`git merge --no-ff`, push)
-5. **Step 4**: clean up worktree and branches
-6. **Step 5**: update story state via `pm_update_story`, check epic auto-close via `pm_update_epic`
-7. **Step 5.5**: log outcome to `~/.claude/outcomes.md`
+2. **Enqueue**:
+   ```bash
+   ENQUEUE_RESULT=$(python3 ~/.claude/scripts/merge-queue.py enqueue \
+     --story-id <story_id> \
+     --write-targets '<write_files_json>' \
+     --priority <priority>)
+   ```
+   Priority assignment:
+   - quickfix stories: 2
+   - architect stories: 1
+   - all others: 0
 
-If any story hits a merge conflict:
-- Record it as `blocked` with the conflict details
-- Skip to the next story (do NOT abort the batch)
-- The blocked story's worktree is preserved for manual resolution
+**Phase 2 — Drain the queue:**
+
+Initialize `stall_counter = 0`. Loop until queue is empty or stalled:
+
+1. ```bash
+   NEXT_RESULT=$(python3 ~/.claude/scripts/merge-queue.py next)
+   ```
+2. Parse the `action` field:
+   - `"next"`: safe story found. Execute merge (Step 3 logic) for that story.
+     On merge success:
+       ```bash
+       python3 ~/.claude/scripts/merge-queue.py dequeue --story-id <story_id>
+       ```
+       Continue with Steps 4, 5, 5.5 for that story. Increment `merged_via_skip` counter.
+       Reset `stall_counter = 0`.
+     On merge conflict:
+       ```bash
+       python3 ~/.claude/scripts/merge-queue.py cancel --story-id <story_id>
+       ```
+       Record as blocked. Continue draining.
+   - `"none"` with reason `"queue_empty"`: all done. Exit loop.
+   - `"none"` with reason `"all_blocked"`:
+       Increment `stall_counter`.
+       If `stall_counter >= 3`: fall back to sequential — cancel all queued stories,
+       re-enqueue one at a time, merge each before enqueuing next.
+       Increment `stall_fallbacks` counter.
+       Else: continue loop (the next iteration re-checks after the current merge completes).
+
+**Phase 3 — Report** (unchanged Step 6)
 
 ### Required return format
 
@@ -97,7 +144,10 @@ MERGE_SUMMARY:
   warnings: ["story-NNN: unexpected files changed: foo.ts"] | none
   test_results: {story-NNN: "pass", story-MMM: "skip"}
   outcomes_logged: [story-NNN, story-MMM]
+  queue_stats: {enqueued: 5, merged_via_skip: 3, waited: 2, stall_fallbacks: 0}
 ```
+
+`merged_via_skip`: stories that merged immediately because they had no write-target overlap with anything in the queue at the time. This is the throughput metric -- higher means the queue is doing its job.
 
 ### What the main session does after
 
@@ -316,11 +366,7 @@ If the cleanup reports uncommitted changes (in the JSON), include a warning in t
 
 ## Step 5: Update story state (only if story found in DB)
 
-> **Serialization note**: When `/run-stories` calls `/merge-worktree` for multiple DONE
-> stories in the same epic, it must call them **sequentially** — wait for each merge to
-> complete before starting the next. This prevents stale-push race conditions on the dev branch.
->
-> **Batch mode**: When invoked via batch mode (above), the subagent handles serialization internally. The caller does not need to manage merge ordering.
+> **Serialization note**: When batch mode is active, merges are coordinated through the merge queue (`merge-queue.py`). Non-conflicting stories merge concurrently; conflicting stories are serialized by write-target overlap. The queue replaces the previous strict sequential constraint. Single-story invocations bypass the queue entirely.
 
 If `story_id` is non-null:
 

@@ -56,6 +56,15 @@ SCHEMA_DDL = [
         merged_at INTEGER,
         PRIMARY KEY (session_id, story_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS merge_queue (
+        id INTEGER PRIMARY KEY,
+        story_id TEXT NOT NULL,
+        priority INTEGER DEFAULT 0,
+        write_targets TEXT,
+        status TEXT DEFAULT 'queued' CHECK(status IN ('queued','merging','merged','blocked','cancelled')),
+        queued_at TEXT DEFAULT (datetime('now')),
+        merged_at TEXT
+    )""",
 ]
 
 
