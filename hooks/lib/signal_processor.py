@@ -450,6 +450,118 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
     return all_corrections
 
 
+def get_domain_success_rates(db_path):
+    """Query merge_outcomes for per-domain success rates.
+
+    Parses domain_tags JSON array per row, accumulates per-domain success/total counts.
+    Returns dict of {domain: success_rate}. Empty dict if table missing or no records.
+    """
+    if not os.path.isfile(db_path):
+        return {}
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='merge_outcomes'"
+        )
+        if not cursor.fetchone():
+            conn.close()
+            return {}
+        rows = cursor.execute(
+            "SELECT domain_tags, success FROM merge_outcomes WHERE success IS NOT NULL"
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error:
+        return {}
+
+    domain_counts = {}
+    for domain_tags_json, success in rows:
+        try:
+            tags = json.loads(domain_tags_json) if domain_tags_json else []
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for tag in tags:
+            tag = tag.strip()
+            if not tag:
+                continue
+            if tag not in domain_counts:
+                domain_counts[tag] = {"success": 0, "total": 0}
+            domain_counts[tag]["total"] += 1
+            if success:
+                domain_counts[tag]["success"] += 1
+
+    return {
+        domain: counts["success"] / counts["total"]
+        for domain, counts in domain_counts.items()
+        if counts["total"] > 0
+    }
+
+
+def get_model_success_rates(db_path):
+    """Query merge_outcomes grouped by model for per-model success rates.
+
+    Returns dict of {model: success_rate}. Empty dict if table missing or no records.
+    """
+    if not os.path.isfile(db_path):
+        return {}
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='merge_outcomes'"
+        )
+        if not cursor.fetchone():
+            conn.close()
+            return {}
+        rows = cursor.execute(
+            "SELECT model, COUNT(*) as total, SUM(CASE WHEN success THEN 1 ELSE 0 END) as successes "
+            "FROM merge_outcomes WHERE success IS NOT NULL AND model IS NOT NULL "
+            "GROUP BY model"
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error:
+        return {}
+
+    return {
+        model: successes / total
+        for model, total, successes in rows
+        if total > 0
+    }
+
+
+def feed_outcomes_to_scoring(db_path):
+    """Aggregate domain and model success rates for trust calibration.
+
+    Calls get_domain_success_rates and get_model_success_rates, logs warnings
+    for models with success_rate < 0.7 and sample_count >= 5.
+
+    Returns {"domain_rates": dict, "model_rates": dict}.
+    """
+    domain_rates = get_domain_success_rates(db_path)
+    model_rates = get_model_success_rates(db_path)
+
+    if os.path.isfile(db_path):
+        try:
+            conn = sqlite3.connect(db_path, timeout=5)
+            rows = conn.execute(
+                "SELECT model, COUNT(*) as total, SUM(CASE WHEN success THEN 1 ELSE 0 END) as successes "
+                "FROM merge_outcomes WHERE success IS NOT NULL AND model IS NOT NULL "
+                "GROUP BY model"
+            ).fetchall()
+            conn.close()
+            for model, total, successes in rows:
+                if total >= 5 and (successes / total) < 0.7:
+                    print(
+                        f"Warning: model '{model}' success rate {successes/total:.1%} "
+                        f"({successes}/{total}) below 0.7 threshold",
+                        file=sys.stderr,
+                    )
+        except sqlite3.Error:
+            pass
+
+    return {"domain_rates": domain_rates, "model_rates": model_rates}
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]", file=sys.stderr)
