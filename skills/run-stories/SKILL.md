@@ -479,6 +479,26 @@ Write tests from the plan's acceptance criteria and function signatures ONLY. Yo
 
 **When `has-test-files` is false**, skip test agent launch entirely. The coder runs solo with the standard worktree path (no `--code` suffix). This preserves the existing flow for stories without test files.
 
+### Agent health monitoring
+
+After launching all agents in a parallel batch, start the watchdog in the background:
+
+```bash
+python3 ~/.claude/scripts/agent-watchdog.py \
+  --session-id "$SESSION_ID" \
+  --story-ids "<comma-separated story IDs in this batch>" \
+  --agent-pids "<comma-separated PIDs from launched agents, same order>" \
+  --agent-types "<comma-separated agent types: quick-fixer|architect, same order>"
+```
+
+Run this in the background (do not wait for it). Store the watchdog PID.
+
+When collecting results in Step 5, also check watchdog output:
+- If the watchdog killed any agents, those stories are BLOCKED with the kill reason.
+- Include killed agents in the Step 6 report under "Blocked during execution" with prefix "Watchdog killed: ".
+
+On early exit or cleanup, send SIGTERM to the watchdog PID if it's still running.
+
 ### For sequential batches (conflict serialization)
 
 After the previous batch completes, before launching the next story:
@@ -780,6 +800,7 @@ Deferred (dependency not yet merged):
 
 Blocked during execution:
   story-005: plan file references missing utility function `buildSearchIndex`
+  story-008: Watchdog killed: stuck (Read x7) + 68% budget elapsed
 ```
 
 **Example with batch verification failure:**
