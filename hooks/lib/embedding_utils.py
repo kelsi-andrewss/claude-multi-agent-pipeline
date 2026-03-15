@@ -1,5 +1,5 @@
 """Shared embedding utilities for OpenMemory and signal processing."""
-import json, math, os, struct
+import json, math, os, struct, sys
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
@@ -15,7 +15,8 @@ def get_embedding(text):
         with urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
         return data.get("embedding")
-    except (URLError, OSError, json.JSONDecodeError, KeyError):
+    except (URLError, OSError, json.JSONDecodeError, KeyError) as e:
+        print(f"embedding: {type(e).__name__} — {e}", file=sys.stderr)
         return None
 
 
