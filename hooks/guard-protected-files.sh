@@ -52,7 +52,7 @@ if [[ "$IS_PROTECTED" == "0" ]]; then
 fi
 
 # Check for permission sentinel file
-PERMISSION_FILE="$CLAUDE_TEMP_DIR/konva-permission-${SESSION_ID}-${PROTECTED_NAME}"
+PERMISSION_FILE="$CLAUDE_TEMP_DIR/konva-permission-${CLAUDE_SESSION_ID:-unknown}-${PROTECTED_NAME}"
 
 if [[ -f "$PERMISSION_FILE" ]]; then
   # Permission granted for this session
@@ -62,5 +62,5 @@ fi
 # Block — no permission
 echo "BLOCKED: $PROTECTED_NAME is a protected Konva file." >&2
 echo "Grant explicit permission first by saying: \"I grant permission to edit $PROTECTED_NAME\"" >&2
-echo "This causes the main session to write: $CLAUDE_TEMP_DIR/konva-permission-${SESSION_ID}-${PROTECTED_NAME}" >&2
+echo "This causes the main session to write: $CLAUDE_TEMP_DIR/konva-permission-${CLAUDE_SESSION_ID:-unknown}-${PROTECTED_NAME}" >&2
 exit 2

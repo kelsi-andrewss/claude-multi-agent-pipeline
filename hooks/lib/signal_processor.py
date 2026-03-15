@@ -385,7 +385,7 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
         List of correction dicts: [{"turn_idx": int, "content": str, "weight": float}]
     """
     if project_root is None:
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_file)))
+        project_root = os.path.dirname(os.path.dirname(db_file))
 
     all_corrections = []
     seen_themes = set()
@@ -408,6 +408,8 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
         _ensure_correction_groups_table(cursor)
         now = int(time.time())
 
+        grouping_embedding_calls = 0
+
         for correction in all_corrections:
             theme_text = correction["content"]
             theme_key = theme_text[:300]
@@ -417,12 +419,28 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 continue
             seen_themes.add(theme_key)
 
-            # Check for existing group by text prefix match
-            row = cursor.execute(
-                "SELECT id, count, correction_dates, status FROM correction_groups "
-                "WHERE theme = ?",
-                (theme_key,)
-            ).fetchone()
+            # Try semantic matching via embedding before falling back to exact text match
+            matched_group_id = None
+            correction_embedding = None
+            if grouping_embedding_calls < MAX_EMBEDDING_CALLS_PER_SESSION:
+                grouping_embedding_calls += 1
+                correction_embedding = get_embedding(theme_key)
+                if correction_embedding is not None:
+                    matched_group_id = _find_matching_group(cursor, correction_embedding, SIMILARITY_THRESHOLD)
+
+            if matched_group_id is not None:
+                # Semantic match found -- use that group for the update
+                row = cursor.execute(
+                    "SELECT id, count, correction_dates, status FROM correction_groups WHERE id = ?",
+                    (matched_group_id,)
+                ).fetchone()
+            else:
+                # Fallback: exact text prefix match (original behavior)
+                row = cursor.execute(
+                    "SELECT id, count, correction_dates, status FROM correction_groups "
+                    "WHERE theme = ?",
+                    (theme_key,)
+                ).fetchone()
 
             if row:
                 if row[3] in ('promoted', 'dismissed'):
@@ -436,10 +454,11 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                     (new_count, json.dumps(old_dates), new_status, now, row[0])
                 )
             else:
+                embedding_blob = embedding_to_blob(correction_embedding) if correction_embedding is not None else None
                 cursor.execute(
-                    "INSERT INTO correction_groups (theme, status, count, correction_dates, source, created_at, updated_at) "
-                    "VALUES (?, 'accumulating', 1, ?, 'auto', ?, ?)",
-                    (theme_text[:300], json.dumps([today]), now, now)
+                    "INSERT INTO correction_groups (theme, status, count, correction_dates, embedding, source, created_at, updated_at) "
+                    "VALUES (?, 'accumulating', 1, ?, ?, 'auto', ?, ?)",
+                    (theme_text[:300], json.dumps([today]), embedding_blob, now, now)
                 )
 
         conn.commit()
@@ -669,17 +688,34 @@ def recommend_model(trust_level, agent, file_count):
     return "sonnet"
 
 
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]", file=sys.stderr)
-        sys.exit(1)
+def main_logic(transcript_path, db_path, session_id=""):
+    """Core signal processing: correlate corrections with decision_preferences.
 
-    transcript_path = sys.argv[1]
-    db_path = sys.argv[2]
-    session_id = sys.argv[3] if len(sys.argv) > 3 else ""
+    Performs:
+    1. Connect to db_path, query recent decision_preferences
+    2. Parse transcript turns, find decision mention turns
+    3. Run process_session_corrections (correction detection + DB upsert)
+    4. For matched corrections: decrement signal_score by correction weight
+    5. For unmatched decisions: increment signal_score by 0.5 (implicit approval)
+    6. Commit and close
 
+    Args:
+        transcript_path: Path to JSONL transcript file.
+        db_path: Path to epics.db.
+        session_id: Session identifier for filtering decisions.
+
+    Returns:
+        None. Side effects: updates decision_preferences.signal_score/signal_count
+        in db_path, upserts correction_groups via process_session_corrections.
+
+    Exits silently (returns None) when:
+        - transcript_path or db_path don't exist
+        - decision_preferences table missing
+        - No recent decisions found
+        - No transcript turns parsed
+    """
     if not os.path.isfile(transcript_path) or not os.path.isfile(db_path):
-        sys.exit(0)
+        return
 
     try:
         conn = sqlite3.connect(db_path)
@@ -691,9 +727,9 @@ def main():
         )
         if not cursor.fetchone():
             conn.close()
-            sys.exit(0)
+            return
     except Exception:
-        sys.exit(0)
+        return
 
     now = int(time.time())
     day_ago = now - 86400
@@ -716,20 +752,20 @@ def main():
         decisions = [dict(row) for row in cursor.fetchall()]
     except Exception:
         conn.close()
-        sys.exit(0)
+        return
 
     if not decisions:
         conn.close()
-        sys.exit(0)
+        return
 
     turns = parse_transcript_turns(transcript_path)
     if not turns:
         conn.close()
-        sys.exit(0)
+        return
 
     find_decision_mention_turns(decisions, turns)
 
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(db_path)))
+    project_root = os.path.dirname(os.path.dirname(db_path))
     corrections = process_session_corrections(transcript_path, db_path, session_id, project_root)
 
     matched_decision_ids = set()
@@ -772,6 +808,17 @@ def main():
 
     conn.commit()
     conn.close()
+
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: signal_processor.py <transcript_path> <epics_db_path> [session_id]", file=sys.stderr)
+        sys.exit(1)
+
+    transcript_path = sys.argv[1]
+    db_path = sys.argv[2]
+    session_id = sys.argv[3] if len(sys.argv) > 3 else ""
+    main_logic(transcript_path, db_path, session_id)
 
 
 if __name__ == "__main__":

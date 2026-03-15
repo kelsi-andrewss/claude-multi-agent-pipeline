@@ -17,6 +17,34 @@ fi
 echo "Hook profile: $ACTIVE_PROFILE"
 echo ""
 
+# Reconciliation: warn about dead hook references in settings.json
+(
+  python3 - "$HOME/.claude/settings.json" <<'RECONCILEEOF'
+import json, os, sys
+try:
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+    hooks = cfg.get("hooks", {})
+    home = os.path.expanduser("~")
+    dead = []
+    for event, entries in hooks.items():
+        for entry in entries:
+            for hook in entry.get("hooks", []):
+                cmd = hook.get("command", "")
+                resolved = cmd.replace("~", home, 1) if cmd.startswith("~") else cmd
+                if resolved and not os.path.isfile(resolved):
+                    dead.append(cmd)
+    if dead:
+        print("=== DEAD HOOK REFERENCES IN settings.json ===")
+        for d in dead:
+            print(f"  WARN: {d} does not exist on disk")
+        print("  Run story cleanup to remove these entries.")
+        print("")
+except Exception:
+    pass  # Never block session start
+RECONCILEEOF
+) 2>/dev/null || true
+
 echo "=== SESSION CONTEXT: MANDATORY PRE-READ ==="
 echo "The following files have been loaded into your context. You MUST treat their"
 echo "rules as active constraints before responding to any message this session."
@@ -48,9 +76,51 @@ conn.execute(
     "SET text = 'User corrected ' || count || 'x on: ' || substr(theme, 1, 200) "
     "WHERE status = 'promoted' AND (text IS NULL OR text = '')"
 )
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS decision_preferences (
+        id TEXT PRIMARY KEY,
+        decision_type TEXT NOT NULL,
+        context TEXT NOT NULL,
+        chosen_path TEXT NOT NULL,
+        alternatives TEXT,
+        session_id TEXT,
+        confidence REAL DEFAULT 0.5,
+        signal_score REAL DEFAULT 0,
+        signal_count INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )
+""")
+conn.execute("CREATE INDEX IF NOT EXISTS idx_dp_type ON decision_preferences(decision_type)")
+conn.execute("CREATE INDEX IF NOT EXISTS idx_dp_created ON decision_preferences(created_at)")
 conn.commit()
 conn.close()
 MIGRATEEOF
+
+  # One-time: fix correction_groups count mismatches (count should equal unique dates)
+  python3 - "$DB_FILE_PREFS" <<'COUNTFIXEOF'
+import json, sqlite3, sys
+try:
+    conn = sqlite3.connect(sys.argv[1], timeout=5)
+    rows = conn.execute(
+        "SELECT rowid, correction_dates, count FROM correction_groups"
+    ).fetchall()
+    fixes = []
+    for rowid, dates_json, stored_count in rows:
+        try:
+            dates = json.loads(dates_json) if dates_json else []
+        except (json.JSONDecodeError, TypeError):
+            continue
+        actual = len(set(dates))
+        if actual != stored_count:
+            fixes.append((actual, rowid))
+    if fixes:
+        conn.executemany("UPDATE correction_groups SET count=? WHERE rowid=?", fixes)
+        conn.commit()
+    conn.close()
+except Exception:
+    pass
+COUNTFIXEOF
   fi
 
   # Render behavioral preferences from DB to sidecar file
@@ -104,6 +174,38 @@ RENDERPREFSEOF
     echo "" >> "$RENDERED_PREFS"
     echo "_No database available._" >> "$RENDERED_PREFS"
   fi
+
+  # Render decision health scores (negative signals) to sidecar
+  if [[ -f "$DB_FILE_PREFS" ]]; then
+  python3 - "$DB_FILE_PREFS" "$RENDERED_PREFS" <<'DECISIONHEALTHEOF'
+import sqlite3, sys
+try:
+    db_path = sys.argv[1]
+    out_path = sys.argv[2]
+    conn = sqlite3.connect(db_path, timeout=5)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='decision_preferences'")
+    if not cur.fetchone():
+        conn.close()
+        sys.exit(0)
+    cur.execute(
+        "SELECT decision_type, context, signal_score FROM decision_preferences "
+        "WHERE signal_score < 0 ORDER BY signal_score ASC LIMIT 10"
+    )
+    rows = cur.fetchall()
+    conn.close()
+    if not rows:
+        sys.exit(0)
+    with open(out_path, "a") as f:
+        f.write("\n\n# Decision Health\n\n")
+        for decision_type, context, signal_score in rows:
+            ctx = context[:80] + "..." if len(context) > 80 else context
+            f.write(f"- {decision_type}: {ctx} (signal: {signal_score})\n")
+except Exception:
+    pass
+DECISIONHEALTHEOF
+  fi
+
   if [[ -f "$HOME/.claude/session-handoff.md" ]]; then
     echo "=== SESSION HANDOFF (from previous session) ==="
     cat "$HOME/.claude/session-handoff.md"

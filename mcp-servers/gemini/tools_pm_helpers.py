@@ -424,10 +424,7 @@ def _ensure_knowledge_tables(conn: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             description TEXT NOT NULL,
-            category TEXT NOT NULL CHECK (category IN (
-                'react', 'firebase', 'css', 'konva', 'architecture', 'general',
-                'python-mcp', 'skill-markdown', 'claude-md'
-            )),
+            category TEXT NOT NULL,
             severity TEXT DEFAULT 'must' CHECK (severity IN ('must', 'should', 'prefer')),
             source TEXT,
             status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deprecated')),
