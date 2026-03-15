@@ -39,6 +39,9 @@ _r_test(mcp)
 from tools_analysis import register as _r_analysis
 _r_analysis(mcp)
 
+from tools_design import register as _r_design
+_r_design(mcp)
+
 from tools_pm_read import register as _r_pm_read
 _r_pm_read(mcp)
 

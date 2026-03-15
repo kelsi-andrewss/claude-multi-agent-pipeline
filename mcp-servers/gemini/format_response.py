@@ -852,3 +852,25 @@ def fmt_analyze(text: str) -> str:
 
     path = _write_detail("analyze.md", text)
     return f"Verdict: {verdict} ({finding_count} findings). → {path}"
+
+
+def fmt_design(text: str, component_name: str) -> str:
+    """Format design spec response — writes detail file, returns one-liner."""
+    if not text or text.startswith("[gemini error") or text.startswith("[gemini parse error"):
+        return text
+
+    import re
+
+    section_count = text.count("\n## ") + (1 if text.startswith("## ") else 0)
+
+    framework = "unknown"
+    header = text[:500]
+    for fw in ("Flutter", "React", "Vue"):
+        if fw in header:
+            framework = fw
+            break
+
+    sanitized = re.sub(r"[^a-z0-9]+", "-", component_name.lower()).strip("-")
+    filename = f"design-{sanitized}.md"
+    path = _write_detail(filename, text)
+    return f"Design spec for {component_name}: {section_count} sections, {framework}. -> {path}"
