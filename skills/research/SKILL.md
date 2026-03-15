@@ -116,23 +116,34 @@ Output: array of 4-6 research angle objects, each with merged queries and source
 
 ## Step 4: Fan-out -- parallel research (Gemini + Claude)
 
-Both models research simultaneously. Launch everything in a single message.
+Both models research simultaneously. **Launch ALL agents (gemini-researcher and web-researcher) in a SINGLE message so they all run in parallel.**
 
-### 4a: Gemini research (via gemini_chat)
+### 4a: Gemini research (via gemini-researcher agents)
 
-For each angle, call `gemini_chat` with grounded search. Gemini has native Google Search grounding -- it searches the web as part of its response.
-
-Call `gemini_chat` once per angle (up to 6 calls, launched in parallel if the tool supports it, otherwise sequential):
+Launch one `gemini-researcher` background agent per angle. The `gemini-researcher` agent type has access to `mcp__gemini__web_search` and `mcp__gemini__gemini_chat` (with native Google Search grounding).
 
 ```
-Research this topic thoroughly using web search grounding.
+For each angle:
+  Agent(subagent_type="gemini-researcher", run_in_background=true, prompt=<brief>)
+```
+
+**Agent research brief:**
+
+```
+You are a deep web researcher using Gemini tools. Research this angle thoroughly.
 
 Angle: <angle.angle>
 Hypothesis: <angle.hypothesis>
 Scope boundary (do NOT research): <angle.scope_boundary>
 Starting queries: <angle.queries, one per line>
 
-Return your findings as JSON:
+Instructions:
+- Use web_search for each query in the starting queries list above.
+- After completing web searches, use gemini_chat to synthesize your findings into a structured result.
+- Prefer official documentation, academic papers, and primary sources over SEO content.
+- Be specific: version numbers, API endpoints, exact limits, dates. Every claim must cite a source URL.
+
+When done, return ONLY a JSON object (no markdown fencing, no preamble):
 {
   "angle": "<angle name>",
   "findings": [
@@ -141,24 +152,22 @@ Return your findings as JSON:
   "key_insights": ["top 3 takeaways"],
   "gaps": ["topics you couldn't find reliable information on"]
 }
-
-Be specific. Include version numbers, API endpoints, exact limits, dates. Every claim must cite a source URL.
 ```
 
 Budget:
-- Normal: 1 `gemini_chat` call per angle
-- `--deep`: 2 `gemini_chat` calls per angle (first broad, second drilling into findings)
+- Normal: 1 `gemini-researcher` agent per angle (agent decides how many web_search calls internally)
+- `--deep`: 2 `gemini-researcher` agents per angle (first agent does broad search, second drills into findings)
 
-### 4b: Claude research (via background subagents)
+### 4b: Claude research (via web-researcher agents)
 
-Launch one `general-purpose` subagent per angle, all in the same message with `run_in_background: true`:
+Launch one `web-researcher` background agent per angle. The `web-researcher` agent type has WebSearch and WebFetch tools built in.
 
 ```
 For each angle:
-  Agent(subagent_type="general-purpose", run_in_background=true, prompt=<brief>)
+  Agent(subagent_type="web-researcher", run_in_background=true, prompt=<brief>)
 ```
 
-**Subagent research brief:**
+**Agent research brief:**
 
 ```
 You are a web researcher. Find authoritative sources on a specific topic and extract
@@ -171,7 +180,6 @@ Starting queries: <angle.queries, one per line>
 
 Instructions:
 - Use WebSearch to find sources, then WebFetch to extract specific facts from the best results.
-- Run WebSearch calls SEQUENTIALLY (parallel searches trigger 429 rate limits).
 - For WebFetch, ask specific extraction questions -- not "summarize this page."
 - Prefer official documentation, academic papers, and primary sources over SEO content.
 - Be specific: version numbers, API shapes, exact limits, dates, code examples.
@@ -191,38 +199,38 @@ When done, return ONLY a JSON object (no markdown fencing, no preamble):
 ```
 
 Budget values:
-- Normal: `<SEARCH_BUDGET>` = "2-3", `<FETCH_BUDGET>` = "2"
-- `--deep`: `<SEARCH_BUDGET>` = "4-6", `<FETCH_BUDGET>` = "4"
+- Normal: `<SEARCH_BUDGET>` = "5-8", `<FETCH_BUDGET>` = "3"
+- `--deep`: `<SEARCH_BUDGET>` = "10-15", `<FETCH_BUDGET>` = "6"
 
 ---
 
 ## Step 5: Collect results
 
-Wait for all Claude subagents to complete. Gemini results are already available (inline calls).
+Wait for ALL background agents (both gemini-researcher and web-researcher) to complete.
 
 **For each angle, you now have up to two result sets:**
-- Gemini's findings (from gemini_chat response)
-- Claude subagent's findings (from agent return)
+- Gemini findings (from gemini-researcher agent)
+- Claude findings (from web-researcher agent)
 
 **Handle failures:**
-- If a Gemini call fails: proceed with Claude results for that angle.
-- If a Claude subagent fails or returns malformed output: proceed with Gemini results for that angle.
+- If a Gemini agent fails: proceed with Claude results for that angle.
+- If a Claude agent fails or returns malformed output: proceed with Gemini results for that angle.
 - If both fail for an angle: add the angle to `gaps`, set `partial_research: true`.
 - If ALL angles fail completely: write artifact with empty findings, full gaps, `partial_research: true`. Report failure.
 
 ---
 
-## Step 6: Fan-in -- synthesis and merge
+## Step 6: Fan-in -- merge and flag
 
-### 6a: Deduplicate findings
+The presearch pipeline downstream does the real synthesis. Research just needs to merge, dedup, and flag.
 
-Compare claims across Gemini and Claude results for each angle:
-- Same claim from both models: merge, keep higher-confidence version, collect all source URLs, set `agent_attribution: "both"`.
+### 6a: Merge findings per angle
+
+For each angle, merge Gemini and Claude results:
+- Same URL from both models: merge into one entry, keep higher-confidence version, set `agent_attribution: "both"`.
 - Unique claims: pass through, set `agent_attribution: "gemini"` or `"claude"`.
 
-Then deduplicate across angles -- claims about the same fact from different angles merge.
-
-Group findings by theme (not by source angle) for the synthesized output.
+Do NOT regroup by theme -- keep findings organized by angle. The presearch/briefing pipeline handles thematic grouping.
 
 ### 6b: Detect conflicts
 
@@ -232,21 +240,11 @@ When Gemini and Claude report contradictory claims about the same subject:
 - Do NOT silently resolve -- record both sides in the `conflicts` array.
 - Additive merge with conflict flags, not consensus filtering (decision-64).
 
-### 6c: Track citations
-
-- Every claim in synthesized_findings must trace to at least one source URL.
-- Deduplicate URLs across all results.
-- Rate each source: `authoritative` (official docs, academic), `informative` (quality blog, conference talk), `low-quality` (SEO content, outdated).
-
-### 6d: Identify gaps
+### 6c: Identify gaps
 
 - Angles that produced thin results (fewer than 2 findings from both models combined).
 - Topics both models flagged as under-documented.
-- Claims with only low-quality sources.
-
-**Source quality bias mitigation:** If a finding is supported only by SEO-style content, downgrade confidence to `low` and add the topic to gaps.
-
-**Context bloat mitigation:** The final `synthesized_findings` array should contain 10-20 themed findings, not a dump of all raw claims.
+- Claims with only low-quality sources -- downgrade confidence to `low` and add the topic to gaps.
 
 ---
 
@@ -371,8 +369,8 @@ When /presearch completes, the full pipeline is done. Do NOT print an additional
 - **No topic and no --scope**: AskUser prompt fires in Step 0.
 - **Scope artifact does not exist**: error with "File not found: <path>. Run /scope first or provide a topic directly."
 - **Gemini unavailable**: proceed with Claude-only research. Log to gaps. Degraded mode, not failure (decision-65).
-- **All subagents fail but Gemini succeeds**: write artifact with Gemini-only findings. Set `partial_research: true`.
-- **All Gemini calls fail but subagents succeed**: write artifact with Claude-only findings. Set `partial_research: true`.
+- **All web-researcher agents fail but gemini-researcher agents succeed**: write artifact with Gemini-only findings. Set `partial_research: true`.
+- **All gemini-researcher agents fail but web-researcher agents succeed**: write artifact with Claude-only findings. Set `partial_research: true`.
 - **Fewer than 4 angles after dedup**: use what is available. Do not pad.
-- **Subagent returns malformed output**: treat as failed for that angle. Add to gaps.
-- **Rate limiting on WebSearch**: subagents handle their own retries.
+- **Agent returns malformed output**: treat as failed for that angle. Add to gaps.
+- **Rate limiting on WebSearch**: web-researcher agents handle their own retries.
