@@ -127,18 +127,19 @@ COUNTFIXEOF
   RENDERED_PREFS="$HOME/.claude/.claude/rendered-prefs.md"
   if [[ -f "$DB_FILE_PREFS" ]]; then
   python3 - "$DB_FILE_PREFS" "$RENDERED_PREFS" <<'RENDERPREFSEOF'
-import subprocess, sys
+import sqlite3, sys
 
 db_path = sys.argv[1]
 out_path = sys.argv[2]
 
-def query_db(sql):
+def query_db(sql, params=()):
     try:
-        result = subprocess.run(
-            ["sqlite3", "-separator", "\t", db_path, sql],
-            capture_output=True, text=True, timeout=5
-        )
-        return [line.split("\t") for line in result.stdout.strip().splitlines() if line.strip()]
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
+        rows = conn.execute(sql, params).fetchall()
+        conn.close()
+        return rows
     except Exception:
         return []
 
@@ -216,7 +217,7 @@ DECISIONHEALTHEOF
   OM_DB="$HOME/.claude/.claude/openmemory.sqlite"
   if [[ -f "$OM_DB" ]]; then
   python3 - "$OM_DB" <<'OMCOMPACTEOF'
-import os, subprocess, sys, time
+import os, sys, time
 
 om_db = sys.argv[1]
 now = time.time()
@@ -238,13 +239,15 @@ DECAY_SCORE = (
     f"* (({int(now)} - COALESCE(last_seen_at, created_at)) / 86400.0))"
 )
 
-def om_query(sql):
+def om_query(sql, params=()):
     try:
-        r = subprocess.run(
-            ["sqlite3", "-separator", "\t", om_db, sql],
-            capture_output=True, text=True, timeout=5
-        )
-        return [line.split("\t") for line in r.stdout.strip().splitlines() if line.strip()]
+        import sqlite3
+        conn = sqlite3.connect(om_db, timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
+        rows = conn.execute(sql, params).fetchall()
+        conn.close()
+        return rows
     except Exception:
         return []
 
@@ -310,7 +313,7 @@ TRUSTEOF
 
   if [[ -f "$DB_FILE" ]]; then
   python3 - "$DB_FILE" "$HOME/.claude" <<'PYEOF'
-import subprocess, sys, time
+import sqlite3, subprocess, sys, time
 from datetime import datetime, timezone
 
 STALE_SECONDS = 86400  # 24 hours
@@ -321,13 +324,14 @@ now = time.time()
 db_path = sys.argv[1]
 project_root = sys.argv[2]
 
-def query_db(sql):
+def query_db(sql, params=()):
     try:
-        result = subprocess.run(
-            ["sqlite3", "-separator", "\t", db_path, sql],
-            capture_output=True, text=True, timeout=5
-        )
-        return [line.split("\t") for line in result.stdout.strip().splitlines() if line.strip()]
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
+        rows = conn.execute(sql, params).fetchall()
+        conn.close()
+        return rows
     except Exception:
         return []
 
@@ -416,17 +420,18 @@ PYEOF
   # Correction patterns — from correction_groups DB table
   if [[ -f "$DB_FILE" ]]; then
   python3 - "$DB_FILE" <<'CORRPATTERNSEOF'
-import subprocess, sys
+import sqlite3, sys
 
 db_path = sys.argv[1]
 
-def query_db(sql):
+def query_db(sql, params=()):
     try:
-        result = subprocess.run(
-            ["sqlite3", "-separator", "\t", db_path, sql],
-            capture_output=True, text=True, timeout=5
-        )
-        return [line.split("\t") for line in result.stdout.strip().splitlines() if line.strip()]
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
+        rows = conn.execute(sql, params).fetchall()
+        conn.close()
+        return rows
     except Exception:
         return []
 
