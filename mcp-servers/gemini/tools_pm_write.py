@@ -160,13 +160,9 @@ def register(mcp):
                 _set_story_deps(conn, story_id, depends_on)
 
             created_tasks = []
-            for i, task_title in enumerate(tasks or [], start=1):
-                task_id = f"t{i}"
-                conn.execute(
-                    "INSERT INTO tasks (id, story_id, title, state, blocked_by) VALUES (?, ?, ?, 'todo', NULL)",
-                    (task_id, story_id, task_title)
-                )
-                created_tasks.append({"id": task_id, "title": task_title, "state": "todo"})
+            for task_title in tasks or []:
+                task = _add_task_to_story(conn, story_id, task_title)
+                created_tasks.append({"id": task["id"], "title": task_title, "state": "todo"})
 
             result = {
                 "id": story_id, "epic_id": target_epic, "title": title,
@@ -335,13 +331,9 @@ def register(mcp):
                 )
                 created_stories.append({"id": sid, "title": s["title"], "epic_id": story_epic})
 
-                for i, task_title in enumerate(s.get("tasks") or [], start=1):
-                    task_id = f"t{i}"
-                    conn.execute(
-                        "INSERT INTO tasks (id, story_id, title, state, blocked_by) VALUES (?, ?, ?, 'todo', NULL)",
-                        (task_id, sid, task_title)
-                    )
-                    created_tasks.append({"id": task_id, "story_id": sid, "title": task_title})
+                for task_title in s.get("tasks") or []:
+                    task = _add_task_to_story(conn, sid, task_title)
+                    created_tasks.append({"id": task["id"], "story_id": sid, "title": task_title})
 
             return fmt_plan_items({
                 "phase": "committed",

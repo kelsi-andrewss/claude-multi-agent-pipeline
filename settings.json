@@ -11,8 +11,8 @@
       "Bash(~/.claude/hooks/track-skill-changes.sh*)",
       "mcp__openmemory__openmemory_store",
       "mcp__openmemory__openmemory_query",
-      "Bash(/Users/kelsiandrews/.claude/tracking/stop-hook.sh*)",
-      "Bash(/Users/kelsiandrews/.claude/tracking/subagent-stop-hook.sh*)",
+      "Bash(~/.claude/tracking/stop-hook.sh*)",
+      "Bash(~/.claude/tracking/subagent-stop-hook.sh*)",
       "Bash(~/.claude/hooks/inject-tier2-context.sh*)"
     ],
     "defaultMode": "default"
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/tracking/stop-hook.sh",
+            "command": "~/.claude/tracking/stop-hook.sh",
             "timeout": 30,
             "async": true
           }
@@ -142,7 +142,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/tracking/stop-hook.sh --backfill-only",
+            "command": "~/.claude/tracking/stop-hook.sh --backfill-only",
             "timeout": 60,
             "async": true
           }
@@ -154,7 +154,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/kelsiandrews/.claude/tracking/subagent-stop-hook.sh",
+            "command": "~/.claude/tracking/subagent-stop-hook.sh",
             "timeout": 30,
             "async": true
           }
