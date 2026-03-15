@@ -256,6 +256,7 @@ def find_decision_mention_turns(decisions, turns):
 
 SIMILARITY_THRESHOLD = 0.85
 PROMOTION_THRESHOLD = 3
+RULE_THRESHOLD = 5
 
 CORRECTION_PROTOTYPES = [
     "stop doing that, I told you not to",
@@ -368,6 +369,71 @@ def _check_promoted(theme_text, project_root):
     return False
 
 
+def generate_rule(theme_text):
+    """Convert a correction theme into a positive-instruction rule.
+
+    Extracts the behavioral pattern from the correction text and reframes it
+    as a directive. E.g. "don't skip research" -> "When research is applicable, always do research first."
+    """
+    text = theme_text.strip().rstrip('.')
+    lower = text.lower()
+
+    # Strip leading date prefixes like "2026-03-04 — "
+    date_stripped = re.sub(r'^\d{4}-\d{2}-\d{2}\s*[—–-]\s*', '', text)
+    if date_stripped != text:
+        text = date_stripped.strip()
+        lower = text.lower()
+
+    # Strip leading/trailing expletives like "bro", "omg", "wtf", etc.
+    text = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', text, flags=re.IGNORECASE).strip()
+    text = re.sub(r'[,!?\s]*(bro|omg|omfg|wtf|bruh|dude|yo)[.!?]*$', '', text, flags=re.IGNORECASE).strip()
+    lower = text.lower()
+
+    # Pattern: "don't/do not/stop <doing X>" -> "When <X> is relevant, always <do X>"
+    neg_match = re.match(r"(?:don'?t|do not|stop|quit|never)\s+(.+)", lower)
+    if neg_match:
+        action = neg_match.group(1).strip().rstrip('.')
+        return f"When {action} is the topic, always avoid it per user preference"
+
+    # Pattern: "why didn't you / why aren't you / why do you keep" -> extract the expected action
+    # "why are you X-ing" -> complaint about current behavior, stop doing X
+    why_are_match = re.match(r"why are you\s+(.+)", lower)
+    if why_are_match:
+        bad_action = why_are_match.group(1).strip().rstrip('?').rstrip('.')
+        return f"When relevant, never {bad_action}"
+
+    why_match = re.match(r"why (?:didn'?t|don'?t|aren'?t|isn'?t|won'?t|do) (?:you|u)\s+(.+)", lower)
+    if why_match:
+        rest = why_match.group(1).strip().rstrip('?').rstrip('.')
+        # "why do you keep X" -> "never X"
+        keep_match = re.match(r"keep\s+(.+)", rest)
+        if keep_match:
+            bad_action = keep_match.group(1).strip()
+            return f"When relevant, never {bad_action}"
+        return f"When applicable, always {rest}"
+
+    # Pattern: "use X instead" / "do X" -> direct instruction
+    use_match = re.match(r"(?:use|do|run|call|try)\s+(.+?)(?:\s+instead)?$", lower)
+    if use_match:
+        action = use_match.group(1).strip()
+        return f"When applicable, always use {action}"
+
+    # Pattern: "this is for X" / "no. this is for X"
+    this_match = re.match(r"(?:no[.!,]?\s*)?this is (?:for\s+)?(.+)", lower)
+    if this_match:
+        purpose = this_match.group(1).strip().rstrip('.')
+        return f"When this context arises, remember: this is for {purpose}"
+
+    # Pattern: "X comes first" / "X before Y"
+    first_match = re.search(r'(\w[\w\s]*?)\s+comes?\s+first', lower)
+    if first_match:
+        priority = first_match.group(1).strip()
+        return f"When applicable, always do {priority} first"
+
+    # Fallback: frame the correction text as a direct rule
+    return f"Per repeated user correction: {text}"
+
+
 def process_session_corrections(transcript_path, db_file, session_id="", project_root=None):
     """Unified entry point: detect corrections from transcript and upsert to correction_groups.
 
@@ -443,15 +509,34 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 ).fetchone()
 
             if row:
-                if row[3] in ('promoted', 'dismissed'):
+                if row[3] == 'dismissed':
+                    continue
+                if row[3] == 'promoted':
+                    # Reinforce: update timestamp without incrementing count
+                    cursor.execute(
+                        "UPDATE correction_groups SET updated_at=? WHERE id=?",
+                        (now, row[0])
+                    )
                     continue
                 new_count = row[1] + 1
                 old_dates = json.loads(row[2]) if row[2] else []
                 old_dates.append(today)
                 new_status = 'pending_promotion' if new_count >= PROMOTION_THRESHOLD else row[3]
+                updates = {
+                    'count': new_count, 'correction_dates': json.dumps(old_dates),
+                    'status': new_status, 'updated_at': now,
+                }
+                # At rule threshold, auto-generate actionable rule text
+                if new_count >= RULE_THRESHOLD:
+                    rule_text = generate_rule(theme_text)
+                    updates['text'] = f"RULE: {rule_text} (Auto-generated from {new_count} corrections)"
                 cursor.execute(
-                    "UPDATE correction_groups SET count=?, correction_dates=?, status=?, updated_at=? WHERE id=?",
-                    (new_count, json.dumps(old_dates), new_status, now, row[0])
+                    "UPDATE correction_groups SET count=?, correction_dates=?, status=?, updated_at=?"
+                    + (", text=?" if 'text' in updates else "")
+                    + " WHERE id=?",
+                    tuple(updates[k] for k in ['count', 'correction_dates', 'status', 'updated_at']
+                          + (['text'] if 'text' in updates else []))
+                    + (row[0],)
                 )
             else:
                 embedding_blob = embedding_to_blob(correction_embedding) if correction_embedding is not None else None
