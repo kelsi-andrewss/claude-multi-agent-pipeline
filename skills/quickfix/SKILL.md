@@ -54,8 +54,8 @@ If `context_path` was not provided, skip to Step 3.
 
 A quickfix is valid when ALL of the following hold:
 
-- **File count**: <=3 write-target files mentioned or implied by the description
-- **No schema changes**: No Firestore field additions, no DB migrations, no API contract changes
+- **File count**: <=5 write-target files mentioned or implied by the description
+- **No breaking schema changes**: Additive field additions OK (new Firestore fields, new optional API params). Renames, deletes, and type changes to existing fields are blocked — use /ship for those.
 - **No AI tool changes**: No toolDeclarations, toolExecutors, or system prompt modifications
 - **No protected file touches**: Read `<project-root>/.claude/protected-files.md` if it exists. None of the target files appear in the protected list.
 
@@ -68,7 +68,44 @@ Do NOT fall back to /ship — that is the orchestrator's decision, not this skil
 
 ## Step 4: Read target files
 
-Identify the 1-3 files the fix will touch. Read them to understand current state. If files don't exist yet, note that — they will be created.
+Identify the 1-5 files the fix will touch. Read them to understand current state. If files don't exist yet, note that — they will be created.
+
+---
+
+## Step 4b: Plan-optional path (<=2 write targets)
+
+If the fix touches **2 or fewer** write-target files, skip Step 5 (plan file writing). Instead, embed the implementation instructions directly into the coder prompt in Step 7.
+
+The embedded instructions must include:
+- **Description**: The fix description from Step 1
+- **Write targets**: The 1-2 files being modified
+- **What to change per file**: Specific changes derived from the description and file reads in Step 4
+- **Acceptance criteria**: Observable behavior that confirms the fix
+
+When using this path, the coder prompt in Step 7 replaces `Plan file: plans/<slug>.md` with:
+
+```
+Plan file: (inline — no plan file)
+
+## Inline plan
+
+### Description
+<description>
+
+### Write targets
+| File | Change |
+|---|---|
+| <file> | <what changes> |
+
+<If research_context exists:>
+### Research context
+<bullet points from artifact chain>
+
+### Acceptance criteria
+- <observable behavior>
+```
+
+If the fix touches **3 or more** write-target files, proceed to Step 5 as normal.
 
 ---
 
@@ -128,7 +165,7 @@ git checkout dev && git checkout -b quickfix/<slug>
 
 ## Step 7: Launch quick-fixer
 
-Launch a `quick-fixer` background agent (model selection: Sonnet by default; Haiku only if ALL Haiku threshold criteria from ORCHESTRATION SS2 are met — never Haiku for pipeline files) in a worktree on `quickfix/<slug>` with the plan file as input.
+Launch a `quick-fixer` background agent (model: Sonnet, always) in a worktree on `quickfix/<slug>` with the plan file (or inline plan from Step 4b) as input.
 
 Use the standard coder prompt from run-stories Step 4:
 
@@ -192,9 +229,6 @@ Gemini is a research tool for the orchestrator — not available to coders.
    - Success: "DONE: quickfix/<slug> pushed. Commit: <short-hash>. Files changed: <list>. Notes: <any>"
    - Failure: "BLOCKED: <clear reason why the fix could not be completed>"
 ```
-
-**Model-specific warning for Haiku** (append to agent-approach when using Haiku):
-> "CRITICAL: PRESERVE existing patterns. When extending or expanding code (regexes, arrays, switch cases, config objects), ADD new entries — never replace the existing block wholesale. Read the target section first, then insert your additions alongside what's already there."
 
 ---
 
