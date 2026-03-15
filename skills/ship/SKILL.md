@@ -18,7 +18,7 @@ User has requested: `/ship {{args}}`
 Parse `{{args}}` to determine the mode:
 
 **Flags:**
-- If `--quickfix` appears anywhere in args, set `quickfix_mode = true`. Strip from args. Triggers lightweight quickfix path (Step 0b) — skips the full pipeline.
+- If `--quickfix` appears anywhere in args, set `quickfix_mode = true` and `quickfix_forced = true`. Strip from args. Force-override: bypasses auto-classification and always routes to quickfix (Step 0b).
 - If `--quick` appears anywhere in args, set `skip_validate = true` and `skip_verify = true`. Strip from args. Skips plan validation (critique) and integrated review/verify. Per-story testing always runs (it's a run-stories concern, not a ship concern).
 - If `--argue` appears anywhere in args, set `use_argue = true`. Strip from args. Uses adversarial debate instead of single-pass review for plan validation.
 
@@ -33,7 +33,19 @@ Parse `{{args}}` to determine the mode:
    - `by YYYY-MM-DD` → `target_date`
    - Remaining numbered or comma-separated items → `items` list
 
-   **Sufficiency check (inline mode only):** After parsing, check for actionable signals:
+   **Auto-classification (inline mode only):** After parsing, if `quickfix_mode` is not already set by the `--quickfix` flag, classify the task to determine routing. Scan the full description (title + items) for:
+
+   - **File count**: Count tokens containing `/` or file extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.md`, `.json`, `.yaml`, `.yml`, `.css`, `.html`, `.sh`, `.sql`). Store as `detected_file_count`.
+   - **Schema keywords**: Check for any of: `Firestore`, `migration`, `schema`, `field rename`, `field delete`, `DB migration`, `API contract`, `type change`. (Note: `add field` alone is NOT a disqualifier — additive schema changes are quickfix-eligible.)
+   - **AI tool keywords**: Check for any of: `toolDeclarations`, `toolExecutors`, `system prompt`.
+   - **Protected file mentions**: If `<project-root>/.claude/protected-files.md` exists, read it and check whether any detected file paths appear in the protected list.
+
+   Classification result:
+   - If `detected_file_count` is 0 (no file tokens found): set `quickfix_eligible = false`. Log: `"Could not determine file targets from description — using full pipeline."`
+   - If `detected_file_count` is 1-5 AND no schema keywords AND no AI tool keywords AND no protected file mentions: set `quickfix_eligible = true` and `quickfix_mode = true`. Log: `"Auto-routed to quickfix (<=N files, no schema/AI/protected)."`
+   - Otherwise: set `quickfix_eligible = false`. Proceed to sufficiency check below.
+
+   **Sufficiency check (inline mode only):** After classification, check for actionable signals:
    - Specific technologies/frameworks mentioned? (e.g., "Stripe", "React", "Firebase")
    - Existing file paths referenced?
    - Numbered feature items (≥2)?
@@ -51,18 +63,24 @@ Parse `{{args}}` to determine the mode:
 
 ## Step 0b: Quickfix dispatch
 
-**Run only when `quickfix_mode = true`. On success, skip Steps 1–6 entirely.**
+**Run when `quickfix_mode = true` (from `--quickfix` flag or auto-classification). On success, skip Steps 1-6 entirely.**
+
+Print routing context:
+- If `quickfix_forced = true`: `"Quickfix flag: skipping classification."`
+- If `quickfix_eligible = true` (auto-classified): the auto-classification log line was already printed in Step 0.
 
 Invoke:
 
 ```
-Skill: quickfix, args: "<remaining args after --quickfix stripped>"
+Skill: quickfix, args: "<remaining args after flags stripped>"
 ```
 
 /quickfix handles criteria validation, plan writing, branch creation, coder launch, and merge internally.
 
-- **On /quickfix success**: print the result and STOP. Skip Steps 1–6.
-- **On /quickfix error mentioning "criteria not met"**: warn user ("Quickfix criteria not met — falling back to normal pipeline."), set `quickfix_mode = false`, and continue to Step 1.
+- **On /quickfix success**: print the result and STOP. Skip Steps 1-6.
+- **On /quickfix error mentioning "criteria not met"**:
+  - If `quickfix_forced = true`: warn user `"Quickfix criteria not met — falling back to full pipeline."`, set `quickfix_mode = false`, and continue to Step 1.
+  - If `quickfix_eligible = true` (auto-classified): warn user `"Auto-classified as quickfix but criteria not met — falling back to full pipeline."`, set `quickfix_mode = false`, and continue to Step 1.
 - **On /quickfix error for any other reason**: surface the error to the user and stop.
 
 ---
