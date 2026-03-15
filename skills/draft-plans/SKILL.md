@@ -66,6 +66,19 @@ For each story ID in the list:
 2. **Skip** stories that are `done` or `archived` — warn: `"story-NNN: already done/archived — skipping."`
 3. **Skip** stories with no tasks — warn: `"story-NNN: no tasks — skipping. Run /plan-stories first."`
 
+**Frontend detection** — classify each story by scanning `write_files`:
+
+- **Flutter**: files under `lib/src/features/*/` with `widget`/`screen`/`page` in name, or `.dart` files in `layout`/`ui`/`widget` directories
+- **React**: `.tsx`/`.jsx` files in `components/`/`pages/`/`views/` directories
+- **Vue**: `.vue` files
+- **CSS/styling**: `.css`, `.scss`, `.sass`, `.less`, `.styl` files
+
+Classification rules:
+- If ANY write_file matches a frontend pattern: set `frontend: true`
+- If ALL write_files match frontend patterns: set `frontend_only: true`
+- If SOME (but not all) match: set `mixed: true`
+- If NO write_files match (backend-only): no flag set, existing flow unchanged
+
 **Fast-path detection** (mirrors `/draft-plan` Step 2):
 A story qualifies for fast-path when ALL of:
 - `agent` = `quick-fixer`
@@ -75,6 +88,8 @@ A story qualifies for fast-path when ALL of:
 
 Fast-path stories: write plan directly in main session (Step 3b). No agent needed.
 All other stories: agent-path (Step 3b).
+
+Frontend flags are orthogonal to fast-path — a fast-path story can also be `frontend: true`. Frontend flags affect the plan template and whether `gemini_design` is called in Step 3b.
 
 If no stories remain after filtering, stop: `"No eligible stories to plan."`
 
@@ -92,6 +107,19 @@ If no stories remain after filtering, stop: `"No eligible stories to plan."`
 ---
 
 ## Step 3b: Launch plan-writer agents
+
+**Frontend/mixed stories — gemini_design call (before agent launch):**
+
+For each story with `frontend: true` or `mixed: true`:
+
+1. Load the tool: `ToolSearch: select:mcp__gemini__gemini_design`
+2. Call `gemini_design(paths=<write_files>, output="plans/<plan-name>-design.md")`
+3. Read the design spec output file (`plans/<plan-name>-design.md`)
+4. Store the design spec content as `gemini_design_spec` for inclusion in the plan-writer agent prompt
+
+Backend-only stories skip this block entirely.
+
+---
 
 **Fast-path stories** — write directly in main session using metadata-only template (no file reads needed):
 
@@ -129,6 +157,50 @@ Files: <write_files>
 
 No `## Contract` section for fast-path stories.
 
+**Fast-path frontend/mixed stories** — same as above but use this template instead (includes the design spec from the `gemini_design` call):
+
+```
+# <story title>
+
+Story: <story_id>
+Agent: <agent>
+
+## Context
+
+<story title>
+Files: <write_files>
+
+## What changes
+
+| File | Change |
+|---|---|
+| <write_file> | <task description> |
+
+## Frontend Design (Gemini)
+
+<verbatim content from gemini_design_spec>
+
+## Architecture (Claude)
+
+<state management, data flow, integration points — written by main session based on task descriptions>
+
+## Tasks
+
+1. <task 1>
+2. <task 2>
+
+## Acceptance criteria
+
+- <one testable statement per task, derived from task description>
+
+## Verification
+
+- Confirm each task is implemented correctly
+- No changes outside write scope
+```
+
+Backend-only fast-path stories continue using the existing template above (no Frontend Design section, no Architecture section).
+
 **Agent-path stories** — launch one `general-purpose` background agent per story with `run_in_background: true`. Prompt template:
 
 ```
@@ -143,6 +215,14 @@ Output file: plans/<name>.md
 <If predicted preferences exist for this story:>
 ## Predicted Preferences
   - <domain>: <preference text> (confidence: <score>)
+
+<If story has frontend: true or mixed: true, include:>
+## Gemini Design Spec (include verbatim in plan)
+<gemini_design_spec content from the gemini_design call in Step 3b>
+
+Include the above design spec as the `## Frontend Design (Gemini)` section of the plan file.
+Write the `## Architecture (Claude)` section yourself, ensuring it integrates with the design.
+The Architecture section covers: state management, data flow, API connections, integration points.
 
 ## Critique Checklist
 <full checklist content from refs/orch-critique-checklist.md>
@@ -208,6 +288,57 @@ Output file: plans/<name>.md
 
    - <how to verify the changes work>
 
+   **For frontend/mixed stories** (when Gemini Design Spec is provided), use this
+   alternate structure instead — replaces `## Read-only context` through `## Tasks`:
+
+   # <story title>
+
+   Story: <story_id>
+   Agent: <agent>
+
+   ## Context
+
+   <Brief description of what this story accomplishes>
+
+   ## What changes
+
+   | File | Change |
+   |---|---|
+   | <write_file> | <description from tasks> |
+
+   ## Frontend Design (Gemini)
+
+   <verbatim from Gemini Design Spec section above>
+
+   ## Architecture (Claude)
+
+   <state management, data flow, integration points — written by the agent>
+
+   ## Read-only context
+
+   These files inform the implementation but should not be modified:
+   - `path/to/file` — why it's relevant
+
+   ## Contract
+
+   <same contract rules as backend template>
+
+   ## Tasks
+
+   1. <task 1>
+   2. <task 2>
+
+   ## Acceptance criteria
+
+   These define correctness independently of the implementation:
+   - Given <precondition>, when <action>, then <expected outcome>
+
+   ## Verification
+
+   - <how to verify the changes work>
+
+   Backend-only stories use the template above (no Frontend Design or Architecture sections).
+
 5. If briefing_path was provided, include it in read-only context and reference
    specific sections in task descriptions.
    Format: (see briefing ## <Section> > <Subsection> for <what>)
@@ -230,6 +361,18 @@ Wait for all background agents to complete. For each result:
 - **`DONE: plans/<name>.md`** — call `pm_update_story(story_id=<id>, plan_file="plans/<name>.md")`.
 - **`NEED_DECISION: <issue>`** — surface to user with the options provided, get answer, resume agent with the decision.
 - **`BLOCKED: <reason>`** — report to user, skip story, do not update DB.
+
+**Frontend section validation** — for stories with `frontend: true` or `mixed: true`, read the plan file and check:
+
+- `## Frontend Design (Gemini)` section must be present and non-empty
+- `## Architecture (Claude)` section must be present and non-empty
+
+If either section is missing or empty, reject the plan:
+> "Plan rejected: frontend story requires both ## Frontend Design (Gemini) and ## Architecture (Claude) sections."
+
+Retry once — re-launch the plan-writer agent with the rejection message appended. If the second attempt also fails, mark as `BLOCKED` and surface to user.
+
+Backend-only stories skip this validation entirely.
 
 Also call `pm_update_story(story_id=<id>, plan_file="plans/<name>.md")` for each fast-path story written in the main session.
 
