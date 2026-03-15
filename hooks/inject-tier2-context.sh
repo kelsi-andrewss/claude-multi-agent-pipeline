@@ -125,10 +125,8 @@ done
 COUNT=$((COUNT + 1))
 echo "$COUNT" > "$COUNTER_FILE"
 
-# JSON-escape the context string
-CONTEXT="${CONTEXT//\\/\\\\}"
-CONTEXT="${CONTEXT//\"/\\\"}"
-CONTEXT="${CONTEXT//$'\n'/\\n}"
+# JSON-escape the context string via json.dumps (handles all control characters)
+ESCAPED=$(printf '%s' "$CONTEXT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))")
 
-printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}' "$CONTEXT"
+printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%s}}' "$ESCAPED"
 exit 0
