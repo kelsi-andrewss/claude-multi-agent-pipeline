@@ -6,7 +6,7 @@
 # Protected files:
 #   BoardCanvas.jsx, StickyNote.jsx, Frame.jsx, Shape.jsx, LineShape.jsx, Cursors.jsx
 #
-# Permission signal: $CLAUDE_TEMP_DIR/konva-permission-<SESSION_ID>-<basename>
+# Permission signal: $CLAUDE_TEMP_DIR/konva-permission-<basename>
 # Grant permission: main session writes that file when user says "I grant permission to edit X"
 #
 # Exit 0 = allow
@@ -24,14 +24,7 @@ fi
 
 INPUT=$(cat)
 
-FILE_PATH=$(echo "$INPUT" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-path = d.get('tool_input', {}).get('file_path', '')
-if not path:
-    path = d.get('tool_input', {}).get('path', '')
-print(path)
-" 2>/dev/null)
+FILE_PATH=$(echo "$INPUT" | python3 "$HOME/.claude/hooks/lib/parse_hook_input.py" file_path)
 
 # Protected Konva file basenames
 PROTECTED_FILES=("BoardCanvas.jsx" "StickyNote.jsx" "Frame.jsx" "Shape.jsx" "LineShape.jsx" "Cursors.jsx")
@@ -52,7 +45,7 @@ if [[ "$IS_PROTECTED" == "0" ]]; then
 fi
 
 # Check for permission sentinel file
-PERMISSION_FILE="$CLAUDE_TEMP_DIR/konva-permission-${CLAUDE_SESSION_ID:-unknown}-${PROTECTED_NAME}"
+PERMISSION_FILE="$CLAUDE_TEMP_DIR/konva-permission-${PROTECTED_NAME}"
 
 if [[ -f "$PERMISSION_FILE" ]]; then
   # Permission granted for this session
@@ -62,5 +55,5 @@ fi
 # Block — no permission
 echo "BLOCKED: $PROTECTED_NAME is a protected Konva file." >&2
 echo "Grant explicit permission first by saying: \"I grant permission to edit $PROTECTED_NAME\"" >&2
-echo "This causes the main session to write: $CLAUDE_TEMP_DIR/konva-permission-${CLAUDE_SESSION_ID:-unknown}-${PROTECTED_NAME}" >&2
+echo "This causes the main session to write: $CLAUDE_TEMP_DIR/konva-permission-${PROTECTED_NAME}" >&2
 exit 2

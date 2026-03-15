@@ -23,14 +23,7 @@ fi
 
 INPUT=$(cat)
 
-FILE_PATH=$(echo "$INPUT" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-path = d.get('tool_input', {}).get('file_path', '')
-if not path:
-    path = d.get('tool_input', {}).get('path', '')
-print(path)
-" 2>/dev/null)
+FILE_PATH=$(echo "$INPUT" | python3 "$HOME/.claude/hooks/lib/parse_hook_input.py" file_path)
 
 # Allow edits in non-git directories — guard only applies to git-tracked projects
 FILE_DIR=$(dirname "$FILE_PATH")
