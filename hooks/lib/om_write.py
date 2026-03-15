@@ -91,44 +91,44 @@ def dedup_check(content, primary_tag):
     return None
 
 
-def enforce_budget(primary_tag):
+def enforce_budget(conn, primary_tag):
+    """Delete oldest entries to make room. Uses caller-provided connection.
+    Does NOT commit — caller is responsible for committing."""
     budget = BUDGETS.get(primary_tag)
     if budget is None:
         return 0
 
     try:
-        with _db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT COUNT(*) FROM memories WHERE tags LIKE ?",
-                (f"%{primary_tag}%",),
-            )
-            count = cursor.fetchone()[0]
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM memories WHERE tags LIKE ?",
+            (f"%{primary_tag}%",),
+        )
+        count = cursor.fetchone()[0]
 
-            if count < budget:
-                return 0
+        if count < budget:
+            return 0
 
-            now = time.time()
-            cursor.execute(
-                "SELECT id, feedback_score, decay_lambda, created_at FROM memories WHERE tags LIKE ?",
-                (f"%{primary_tag}%",),
-            )
-            entries = []
-            for row_id, score, decay, created_at in cursor.fetchall():
-                age_days = (now - (created_at or now)) / 86400.0
-                lam = decay if decay else DEFAULT_DECAY
-                weighted = (score if score else 0.0) * math.exp(-lam * age_days)
-                entries.append((row_id, weighted))
+        now = time.time()
+        cursor.execute(
+            "SELECT id, feedback_score, decay_lambda, created_at FROM memories WHERE tags LIKE ?",
+            (f"%{primary_tag}%",),
+        )
+        entries = []
+        for row_id, score, decay, created_at in cursor.fetchall():
+            age_days = (now - (created_at or now)) / 86400.0
+            lam = decay if decay else DEFAULT_DECAY
+            weighted = (score if score else 0.0) * math.exp(-lam * age_days)
+            entries.append((row_id, weighted))
 
-            entries.sort(key=lambda x: x[1])
-            to_delete = count - budget + 1
-            deleted = 0
-            for row_id, _ in entries[:to_delete]:
-                cursor.execute("DELETE FROM memories WHERE id = ?", (row_id,))
-                deleted += 1
+        entries.sort(key=lambda x: x[1])
+        to_delete = count - budget + 1
+        deleted = 0
+        for row_id, _ in entries[:to_delete]:
+            cursor.execute("DELETE FROM memories WHERE id = ?", (row_id,))
+            deleted += 1
 
-            conn.commit()
-            return deleted
+        return deleted
     except sqlite3.Error:
         return 0
 
@@ -184,10 +184,6 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
             print(f"om_write: dedup_fired — existing_id={existing_id} primary_tag={primary_tag}", file=sys.stderr)
             return existing_id
 
-        pruned = enforce_budget(primary_tag)
-        if pruned > 0:
-            print(f"om_write: budget_enforced — primary_tag={primary_tag} pruned={pruned}", file=sys.stderr)
-
         embedding = get_embedding(content)
         now = int(time.time())
         new_id = str(uuid.uuid4())
@@ -195,15 +191,18 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
         if embedding is not None:
             mean_vec = embedding_to_blob(embedding)
             mean_dim = len(embedding)
-            simhash = _compute_simhash(content)
         else:
             mean_vec = None
             mean_dim = None
-            simhash = _compute_simhash(content)
 
+        simhash = _compute_simhash(content)
         tags_json = json.dumps(tags)
 
         with _db_connection() as conn:
+            pruned = enforce_budget(conn, primary_tag)
+            if pruned > 0:
+                print(f"om_write: budget_enforced — primary_tag={primary_tag} pruned={pruned}", file=sys.stderr)
+
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO memories (id, user_id, content, simhash, primary_sector, tags, "

@@ -20,8 +20,8 @@ def _om_shadow_decision(decision_id: str, content: str, user_id: str) -> None:
     """Shadow a decision to OpenMemory for semantic search. Silently fails if OpenMemory unavailable."""
     try:
         om_write(
-            content=content,
-            tags=["decision", decision_id],
+            content=f"[{decision_id}] {content}",
+            tags=["decision"],
             user_id=user_id,
             sector="semantic",
             salience=0.5,
