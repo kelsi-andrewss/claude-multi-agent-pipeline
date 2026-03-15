@@ -47,7 +47,7 @@ def _db_connection():
         conn.close()
 
 
-def _compute_simhash(content):
+def _content_hash(content):
     return hashlib.md5(content.lower().strip().encode()).hexdigest()[:16]
 
 
@@ -74,7 +74,7 @@ def dedup_check(content, primary_tag):
         return None
 
     print("om_write: ollama_fallback — embedding unavailable for dedup", file=sys.stderr)
-    simhash = _compute_simhash(content)
+    simhash = _content_hash(content)
     try:
         with _db_connection() as conn:
             cursor = conn.cursor()
@@ -195,7 +195,7 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
             mean_vec = None
             mean_dim = None
 
-        simhash = _compute_simhash(content)
+        simhash = _content_hash(content)
         tags_json = json.dumps(tags)
 
         with _db_connection() as conn:
