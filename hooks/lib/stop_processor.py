@@ -171,7 +171,7 @@ def stage_auto_distillation(db_file, project_root):
 
     conn = _connect_db(db_file)
     rows = conn.execute(
-        "SELECT theme, count, correction_dates FROM correction_groups WHERE status='pending_promotion'"
+        "SELECT theme, count, correction_dates, text FROM correction_groups WHERE status='pending_promotion'"
     ).fetchall()
 
     if not rows:
@@ -181,10 +181,31 @@ def stage_auto_distillation(db_file, project_root):
 
     sys.path.insert(0, project_root)
     from hooks.lib.om_write import om_write
+    from hooks.lib.signal_processor import generate_rule, RULE_THRESHOLD
 
     promoted = 0
-    for theme, count, dates in rows:
-        pref_text = f"User corrected {count}x on: {theme[:200]} ({dates})"
+    for theme, count, dates, existing_text in rows:
+        # Parse last correction date from dates array
+        last_date = today
+        try:
+            date_list = json.loads(dates) if dates else []
+            if date_list:
+                last_date = date_list[-1]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        if count >= RULE_THRESHOLD:
+            # Use existing rule text if signal_processor already generated it
+            if existing_text and existing_text.startswith("RULE:"):
+                # Strip any "(Auto-generated from N corrections)" suffix to avoid duplication
+                import re as _re
+                rule_core = _re.sub(r'\s*\(Auto-generated from \d+ corrections\)\s*$', '', existing_text)
+                pref_text = f"{rule_core} (from {count} corrections, last: {last_date})"
+            else:
+                rule = generate_rule(theme)
+                pref_text = f"RULE: {rule} (from {count} corrections, last: {last_date})"
+        else:
+            pref_text = f"Pattern ({count}/5): {theme[:200]} — will become rule at 5 corrections"
 
         try:
             conn.execute(
