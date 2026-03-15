@@ -3,6 +3,7 @@
 Every PM tool returns at most one line to the terminal. Detail-heavy responses
 write markdown to /tmp/gemini/<name>.md and append " → <path>" to the one-liner.
 """
+# TODO: 850+ lines / 21 fmt_* functions — split into format_pm.py and format_analysis.py when this exceeds ~1000 lines.
 
 from __future__ import annotations
 
