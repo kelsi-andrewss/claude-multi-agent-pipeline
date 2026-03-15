@@ -55,6 +55,19 @@ REDESIGN_SYSTEM_INSTRUCTION = (
     "For each recommendation, indicate priority: High, Medium, or Low."
 )
 
+# ---------------------------------------------------------------------------
+# Design constants
+# ---------------------------------------------------------------------------
+DESIGN_SYSTEM_INSTRUCTION = (
+    "You are a senior UI architect and design systems expert. "
+    "Given a component name, requirements, and existing codebase context, produce a structured "
+    "design specification in Markdown. Focus on component hierarchy, layout structure, "
+    "visual properties, state management surface, and interaction patterns. "
+    "Output widget trees, component hierarchies, and structural pseudocode where helpful — "
+    "but NOT full implementation code. Use bullet points, tables, and indented tree notation. "
+    "For each design decision, state the rationale."
+)
+
 _KNOWN_DOCUMENTS: dict[str, dict[str, str]] = {
     "claude": {"path": "CLAUDE.md", "description": "Project implementation guide and conventions"},
     "requirements": {"path": "REQUIREMENTS.md", "description": "Full project requirements"},
