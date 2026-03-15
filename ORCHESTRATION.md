@@ -89,7 +89,7 @@ Trust scores computed by `hooks/lib/signal_processor.py:compute_trust_scores()`.
 
 ## 4. DB ACCESS RULES
 
-`epics.db` at `~/.claude/.claude/epics.db`. CLI at `~/.claude/.claude/scripts/epics-cli.sh`.
+`epics.db` at `~/.claude/.claude/epics.db`. CLI at `~/.claude/scripts/epics-cli.sh`.
 
 - **Gemini** writes epics, stories, tasks via `pm_*` tools.
 - **Claude** writes `plan_file` and `state` via `pm_update_story(...)`. No other mutations.
