@@ -18,6 +18,15 @@ These are decision rules and constraints for the main Claude Code session. Spawn
 **Coders** (`quick-fixer`, `architect`) — execute approved plan files in worktrees. Never plan. Always `run_in_background: true`.
 **Reviewer/Unit-tester/Git-ops** — on-demand, always `run_in_background: true`.
 
+### Frontend design ownership
+
+Gemini's visual/layout reasoning produces better design specs; Claude's architectural reasoning produces better integration plans. Split frontend stories accordingly:
+
+- **Gemini** owns frontend design — component layout, visual properties, widget hierarchy, interactions. Use `gemini_redesign` MCP tool for design specs.
+- **Claude** owns architecture — state management, data flow, API connections, business logic.
+- Frontend stories produce dual-author plan files with two sections: `## Frontend Design (Gemini)` and `## Architecture (Claude)`.
+- Coders treat Gemini's design section as a constraint (implement as designed) and Claude's architecture section as a guide (adapt to implementation realities).
+
 ---
 
 ## 2. MODEL SELECTION

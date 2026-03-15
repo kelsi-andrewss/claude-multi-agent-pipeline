@@ -13,14 +13,15 @@
       "mcp__openmemory__openmemory_query",
       "Bash(~/.claude/tracking/stop-hook.sh*)",
       "Bash(~/.claude/tracking/subagent-stop-hook.sh*)",
-      "Bash(~/.claude/hooks/inject-tier2-context.sh*)"
+      "Bash(~/.claude/hooks/inject-tier2-context.sh*)",
+      "Bash(~/.claude/hooks/inject-project-decisions.sh*)"
     ],
     "defaultMode": "default"
   },
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {
             "type": "command",
@@ -35,6 +36,12 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/track-skill-changes.sh",
+            "timeout": 5,
+            "async": true
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/inject-project-decisions.sh",
             "timeout": 5,
             "async": true
           }

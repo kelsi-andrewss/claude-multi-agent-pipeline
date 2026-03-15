@@ -65,3 +65,8 @@ hooks/lib/exemplar_cache.json
 .claude/tracking/tracking.db-shm
 .claude/tracking/tracking.db-wal
 .claude/tracking/tokens.json.migrated
+
+# Per-project decision memory (local rebuild)
+.claude/decisions.db
+.claude/decisions.db-shm
+.claude/decisions.db-wal
