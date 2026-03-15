@@ -284,6 +284,24 @@ git fetch origin dev 2>/dev/null || { git branch dev main && git push -u origin 
 
 ---
 
+## Step 3.5: Context sharding (large batches only)
+
+When a parallel batch contains >8 stories, split into shards of 3-5 stories each.
+For each shard, launch a "lead" agent (general-purpose, Sonnet) that:
+1. Receives the shard's stories with their full coder prompts
+2. Launches coder agents for its shard stories (as background agents)
+3. Handles tactical NEED_DECISION responses autonomously
+4. Escalates strategic/critical NEED_DECISION to the main session
+5. Runs fix-loop for each completed coder
+6. Returns a shard summary: DONE/NEED_DECISION/BLOCKED per story
+
+The main session manages leads, not individual stories. Leads return the same
+contract as individual coders: one status per story in their shard.
+
+When batch size <=8, skip sharding — launch coders directly as before.
+
+---
+
 ## Step 4: Execute groups in order
 
 Process each dependency group sequentially. Within each group, process conflict batches.
@@ -307,8 +325,6 @@ Compute for each story:
   - `quick-fixer` → "Make surgical, minimal changes. No refactoring beyond what the plan specifies."
   - `architect` → "Make full architectural changes as specified in the plan. Follow all structural decisions."
   - anything else → "Follow the plan exactly."
-
-**Model-specific warnings:** When the story's agent is `quick-fixer` (Haiku-tier), append to agent-approach: "CRITICAL: PRESERVE existing patterns. When extending or expanding code (regexes, arrays, switch cases, config objects), ADD new entries — never replace the existing block wholesale. Read the target section first, then insert your additions alongside what's already there."
 
 **Per-story data** was gathered by the resolution subagent. Use the `pitfalls`, `learnings`, `read_only_context`, and `gitignore_warnings` fields from the STORIES data returned in the MCP Delegation step. Do **not** make additional MCP calls for this information. If a story has gitignore warnings for ALL write targets, skip it as BLOCKED.
 
@@ -351,6 +367,24 @@ You are the coder. Write all code yourself.
 Do NOT call any mcp__gemini__* tools (gemini_generate, gemini_chat, analyze, audit, find_bug, plan, test, etc.).
 Do NOT call any pm_* tools except pm_update_story (for state transitions).
 Gemini is a research tool for the orchestrator — not available to coders.
+
+## Decision autonomy
+
+You may resolve these WITHOUT emitting NEED_DECISION:
+- Naming: variable names, function names, file organization
+- Imports: import ordering, module resolution
+- Test structure: test grouping, assertion style
+- Error messages: wording, formatting
+
+You MUST emit NEED_DECISION for:
+- API shape: function signatures visible to other modules
+- Architecture: data flow, state management patterns
+- Dependencies: adding new packages or imports from outside the project
+
+You MUST emit NEED_DECISION with "CRITICAL:" prefix for:
+- Security: auth, permissions, token handling
+- Data migration: schema changes, data transformation
+- Breaking changes: removing or renaming public APIs
 
 ## Pitfalls
 
@@ -406,6 +440,7 @@ Gemini is a research tool for the orchestrator — not available to coders.
 9. Return exactly one of:
    - Success: "DONE: <story-branch> pushed. Commit: <short-hash>. State: done. Files changed: <list of files staged>. Notes: <any relevant notes or 'none'>"
    - Decision needed (max 1 per story): "NEED_DECISION: <blocker>\nOption A: <option>\nOption B: <option>\n[Option C: <option>]"
+   - Research needed: "NEED_RESEARCH: <specific question>\nContext: <what you've tried>"
    - Failure: "BLOCKED: <clear reason why the story could not be completed>"
 ```
 
@@ -569,6 +604,13 @@ If the agent result doesn't include usage metadata, skip — merge-worktree hand
 5. Wait for the resumed agent to return DONE or BLOCKED.
 6. If DONE, add to the merge list. If BLOCKED, add to blocked list.
 
+**NEED_RESEARCH handling:** If any agent returns NEED_RESEARCH:
+1. Parse the research question and context from the response.
+2. Dispatch targeted Gemini research: `gemini_chat` with the specific question.
+3. Resume the agent with: "Research result: <Gemini response>. Continue from where you left off."
+4. Wait for the resumed agent to return DONE, NEED_DECISION, or BLOCKED.
+5. NEED_RESEARCH does not count toward the BLOCKING escalation counter.
+
 ### Step 5.0: Fix-loop auto-review (coder self-correction)
 
 After each coder agent returns DONE (and before the diff gate in Step 5a), run build verification against the coder's worktree to confirm the code actually works:
@@ -723,7 +765,7 @@ For each DONE story that has `test_files` and both the coder and test agent retu
 For each DONE story that passes the diff gate and has no `test_files`:
 
 1. Check if test infrastructure exists in the project (look for test directories, test configs, `jest.config`, `pytest.ini`, `_test.go` files, etc.). If none exists, skip testing for this story.
-2. Launch unit-tester agent (background, **Haiku**) in the worktree. The unit-tester writes tests from the plan file's **acceptance criteria**, not from the implementation.
+2. Launch unit-tester agent (background, **Sonnet**) in the worktree. The unit-tester writes tests from the plan file's **acceptance criteria**, not from the implementation.
 3. Results:
    - PASS → story proceeds to merge.
    - FAIL trivial → log a friction event (category `retry`, type automatic, skill `run-stories`),
