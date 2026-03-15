@@ -263,7 +263,7 @@ def _fetch_story_deps(conn: sqlite3.Connection, story_id: str) -> list[str]:
 
 
 def _detect_cycles(conn: sqlite3.Connection) -> list[list[str]]:
-    """DFS on story_dependencies table. Returns list of cycle paths."""
+    """Iterative DFS on story_dependencies table. Returns list of cycle paths."""
     rows = conn.execute("SELECT story_id, depends_on FROM story_dependencies").fetchall()
     adj: dict[str, list[str]] = defaultdict(list)
     for r in rows:
@@ -273,24 +273,33 @@ def _detect_cycles(conn: sqlite3.Connection) -> list[list[str]]:
     in_stack: set[str] = set()
     cycles: list[list[str]] = []
 
-    def dfs(node: str, path: list[str]) -> None:
-        if node in in_stack:
-            cycle_start = path.index(node)
-            cycles.append(path[cycle_start:] + [node])
-            return
-        if node in visited:
-            return
-        visited.add(node)
-        in_stack.add(node)
-        path.append(node)
-        for neighbor in adj.get(node, []):
-            dfs(neighbor, path)
-        path.pop()
-        in_stack.remove(node)
+    for start in adj:
+        if start in visited:
+            continue
+        stack: list[tuple[str, int]] = [(start, 0)]
+        path: list[str] = [start]
+        visited.add(start)
+        in_stack.add(start)
 
-    for node in adj:
-        if node not in visited:
-            dfs(node, [])
+        while stack:
+            node, idx = stack[-1]
+            neighbors = adj.get(node, [])
+            if idx < len(neighbors):
+                stack[-1] = (node, idx + 1)
+                neighbor = neighbors[idx]
+                if neighbor in in_stack:
+                    cycle_start = path.index(neighbor)
+                    cycles.append(path[cycle_start:] + [neighbor])
+                elif neighbor not in visited:
+                    visited.add(neighbor)
+                    in_stack.add(neighbor)
+                    path.append(neighbor)
+                    stack.append((neighbor, 0))
+            else:
+                stack.pop()
+                path.pop()
+                in_stack.remove(node)
+
     return cycles
 
 
@@ -305,6 +314,11 @@ def _set_story_deps(conn: sqlite3.Connection, story_id: str, depends_on: list[st
             warnings.append(f"Dependency {inv_id} not found, skipped")
         depends_on = [d for d in depends_on if d not in invalid]
 
+    # Capture pre-existing deps before replacement
+    pre_existing = set(_fetch_story_deps(conn, story_id))
+    new_deps = set(depends_on)
+    newly_inserted = new_deps - pre_existing
+
     conn.execute("DELETE FROM story_dependencies WHERE story_id = ?", (story_id,))
     for dep_id in depends_on:
         conn.execute(
@@ -315,13 +329,29 @@ def _set_story_deps(conn: sqlite3.Connection, story_id: str, depends_on: list[st
     # Check for cycles after insertion
     cycles = _detect_cycles(conn)
     if cycles:
-        # Remove the deps we just inserted that created cycles
-        cycle_nodes = set()
+        # Find which newly-inserted deps participate in cycles
+        cyclic_new_deps: set[str] = set()
         for cycle in cycles:
-            cycle_nodes.update(cycle)
-        if story_id in cycle_nodes:
-            conn.execute("DELETE FROM story_dependencies WHERE story_id = ?", (story_id,))
-            warnings.append(f"Cycle detected involving {story_id}: {cycles[0]}. Dependencies removed.")
+            cycle_set = set(cycle)
+            if story_id in cycle_set:
+                for dep in newly_inserted:
+                    if dep in cycle_set:
+                        cyclic_new_deps.add(dep)
+
+        # If no specific new dep identified but story is in a cycle, remove all new deps (conservative)
+        if not cyclic_new_deps and any(story_id in set(c) for c in cycles):
+            cyclic_new_deps = newly_inserted
+
+        if cyclic_new_deps:
+            for dep in cyclic_new_deps:
+                conn.execute(
+                    "DELETE FROM story_dependencies WHERE story_id = ? AND depends_on = ?",
+                    (story_id, dep),
+                )
+            warnings.append(
+                f"Cycle detected involving {story_id}: {cycles[0]}. "
+                f"Removed cyclic deps: {sorted(cyclic_new_deps)}. Pre-existing deps preserved."
+            )
 
     return warnings
 

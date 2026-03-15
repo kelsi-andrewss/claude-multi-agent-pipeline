@@ -130,10 +130,12 @@ def register(mcp):
             epic_filter = " AND s.epic_id = ?" if epic_id else ""
             params_epic: list = [epic_id] if epic_id else []
 
-            backlog_rows = conn.execute(
-                f"SELECT id, title, state, agent FROM stories s WHERE s.epic_id = 'epic-backlog' AND s.archived = 0{' AND s.epic_id = ?' if epic_id else ''}",
-                [epic_id] if epic_id else []
-            ).fetchall()
+            if not epic_id:
+                backlog_rows = conn.execute(
+                    "SELECT id, title, state, agent FROM stories s WHERE s.epic_id = 'epic-backlog' AND s.archived = 0"
+                ).fetchall()
+            else:
+                backlog_rows = []
             backlog_stories = [dict(r) for r in backlog_rows]
 
             unassigned_rows = conn.execute(
