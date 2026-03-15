@@ -208,6 +208,10 @@ class SearchEngine:
             row = self._conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='decision_embeddings'"
             ).fetchone()
-            return row is not None
+            if row is None:
+                return False
+            # Verify the table is actually operable (vec0 module loaded)
+            self._conn.execute("SELECT count(*) FROM decision_embeddings")
+            return True
         except sqlite3.OperationalError:
             return False
