@@ -26,28 +26,10 @@ These are decision rules and constraints for the main Claude Code session. Spawn
 |---|---|---|
 | Claude (main) | Sonnet | Opus if user requests or high-risk |
 | Coder | Sonnet | Opus after 2 BLOCKING round-trips |
-| Coder (Haiku threshold) | Haiku | Sonnet if BLOCKED once |
-| Reviewer | Haiku | Sonnet only if coder ran on Opus |
-| Unit-tester | Haiku | Never escalated |
-
-**Haiku threshold**: Use Haiku ONLY when ALL of these are true:
-- Single write-target file
-- Plan specifies exact code (copy-paste level) or pure deletion
-- No regex or pattern manipulation
-- No complex conditional logic
-
-If any criterion fails, use the default (Sonnet). When in doubt, use Sonnet — the round-trip cost of a Haiku failure exceeds the token cost difference.
+| Reviewer | Sonnet | Sonnet only if coder ran on Opus |
+| Unit-tester | Sonnet | Never escalated |
 
 Before defaulting, query OpenMemory for tool learnings about the model + file type. Consistent failures → escalate preemptively.
-
-**Haiku threshold** — Haiku is appropriate when ALL of:
-- Single write-target file
-- Exact code provided or pure deletion
-- No regex construction or expansion
-- No complex conditional logic
-- Target file is not a pipeline file (ORCHESTRATION.md, skills/, hooks/, settings.json, CLAUDE.md)
-
-Pipeline files are excluded because errors compound — a bad edit affects every future story, not just the current one.
 
 ### Trust-informed selection (when merge_outcomes >= 10 records)
 
@@ -55,7 +37,7 @@ Trust scores from merge_outcomes override the static table above:
 
 | Trust Level | Threshold | Model Policy | Approval Policy |
 |---|---|---|---|
-| High | >= 0.85 | Haiku eligible (if Haiku threshold met) | Auto-approve for proven domains |
+| High | >= 0.85 | Sonnet default | Auto-approve for proven domains |
 | Medium | >= 0.70 | Sonnet default | Standard review flow |
 | Low | < 0.70 | Sonnet default, escalation at 1 BLOCKING | Mandatory approval |
 
@@ -83,7 +65,7 @@ Trust scores computed by `hooks/lib/signal_processor.py:compute_trust_scores()`.
 
 **Default for new work**: `/ship`. Fall back to full pipeline when iterating on production code, touching protected files, or changing schemas/APIs.
 
-`/ship --quickfix` for scoped fixes (1-3 files, no schema/AI) — lightweight path that skips Gemini and epics.db.
+`/ship --quickfix` for scoped fixes (1-5 files, no breaking schema changes, no AI tool changes) — lightweight path that skips Gemini and epics.db.
 
 ---
 
@@ -130,14 +112,34 @@ This maximizes parallel execution — stories with non-overlapping write targets
 
 Full template: run-stories/SKILL.md Step 4. Must include: story title, plan file, write-targets (absolute worktree paths), read-only context, agent approach, pitfalls, OpenMemory learnings, worktree enforcement block.
 
-**NEED_DECISION**: once per story, does not count toward escalation. Second → BLOCKED.
+**NEED_DECISION**: once per story for strategic decisions; critical decisions always escalate regardless of count. Does not count toward escalation. Second strategic NEED_DECISION → BLOCKED.
 **Size ceiling**: >5 files or >200 lines → split. **Conflict check**: no shared write targets with in-progress stories.
+
+### Decision autonomy levels
+
+| Level | Scope | Coder action |
+|---|---|---|
+| Tactical | Naming conventions, import organization, test structure, error message wording | Resolve autonomously — no NEED_DECISION |
+| Strategic | API shape, data flow architecture, state management patterns | Emit NEED_DECISION, main session resolves |
+| Critical | Security changes, data migration, breaking API changes, auth/permissions | Emit NEED_DECISION with "CRITICAL:" prefix, main session must get user confirmation |
+
+### NEED_RESEARCH signal
+
+Coders may emit `NEED_RESEARCH` when they encounter a question that requires external knowledge (API behavior, library usage, platform constraints) they cannot resolve from the codebase alone.
+
+**Format:**
+```
+NEED_RESEARCH: <specific question>
+Context: <what the coder has tried/found so far>
+```
+
+NEED_RESEARCH does not count toward the BLOCKING escalation counter. It is not a failure — it is a request for information.
 
 ---
 
 ## 8. MERGE & ESCALATION
 
-Procedures: merge-worktree/SKILL.md. After coder: NEED_DECISION → pick, resume. DONE → diff gate → test → review → merge. Auto-launch unblocked stories after merge.
+Procedures: merge-worktree/SKILL.md. After coder: NEED_DECISION → pick, resume. NEED_RESEARCH → dispatch targeted Gemini research (gemini_chat with the specific question + coder's context), resume coder with the answer. DONE → diff gate → test → review → merge. Auto-launch unblocked stories after merge.
 
 **Escalation**: 2 BLOCKING → Opus (architect only). Still BLOCKING → `blocked`. **Restart**: plan was wrong (not coder) → new plan, same model, max 1. **Outcome logging**: every terminal transition → `merge_outcomes` table in run-state.db (merge-worktree Step 5.5). **Parallel**: no write-target overlap required; first merges, second rebases.
 
@@ -160,7 +162,7 @@ Before `/clear`: write `session-handoff.md`, store summary to OpenMemory, run de
 - Create branch `hotfix/<slug>` from `dev`, edit there, merge back to `dev`.
 - Never commit directly to main or dev.
 
-**Quickfix**: 1-3 files, none protected, no schema/AI. Max 2/session.
+**Quickfix**: 1-5 files, none protected, no breaking schema changes (additive OK), no AI tool changes. Max 3/session.
 - Use `/ship --quickfix <description>`. /ship validates criteria, writes the plan, launches the coder on a `quickfix/<slug>` branch in a worktree, and merges to dev. No epics.db writes.
 - Never commit directly to main or dev.
 
