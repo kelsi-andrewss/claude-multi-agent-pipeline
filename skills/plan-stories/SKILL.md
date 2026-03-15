@@ -95,6 +95,8 @@ MODE: ship
 TITLE: <title>
 ITEMS: <items list>
 CONTEXT: <briefing_contents if briefing mode, otherwise omit>
+
+DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping.
 """)
 ```
 
@@ -104,6 +106,8 @@ CONTEXT: <briefing_contents if briefing mode, otherwise omit>
 Agent(subagent_type="planner", prompt="""
 MODE: ship
 EPIC_ID: epic-NNN
+
+DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping.
 """)
 ```
 

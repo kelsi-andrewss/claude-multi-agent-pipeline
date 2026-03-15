@@ -114,6 +114,16 @@ Before writing a plan file, Claude independently reviews Gemini's output. Full c
 - **Story** — scoped deliverable, own branch/worktree. States: `draft` → `ready` → `in-progress` → `in-review` → `approved` → `done` → `shipped`. Also: `blocked`. Agent: `quick-fixer` | `architect` | `manual`. Must have `plan_file` to run.
 - **Task** — sub-item, no branch. States: `todo` → `in-progress` → `done`. Also: `blocked`, `skipped`.
 
+### Story decomposition for parallelism
+
+When decomposing an epic into stories, minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns `quickfix/SKILL.md` implements ALL changes to that file across all tiers/features in the epic.
+
+This maximizes parallel execution — stories with non-overlapping write targets run concurrently. Stories with overlapping write targets get serialized, so every shared file is lost parallelism.
+
+**During planning**: if two stories in the same epic share write-target files, flag it as a parallelism concern. Restructure to eliminate the overlap unless the changes are genuinely inseparable (e.g., two functions in the same file that reference each other's new code).
+
+**Decomposition priority**: file ownership > conceptual grouping. A story titled "ORCHESTRATION.md updates" that spans multiple conceptual tiers is better than three tier-themed stories that all touch ORCHESTRATION.md.
+
 ---
 
 ## 7. CODER PROMPTS
