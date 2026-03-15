@@ -85,10 +85,10 @@ def stage_correction_detection(transcript_path, db_file, session_id, project_roo
 
 # -- Stage 2: Signal processing (decision_preferences correlation) --
 
-def stage_signal_processing(transcript_path, db_file, session_id):
+def stage_signal_processing(transcript_path, db_file, session_id, corrections=None):
     print("Stage 2: Signal processing", file=sys.stderr)
     from hooks.lib.signal_processor import main_logic
-    main_logic(transcript_path, db_file, session_id)
+    main_logic(transcript_path, db_file, session_id, corrections=corrections)
     print("Stage 2 complete", file=sys.stderr)
 
 
@@ -305,14 +305,15 @@ def main():
         print("WARNING: Ollama unavailable. Correction detection and session summaries will be degraded.", file=sys.stderr)
 
     # Stage 1: Correction detection
+    corrections = []
     try:
-        stage_correction_detection(args.transcript, args.db, args.session, args.project)
+        corrections = stage_correction_detection(args.transcript, args.db, args.session, args.project)
     except Exception as e:
         print(f"Stage 1 FAILED: {e}", file=sys.stderr)
 
-    # Stage 2: Signal processing
+    # Stage 2: Signal processing (receives corrections from stage 1)
     try:
-        stage_signal_processing(args.transcript, args.db, args.session)
+        stage_signal_processing(args.transcript, args.db, args.session, corrections=corrections)
     except Exception as e:
         print(f"Stage 2 FAILED: {e}", file=sys.stderr)
 

@@ -688,13 +688,13 @@ def recommend_model(trust_level, agent, file_count):
     return "sonnet"
 
 
-def main_logic(transcript_path, db_path, session_id=""):
+def main_logic(transcript_path, db_path, session_id="", corrections=None):
     """Core signal processing: correlate corrections with decision_preferences.
 
     Performs:
     1. Connect to db_path, query recent decision_preferences
     2. Parse transcript turns, find decision mention turns
-    3. Run process_session_corrections (correction detection + DB upsert)
+    3. Use provided corrections (or detect if not provided)
     4. For matched corrections: decrement signal_score by correction weight
     5. For unmatched decisions: increment signal_score by 0.5 (implicit approval)
     6. Commit and close
@@ -703,10 +703,12 @@ def main_logic(transcript_path, db_path, session_id=""):
         transcript_path: Path to JSONL transcript file.
         db_path: Path to epics.db.
         session_id: Session identifier for filtering decisions.
+        corrections: Pre-detected corrections list from stage 1. If None,
+            falls back to calling process_session_corrections (standalone usage).
 
     Returns:
         None. Side effects: updates decision_preferences.signal_score/signal_count
-        in db_path, upserts correction_groups via process_session_corrections.
+        in db_path.
 
     Exits silently (returns None) when:
         - transcript_path or db_path don't exist
@@ -765,8 +767,9 @@ def main_logic(transcript_path, db_path, session_id=""):
 
     find_decision_mention_turns(decisions, turns)
 
-    project_root = os.path.dirname(os.path.dirname(db_path))
-    corrections = process_session_corrections(transcript_path, db_path, session_id, project_root)
+    if corrections is None:
+        project_root = os.path.dirname(os.path.dirname(db_path))
+        corrections = process_session_corrections(transcript_path, db_path, session_id, project_root)
 
     matched_decision_ids = set()
 
