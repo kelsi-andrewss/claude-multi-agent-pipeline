@@ -10,6 +10,8 @@ args:
     description: >
       Optional. A single story ID (story-NNN) to merge, or empty to auto-detect the most
       recently modified story worktree under .claude/worktrees/story/.
+      Or "--queue" to auto-merge all done stories with active worktrees in dependency order.
+      Or "--queue --dry-run" to preview what would be merged without executing.
 ---
 
 # Merge Worktree Skill Invoked
@@ -159,6 +161,119 @@ MERGE_SUMMARY:
 ### Context savings
 
 A 5-story batch that previously produced ~30 tool call responses in main context now produces 1 structured summary (~15 lines). The subagent's internal git output, MCP responses, and outcome logging are invisible to the main session.
+
+---
+
+## Queue Mode (Auto-merge)
+
+Invoked as `/merge-worktree --queue`. Discovers and merges all eligible stories automatically.
+
+### When to use
+
+- run-stories Step 5c: after a batch of stories pass validation, call `/merge-worktree --queue` instead of enumerating IDs
+- Main session cleanup: merge all completed work in one command
+- Automated pipelines: no human-in-the-loop required
+
+### Step Q1: Discover eligible stories
+
+1. Call `pm_list_stories()` across all active epics.
+2. Filter to stories where `state = "done"` AND `worktree_active = true`.
+3. If no stories match, report: "No stories eligible for auto-merge." and stop.
+
+### Step Q2: Check hold list
+
+Read `.claude/merge-holds.json` from the project root:
+
+```bash
+HOLDS=$(cat .claude/merge-holds.json 2>/dev/null || echo '[]')
+```
+
+Parse as a JSON array of story IDs. If parsing fails, treat as empty (no holds).
+
+For each eligible story, check if its ID is in the hold list. If so, mark it `ON HOLD` and exclude from merge processing.
+
+### Step Q3: Dependency ordering
+
+Order remaining stories by dependency (topological sort):
+
+1. For each story, read `depends_on` from the story data.
+2. Build a dependency graph across all eligible stories.
+3. Sort topologically:
+   - Group 0: no unmerged dependencies
+   - Group 1: all dependencies in Group 0
+   - Group N: all dependencies in earlier groups
+4. If a story depends on something not in the eligible set and not already `done`/`shipped`, defer it:
+   > "story-NNN: DEFERRED — depends on story-MMM (not done)"
+
+### Step Q4: Execute merges
+
+Process stories in dependency order. For each story, execute the standard merge procedure (Steps 1 through 5.5) with these modifications:
+
+- **No approval gate**: merges proceed automatically.
+- **Conflict handling**: if a merge conflicts, skip the story (do not abort the queue). Record it as `CONFLICT` in the summary.
+- **Hold check**: already filtered in Step Q2, but double-check before each merge in case the file was updated mid-run.
+
+Use batch mode (subagent delegation) when 2+ stories are eligible after filtering. Use single-story inline execution when only 1 story remains.
+
+### Step Q5: Report
+
+Print the auto-merge summary:
+
+```
+Auto-merge complete:
+  story-NNN: merged (abc1234)
+  story-MMM: merged (def5678)
+  story-PPP: ON HOLD — skipped
+  story-QQQ: CONFLICT — <conflict description>
+  story-RRR: DEFERRED — depends on story-SSS
+```
+
+This is the only output. The main session parses it the same way it parses the batch mode `MERGE_SUMMARY`.
+
+---
+
+## Hold Flag
+
+Stories can be excluded from auto-merge (queue mode) by adding their ID to `.claude/merge-holds.json`.
+
+### File format
+
+```json
+["story-123", "story-456"]
+```
+
+An array of story ID strings. The file lives at `<project-root>/.claude/merge-holds.json`.
+
+### Behavior
+
+- **Queue mode**: checks the hold list before each merge. Held stories are skipped with `ON HOLD` status.
+- **Single-story mode**: ignores the hold list. Explicit `/merge-worktree story-NNN` always merges.
+- **Batch mode**: ignores the hold list. Explicit story ID lists always merge.
+- **Missing/malformed file**: treated as empty — no stories held.
+
+### Managing holds
+
+Add a hold:
+```bash
+python3 -c "
+import json, os
+f = '.claude/merge-holds.json'
+holds = json.load(open(f)) if os.path.exists(f) else []
+holds.append('story-NNN')
+json.dump(sorted(set(holds)), open(f, 'w'))
+"
+```
+
+Remove a hold:
+```bash
+python3 -c "
+import json
+f = '.claude/merge-holds.json'
+holds = json.load(open(f))
+holds = [h for h in holds if h != 'story-NNN']
+json.dump(holds, open(f, 'w'))
+"
+```
 
 ---
 
