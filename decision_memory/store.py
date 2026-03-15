@@ -1,0 +1,295 @@
+from __future__ import annotations
+
+import hashlib
+import logging
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .types import Decision, DecisionScope
+
+log = logging.getLogger(__name__)
+
+_SCHEMA_SQL = """\
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    reasoning TEXT,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'deprecated', 'superseded', 'violated')),
+    source TEXT NOT NULL DEFAULT 'human'
+        CHECK (source IN ('human', 'ai-discovered', 'ai-proposed')),
+    superseded_by INTEGER REFERENCES decisions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS decision_scopes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    decision_id INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+    scope_type TEXT NOT NULL CHECK (scope_type IN ('file', 'pattern', 'tech')),
+    scope_value TEXT NOT NULL
+);
+"""
+
+_METADATA_SQL = """\
+CREATE TABLE IF NOT EXISTS _metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+"""
+
+_FTS_SQL = """\
+CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
+    content, reasoning, content=decisions, content_rowid=id
+);
+"""
+
+_VEC_SQL = """\
+CREATE VIRTUAL TABLE IF NOT EXISTS decision_embeddings USING vec0(
+    decision_id integer primary key,
+    embedding float[256]
+);
+"""
+
+
+class DecisionStore:
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+        self.dump_path = project_root / ".claude" / "decisions.sql"
+        self.db_path = project_root / ".claude" / "decisions.db"
+        self._vec_available: bool | None = None
+
+    def ensure_ready(self) -> None:
+        if self._is_stale():
+            self.sync_from_dump()
+
+    def sync_from_dump(self) -> None:
+        if self.db_path.exists():
+            self.db_path.unlink()
+            for suffix in ("-shm", "-wal"):
+                p = self.db_path.parent / (self.db_path.name + suffix)
+                if p.exists():
+                    p.unlink()
+
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = self._get_connection()
+        try:
+            dump_content = self._read_dump()
+            if dump_content:
+                conn.executescript(dump_content)
+
+            self._init_schema(conn)
+
+            if dump_content:
+                self._populate_fts(conn)
+
+            dump_hash = self._compute_dump_hash()
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "INSERT OR REPLACE INTO _metadata (key, value) VALUES (?, ?)",
+                ("dump_hash", dump_hash or ""),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO _metadata (key, value) VALUES (?, ?)",
+                ("last_rebuild", now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def record(self, decision: Decision) -> int:
+        self.ensure_ready()
+        conn = self._get_connection()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            cursor = conn.execute(
+                "INSERT INTO decisions (content, reasoning, status, source, superseded_by, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    decision.content,
+                    decision.reasoning,
+                    decision.status,
+                    decision.source,
+                    decision.superseded_by,
+                    now,
+                    now,
+                ),
+            )
+            decision_id = cursor.lastrowid
+
+            for scope in decision.scopes:
+                conn.execute(
+                    "INSERT INTO decision_scopes (decision_id, scope_type, scope_value) VALUES (?, ?, ?)",
+                    (decision_id, scope.scope_type, scope.scope_value),
+                )
+
+            conn.execute(
+                "INSERT INTO decisions_fts (rowid, content, reasoning) VALUES (?, ?, ?)",
+                (decision_id, decision.content, decision.reasoning),
+            )
+
+            conn.commit()
+            return decision_id
+        finally:
+            conn.close()
+
+    def get(self, decision_id: int) -> Decision | None:
+        self.ensure_ready()
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at "
+                "FROM decisions WHERE id = ?",
+                (decision_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            scope_rows = conn.execute(
+                "SELECT id, decision_id, scope_type, scope_value FROM decision_scopes WHERE decision_id = ?",
+                (decision_id,),
+            ).fetchall()
+
+            scopes = [
+                DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
+                for s in scope_rows
+            ]
+
+            return Decision(
+                id=row[0],
+                content=row[1],
+                reasoning=row[2],
+                status=row[3],
+                source=row[4],
+                superseded_by=row[5],
+                created_at=row[6],
+                updated_at=row[7],
+                scopes=scopes,
+            )
+        finally:
+            conn.close()
+
+    def list_all(self, status: str | None = None) -> list[Decision]:
+        self.ensure_ready()
+        conn = self._get_connection()
+        try:
+            if status is not None:
+                rows = conn.execute(
+                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at "
+                    "FROM decisions WHERE status = ? ORDER BY id",
+                    (status,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at "
+                    "FROM decisions ORDER BY id"
+                ).fetchall()
+
+            decisions = []
+            for row in rows:
+                scope_rows = conn.execute(
+                    "SELECT id, decision_id, scope_type, scope_value FROM decision_scopes WHERE decision_id = ?",
+                    (row[0],),
+                ).fetchall()
+                scopes = [
+                    DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
+                    for s in scope_rows
+                ]
+                decisions.append(
+                    Decision(
+                        id=row[0],
+                        content=row[1],
+                        reasoning=row[2],
+                        status=row[3],
+                        source=row[4],
+                        superseded_by=row[5],
+                        created_at=row[6],
+                        updated_at=row[7],
+                        scopes=scopes,
+                    )
+                )
+            return decisions
+        finally:
+            conn.close()
+
+    def _compute_dump_hash(self) -> str | None:
+        if not self.dump_path.exists():
+            return None
+        content = self.dump_path.read_bytes()
+        return hashlib.sha256(content).hexdigest()
+
+    def _is_stale(self) -> bool:
+        if not self.db_path.exists():
+            return True
+        try:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT value FROM _metadata WHERE key = 'dump_hash'"
+                ).fetchone()
+            finally:
+                conn.close()
+        except sqlite3.OperationalError:
+            return True
+
+        if row is None:
+            return True
+
+        current_hash = self._compute_dump_hash()
+        stored_hash = row[0]
+        return stored_hash != (current_hash or "")
+
+    def _init_schema(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(_SCHEMA_SQL)
+        conn.executescript(_METADATA_SQL)
+        conn.executescript(_FTS_SQL)
+        self._try_create_vec_table(conn)
+
+    def _try_create_vec_table(self, conn: sqlite3.Connection) -> None:
+        if self._vec_available is False:
+            return
+        try:
+            import sqlite_vec
+
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+            conn.executescript(_VEC_SQL)
+            self._vec_available = True
+        except ImportError:
+            log.warning("sqlite-vec not installed; vector search disabled")
+            self._vec_available = False
+        except sqlite3.OperationalError as e:
+            log.warning("sqlite-vec table creation failed: %s", e)
+            self._vec_available = False
+
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    def _read_dump(self) -> str | None:
+        if not self.dump_path.exists():
+            return None
+        content = self.dump_path.read_text(encoding="utf-8").strip()
+        return content or None
+
+    def _populate_fts(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT INTO decisions_fts (rowid, content, reasoning) "
+            "SELECT id, content, reasoning FROM decisions"
+        )
+
+    def update_dump_hash(self) -> None:
+        conn = self._get_connection()
+        try:
+            dump_hash = self._compute_dump_hash()
+            conn.execute(
+                "INSERT OR REPLACE INTO _metadata (key, value) VALUES (?, ?)",
+                ("dump_hash", dump_hash or ""),
+            )
+            conn.commit()
+        finally:
+            conn.close()
