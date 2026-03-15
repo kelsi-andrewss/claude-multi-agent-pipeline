@@ -55,9 +55,9 @@ def startup_migrate(db_path: Path | None = None) -> None:
         """)
         _ensure_knowledge_tables(conn)
         _ensure_epic_columns(conn)
-        _ensure_order_idx_column(conn)
-        _ensure_read_files_column(conn)
-        _ensure_test_files_column(conn)
+        _ensure_column(conn, "stories", "order_idx", "INTEGER")
+        _ensure_column(conn, "stories", "read_files", "TEXT", "'[]'")
+        _ensure_column(conn, "stories", "test_files", "TEXT", "'[]'")
         conn.execute("DELETE FROM pending_proposals WHERE created_at < datetime('now', '-24 hours')")
         row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         current = row[0] or 0
@@ -356,39 +356,16 @@ def _set_story_deps(conn: sqlite3.Connection, story_id: str, depends_on: list[st
     return warnings
 
 
-def _ensure_order_idx_column(conn: sqlite3.Connection) -> None:
-    """Lazily add order_idx to stories table if it doesn't exist yet."""
+def _ensure_column(conn, table, name, col_type, default=None):
+    """Lazily add a column to a table if it doesn't exist yet."""
+    col_def = f"{name} {col_type}"
+    if default is not None:
+        col_def += f" DEFAULT {default}"
     try:
-        conn.execute("ALTER TABLE stories ADD COLUMN order_idx INTEGER")
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
         conn.commit()
     except sqlite3.OperationalError as e:
-        if "duplicate column" in str(e).lower():
-            pass
-        else:
-            raise
-
-
-def _ensure_read_files_column(conn: sqlite3.Connection) -> None:
-    """Lazily add read_files to stories table if it doesn't exist yet."""
-    try:
-        conn.execute("ALTER TABLE stories ADD COLUMN read_files TEXT DEFAULT '[]'")
-        conn.commit()
-    except sqlite3.OperationalError as e:
-        if "duplicate column" in str(e).lower():
-            pass
-        else:
-            raise
-
-
-def _ensure_test_files_column(conn: sqlite3.Connection) -> None:
-    """Lazily add test_files to stories table if it doesn't exist yet."""
-    try:
-        conn.execute("ALTER TABLE stories ADD COLUMN test_files TEXT DEFAULT '[]'")
-        conn.commit()
-    except sqlite3.OperationalError as e:
-        if "duplicate column" in str(e).lower():
-            pass
-        else:
+        if "duplicate column" not in str(e).lower():
             raise
 
 

@@ -31,40 +31,40 @@ mcp = FastMCP("gemini")
 
 # Register all tool modules against this mcp instance
 from tools_gemini import register as _r_gemini
-globals().update(_r_gemini(mcp) or {})
+_r_gemini(mcp)
 
 from tools_test import register as _r_test
-globals().update(_r_test(mcp) or {})
+_r_test(mcp)
 
 from tools_analysis import register as _r_analysis
-globals().update(_r_analysis(mcp) or {})
+_r_analysis(mcp)
 
 from tools_pm_read import register as _r_pm_read
-globals().update(_r_pm_read(mcp) or {})
+_r_pm_read(mcp)
 
 from tools_pm_plan import register as _r_pm_plan
-globals().update(_r_pm_plan(mcp) or {})
+_r_pm_plan(mcp)
 
 from tools_pm_write import register as _r_pm_write
-globals().update(_r_pm_write(mcp) or {})
+_r_pm_write(mcp)
 
 from tools_pm_organize import register as _r_pm_organize
-globals().update(_r_pm_organize(mcp) or {})
+_r_pm_organize(mcp)
 
 from tools_pm_analytics import register as _r_pm_analytics
-globals().update(_r_pm_analytics(mcp) or {})
+_r_pm_analytics(mcp)
 
 from tools_pm_ship import register as _r_pm_ship
-globals().update(_r_pm_ship(mcp) or {})
+_r_pm_ship(mcp)
 
 from tools_pm_decisions import register as _r_pm_decisions
-globals().update(_r_pm_decisions(mcp) or {})
+_r_pm_decisions(mcp)
 
 from tools_knowledge import register as _r_knowledge
-globals().update(_r_knowledge(mcp) or {})
+_r_knowledge(mcp)
 
 from tools_search import register as _r_search
-globals().update(_r_search(mcp) or {})
+_r_search(mcp)
 
 
 if __name__ == "__main__":
