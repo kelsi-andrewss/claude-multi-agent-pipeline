@@ -8,8 +8,11 @@ description: >
   Reads .clarify-<slug>.json and/or .research-<slug>.json if provided.
   Writes presearch/.scout-<slug>.json with findings, constraints, patterns, and
   testable assertions.
+  Bootstrap mode (--bootstrap <path>) scans an unfamiliar repo and generates
+  CLAUDE.md, decisions.sql, and .claude/refs/ convention artifacts.
   Use when the user says "/scout <topic>", "/scout --clarify presearch/.clarify-foo.json",
-  "/scout --research presearch/.research-foo.json", or "/scout --deep <topic>".
+  "/scout --research presearch/.research-foo.json", "/scout --deep <topic>",
+  or "/scout --bootstrap /path/to/repo".
 args:
   - name: args
     type: string
@@ -17,7 +20,8 @@ args:
       Topic (quoted string or free text), optional flags: --clarify <path> (path to
       .clarify-<slug>.json), --research <path> (path to .research-<slug>.json
       knowledge synthesis artifact from upstream deep research), --deep (increases
-      exploration depth).
+      exploration depth), --bootstrap <path> (scan unfamiliar repo and generate
+      convention artifacts — incompatible with other flags).
 ---
 
 # Scout Skill Invoked
@@ -30,15 +34,31 @@ User has requested: `/scout {{args}}`
 
 Parse `{{args}}` to extract:
 
+- `--bootstrap <path>` -> path to a target repository for convention extraction. Optional.
 - `--clarify <path>` -> path to a `.clarify-<slug>.json` artifact. Optional.
 - `--research <path>` -> path to a `presearch/.research-<slug>.json` knowledge synthesis artifact. Optional.
 - `--deep` -> increases exploration depth. Boolean.
-- Everything remaining after flag stripping -> `topic`. Required. If empty after stripping flags, ask:
+- Everything remaining after flag stripping -> `topic`. Required unless `--bootstrap` is set.
+
+**Bootstrap guard:** If `--bootstrap` is present alongside `--clarify`, `--research`, or `--deep`, stop with:
+```
+Error: --bootstrap is incompatible with --clarify, --research, and --deep.
+Bootstrap mode performs its own full-repo scan. Run it standalone:
+  /scout --bootstrap /path/to/repo
+```
+
+**Bootstrap validation:** If `--bootstrap` is present:
+- Verify `<path>` exists and is a directory. If not, stop with an error.
+- Set `bootstrap_mode = true`, `target_path = <path>`.
+- `topic` is not required in bootstrap mode.
+- Skip to Step 2b.
+
+**Non-bootstrap topic:** If `--bootstrap` is not present and topic is empty after stripping flags, ask:
   ```
   AskUserQuestion: "What topic should I scout?"
   ```
 
-**Slug derivation:**
+**Slug derivation (non-bootstrap only):**
 - If `--clarify` was provided and the artifact contains a `slug` field: use that slug.
 - If `--research` was provided and the artifact contains a `slug` field (and no slug from clarify): use that slug.
 - Otherwise: topic text lowercased, spaces to hyphens, non-alphanumeric stripped, truncated to 40 chars.
@@ -183,6 +203,24 @@ GAPS:
 
 ---
 
+## Step 2b: Bootstrap introspection (bootstrap_mode only)
+
+Skip Steps 1, 2, 3, 4, 5, 6. Follow Steps 2b, 4b, 5b, 6b instead.
+
+Read `skills/scout/bootstrap-prompt.md`. Replace `{{target_path}}` with the actual target path.
+
+Launch a single foreground `Explore` agent targeting the external repository:
+
+```
+Agent(subagent_type="Explore", prompt=<contents of bootstrap-prompt.md with target_path interpolated>)
+```
+
+The explore agent returns structured JSON describing the target repo's conventions, architectural decisions, pitfalls, and patterns. Parse this JSON output for use in Step 4b.
+
+If the agent's output is not valid JSON, attempt to extract the JSON block from its response. If still unparseable, stop with an error.
+
+---
+
 ## Step 3: Query decisions and memory
 
 While the Explore agent runs (or after, if foreground), query for recorded decisions and semantic memory relevant to the topic.
@@ -255,6 +293,18 @@ If `--research` was provided, check whether any codebase findings contradict the
 - Research recommends a version that conflicts with what's in the package manifest
 
 Record these in `conflicts`.
+
+---
+
+## Step 4b: Bootstrap synthesis (bootstrap_mode only)
+
+Skip decision and memory queries -- the target repo is unfamiliar and has no recorded decisions in the current project's store.
+
+Parse the explore agent's JSON output from Step 2b.
+
+**Existing AI config check:** If `existing_ai_config.files_found` is non-empty, read each file from the target repo. Their contents are constraints -- the generated artifacts must not contradict existing AI instructions. Note them for the generators.
+
+The parsed JSON is passed directly to the generator scripts in Step 5b.
 
 ---
 
@@ -347,6 +397,46 @@ Write to `presearch/.scout-<slug>.json`.
 
 ---
 
+## Step 5b: Generate bootstrap artifacts (bootstrap_mode only)
+
+Run the generator scripts with the explore agent's JSON output. Each generator reads JSON from stdin and writes its output.
+
+### 5b-1: Generate CLAUDE.md
+
+```bash
+echo '<explore_json>' | python3 skills/scout/generators/claude_md.py
+```
+
+Capture the stdout output as the CLAUDE.md content.
+
+### 5b-2: Generate decisions.sql
+
+```bash
+echo '<explore_json>' | python3 skills/scout/generators/decisions_sql.py <target_path>
+```
+
+Capture the stdout output as the decisions.sql content.
+
+### 5b-3: Generate ref files
+
+```bash
+echo '<explore_json>' | python3 skills/scout/generators/refs.py <target_path>/.claude/refs
+```
+
+This writes files directly to the target's `.claude/refs/` directory. Stdout lists the generated filenames.
+
+### 5b-4: Write artifacts to target repo
+
+For each artifact, check whether the target path already exists:
+
+- **CLAUDE.md**: Write to `<target_path>/.claude/CLAUDE.md`. If it already exists, write to `<target_path>/.claude/CLAUDE.generated.md` and warn.
+- **decisions.sql**: Write to `<target_path>/.claude/decisions.sql`. If it already exists, write to `<target_path>/.claude/decisions.generated.sql` and warn.
+- **refs/**: Already written by the refs generator. It skips existing files.
+
+Create `<target_path>/.claude/` and `<target_path>/.claude/refs/` directories as needed before writing.
+
+---
+
 ## Step 6: Report
 
 ```
@@ -367,5 +457,33 @@ Output: presearch/.scout-<slug>.json
 
 If `--research` was used: `Upstream: <research artifact path>`
 If `--clarify` was used: `Upstream: <clarify artifact path>`
+
+Do NOT prompt to run /briefing or any downstream skill. Routing is the orchestrator's job.
+
+---
+
+## Step 6b: Bootstrap report (bootstrap_mode only)
+
+```
+Bootstrap complete for: <project_name>
+Target: <target_path>
+
+Generated:
+  CLAUDE.md — <line count> lines, <section count> sections
+  decisions.sql — <decision count> decisions
+  refs/ — <ref count> files (<list filenames>)
+
+<if existing files were detected:>
+  WARNING: Existing files detected. Generated variants written:
+    .claude/CLAUDE.generated.md (review and merge with existing CLAUDE.md)
+    .claude/decisions.generated.sql (review and merge with existing decisions.sql)
+</if>
+
+Next steps:
+  1. Review generated artifacts
+  2. Edit CLAUDE.md — remove incorrect inferences, add project-specific knowledge
+  3. Edit decisions.sql — promote confident decisions, remove speculative ones
+  4. Commit .claude/ to the target repo
+```
 
 Do NOT prompt to run /briefing or any downstream skill. Routing is the orchestrator's job.
