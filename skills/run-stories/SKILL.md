@@ -342,6 +342,8 @@ Compute for each story:
 >
 > **Gitignore check:** Run `git -C <project-root> check-ignore <write_files>` (space-separated). Return any gitignored files as warnings.
 
+Before including the plan file content in the coder prompt, strip any `<!-- TESTER_ONLY -->` / `<!-- END_TESTER_ONLY -->` blocks and their contents. Use: `plan_content = re.sub(r'<!-- TESTER_ONLY -->.*?<!-- END_TESTER_ONLY -->', '', plan_content, flags=re.DOTALL).strip()`
+
 Each background agent receives this prompt (fill all placeholders before launching):
 
 ```
@@ -454,6 +456,8 @@ You are the CODER. Do NOT create or modify test files. Test files for this story
 
 **Test agent** — launched simultaneously with the coder as a second `general-purpose` background agent (model: Sonnet):
 
+Before including the plan file content in the test agent prompt, strip any `<!-- CODER_ONLY -->` / `<!-- END_CODER_ONLY -->` blocks and their contents. Use: `plan_content = re.sub(r'<!-- CODER_ONLY -->.*?<!-- END_CODER_ONLY -->', '', plan_content, flags=re.DOTALL).strip()`
+
 ```
 You are the TEST AGENT for story <story_id>: "<title>"
 
@@ -483,6 +487,8 @@ Write tests from the plan's acceptance criteria and function signatures ONLY. Yo
 - Do NOT read or reference any source implementation files
 - Write ONLY to these test files: <test_files list>
 - Do NOT run the tests — they will be run against the real implementation in the merge gate
+
+The plan file you receive has been filtered — implementation tasks and approach details have been removed. Write tests purely from the acceptance criteria and contract signatures you see. If acceptance criteria are ambiguous, test the contract surface (function signatures, return types, error cases) rather than guessing implementation details.
 
 ## Steps
 
