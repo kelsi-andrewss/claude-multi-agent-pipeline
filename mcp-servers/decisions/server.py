@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import sys
 from pathlib import Path
 
@@ -139,14 +140,15 @@ def query_project_decisions(
             conn.close()
 
         if active_files:
-            file_set = set(active_files)
             filtered = []
             for r in results:
                 if not r.decision.scopes:
                     filtered.append(r)
                     continue
                 for scope in r.decision.scopes:
-                    if scope.scope_type == "file" and scope.scope_value in file_set:
+                    if scope.scope_type == "file" and any(
+                        fnmatch.fnmatch(f, scope.scope_value) for f in active_files
+                    ):
                         filtered.append(r)
                         break
             results = filtered
@@ -163,11 +165,12 @@ def query_project_decisions(
 
     if active_files:
         all_decisions = store.list_all(status="active")
-        file_set = set(active_files)
         matched = []
         for d in all_decisions:
             for scope in d.scopes:
-                if scope.scope_type == "file" and scope.scope_value in file_set:
+                if scope.scope_type == "file" and any(
+                    fnmatch.fnmatch(f, scope.scope_value) for f in active_files
+                ):
                     matched.append(d)
                     break
         matched = matched[:limit]
