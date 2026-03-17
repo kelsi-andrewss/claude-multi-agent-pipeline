@@ -48,7 +48,7 @@ When the caller has **2+ stories** to merge (e.g., run-stories Step 5c with mult
 
 Build a prompt containing:
 
-1. The full text of Steps 1 through 5.5 below (the single-story merge procedure). The Step 4 cleanup uses `worktree-cleanup.sh` — include the script invocation syntax in the prompt.
+1. The full text of Steps 1 through 5.6 below (the single-story merge procedure). The Step 4 cleanup uses `worktree-cleanup.sh` — include the script invocation syntax in the prompt.
 2. The batch story list with pre-resolved data for each story:
    - `story_id`, `title`, `epic_id`
    - `story-branch` (already computed by run-stories)
@@ -56,6 +56,8 @@ Build a prompt containing:
    - `dev-branch`: `dev`
    - `test_result` from run-stories Step 5b (pass, skip, or pass (spec tests))
    - `write_files` (JSON array of file paths from the story's write_files field)
+   - `plan_file` (path to the story's plan file)
+   - `acceptance_criteria` (text of the ## Acceptance criteria section from the plan file, or empty string if none)
 3. ToolSearch instructions: `select:mcp__gemini__pm_update_story,mcp__gemini__pm_update_epic,mcp__gemini__pm_get_story`
 4. The queue-based merge coordination instructions (Phase 0 through Phase 3 below).
 5. The return format (see below)
@@ -147,6 +149,7 @@ MERGE_SUMMARY:
   test_results: {story-NNN: "pass", story-MMM: "skip"}
   outcomes_logged: [story-NNN, story-MMM]
   queue_stats: {enqueued: 5, merged_via_skip: 3, waited: 2, stall_fallbacks: 0}
+  regressions: {story-NNN: {checked: 3, failed: 0}, story-MMM: {checked: 5, failed: 1, details: ["story-AAA criterion X failed: error"]}} | none
 ```
 
 `merged_via_skip`: stories that merged immediately because they had no write-target overlap with anything in the queue at the time. This is the throughput metric -- higher means the queue is doing its job.
@@ -572,6 +575,38 @@ conn.close()
 
 ---
 
+## Step 5.6: Post-merge regression check
+
+> Only runs in batch mode (2+ stories merging in the same epic). Single-story merges skip this step. Only runs when `epic_id` is non-null. Runs after Step 5.5 completes.
+
+**Procedure:**
+
+1. Build the story manifest. For each previously merged story in the current epic (from the batch's `MERGE_SUMMARY.merged` list plus stories already merged in prior waves this session), collect `write_files`, `plan_file`, and `acceptance_criteria` from the per-story data passed to the subagent.
+
+   Format as JSON: `{story_id: {write_files: [...], plan_file: "/path/to/plan.md", acceptance_criteria: "raw text of ## Acceptance criteria section"}}`.
+
+2. For the just-merged story, invoke the regression check script:
+
+   ```bash
+   REGRESS_RESULT=$(python3 ~/.claude/.claude/scripts/regression-check.py \
+     --epic-id <epic_id> \
+     --just-merged-story-id <story_id> \
+     --just-merged-write-files "<comma-separated write_files>" \
+     --project-root <project-root> \
+     --dev-branch <dev-branch> \
+     --session-id <session_id> \
+     --story-manifest '<JSON string>')
+   ```
+
+3. Parse the JSON result:
+   - Exit 0 (`criteria_failed` == 0): Log "Regression check: clean (N criteria verified, M manual skipped)." Continue.
+   - Exit 1 (`criteria_failed` > 0): Log the failures as warnings in the merge report. **Non-blocking** — the merge already happened. The regression is surfaced for the user to decide whether to revert or fix forward.
+   - Exit 2: Log "Regression check: system error — <error>." Continue (non-blocking).
+
+4. Include regression results in the Step 6 report and in the batch MERGE_SUMMARY `regressions` field.
+
+---
+
 ## Step 6: Report
 
 Print a summary using the information collected above:
@@ -589,3 +624,19 @@ If `story_id` was null, omit the "Story updated" line and add a note:
 > "Story not found in DB — state was not updated."
 
 If any cleanup step failed, append a "Warnings" section listing each failure.
+
+If regressions were detected (Step 5.6), append:
+
+```
+Regressions detected:
+  story-MMM merge broke:
+    - story-AAA: "<criterion text>" — <error> (overlap: <file1>, <file2>)
+```
+
+If all regression checks passed:
+
+```
+Regression checks: clean (N criteria verified across M stories)
+```
+
+If Step 5.6 was skipped (single-story merge or no epic_id), omit the regression section entirely.

@@ -90,6 +90,20 @@ SCHEMA_DDL = [
         last_heartbeat TEXT DEFAULT (datetime('now'))
     )""",
     """CREATE INDEX IF NOT EXISTS idx_heartbeats_story ON agent_heartbeats(story_id)""",
+    """CREATE TABLE IF NOT EXISTS regression_events (
+        id INTEGER PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES run_sessions(id),
+        trigger_story_id TEXT NOT NULL,
+        affected_story_id TEXT NOT NULL,
+        epic_id TEXT NOT NULL,
+        criterion TEXT NOT NULL,
+        result TEXT CHECK(result IN ('pass','fail','timeout','skip_manual','error')),
+        error_output TEXT,
+        overlapping_files TEXT,
+        checked_at TEXT DEFAULT (datetime('now'))
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_regression_trigger ON regression_events(trigger_story_id)""",
+    """CREATE INDEX IF NOT EXISTS idx_regression_affected ON regression_events(affected_story_id)""",
 ]
 
 
