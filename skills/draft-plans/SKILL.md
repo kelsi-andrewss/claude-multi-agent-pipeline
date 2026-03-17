@@ -103,6 +103,11 @@ If no stories remain after filtering, stop: `"No eligible stories to plan."`
 4. For stories from a manifest, call `pm_predict_preference(domain=<domain>)` where domain is inferred from write_files:
    - `hooks` for hook files, `tracking` for tracking files, `skills` for skill files, `refs` for refs files, `scripts` for script files, etc.
    - If predictions returned, store per-story for inclusion in agent prompts.
+5. **Decision lookup** — for each story, query `query_project_decisions(active_files=<write_files>)` via the decisions MCP tool.
+   - Load the tool first: `ToolSearch: select:mcp__decisions__query_project_decisions`
+   - Call once per story with the story's `write_files` list as `active_files`.
+   - Store the result as `decision_constraints` per story.
+   - If no decisions found, `decision_constraints` is empty (omit the section from the plan).
 
 ---
 
@@ -133,6 +138,13 @@ Agent: <agent>
 
 <story title>
 Files: <write_files>
+
+<If decision_constraints is non-empty for this story:>
+## Decision Constraints
+
+These recorded decisions apply to files in this story's write scope. Treat as constraints — violating one requires NEED_DECISION.
+
+<decision_constraints output, verbatim from query_project_decisions>
 
 ## What changes
 
@@ -169,6 +181,13 @@ Agent: <agent>
 
 <story title>
 Files: <write_files>
+
+<If decision_constraints is non-empty for this story:>
+## Decision Constraints
+
+These recorded decisions apply to files in this story's write scope. Treat as constraints — violating one requires NEED_DECISION.
+
+<decision_constraints output, verbatim from query_project_decisions>
 
 ## What changes
 
@@ -216,6 +235,15 @@ Output file: plans/<name>.md
 ## Predicted Preferences
   - <domain>: <preference text> (confidence: <score>)
 
+<If decision_constraints is non-empty for this story:>
+## Decision Constraints (include verbatim in plan)
+
+These recorded decisions apply to files in this story's write scope.
+Include this section in the plan file after ## Context and before ## What changes.
+Coders must treat these as constraints — violating one requires NEED_DECISION.
+
+<decision_constraints output>
+
 <If story has frontend: true or mixed: true, include:>
 ## Gemini Design Spec (include verbatim in plan)
 <gemini_design_spec content from the gemini_design call in Step 3b>
@@ -254,6 +282,10 @@ The Architecture section covers: state management, data flow, API connections, i
    ## Context
 
    <Brief description of what this story accomplishes>
+
+   ## Decision Constraints
+
+   <If provided in the prompt above, include verbatim. Omit section if none.>
 
    ## What changes
 
@@ -299,6 +331,10 @@ The Architecture section covers: state management, data flow, API connections, i
    ## Context
 
    <Brief description of what this story accomplishes>
+
+   ## Decision Constraints
+
+   <If provided in the prompt above, include verbatim. Omit section if none.>
 
    ## What changes
 
