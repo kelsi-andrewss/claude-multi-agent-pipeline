@@ -42,6 +42,26 @@ CRITERION_MANUAL = re.compile(r"displays?|renders?|shows?|UI|visual", re.IGNOREC
 
 CASE_INSENSITIVE_FS = sys.platform == "darwin"
 
+REGRESSION_EVENTS_DDL = """\
+CREATE TABLE IF NOT EXISTS regression_events (
+    id INTEGER PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES run_sessions(id),
+    trigger_story_id TEXT NOT NULL,
+    affected_story_id TEXT NOT NULL,
+    epic_id TEXT NOT NULL,
+    criterion TEXT NOT NULL,
+    result TEXT CHECK(result IN ('pass','fail','timeout','skip_manual','error')),
+    error_output TEXT,
+    overlapping_files TEXT,
+    checked_at TEXT DEFAULT (datetime('now'))
+)"""
+
+
+def ensure_table(conn):
+    conn.execute(REGRESSION_EVENTS_DDL)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_regression_trigger ON regression_events(trigger_story_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_regression_affected ON regression_events(affected_story_id)")
+
 
 def emit(obj):
     print(json.dumps(obj))
@@ -216,6 +236,8 @@ def main():
     except sqlite3.Error as e:
         emit({"status": "error", "error": f"Cannot open run-state.db: {e}"})
         sys.exit(2)
+
+    ensure_table(conn)
 
     stories_checked = 0
     stories_skipped = 0

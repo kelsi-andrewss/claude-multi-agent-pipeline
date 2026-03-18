@@ -287,20 +287,7 @@ conn = sqlite3.connect(db, timeout=10)
 c = conn.cursor()
 c.execute('PRAGMA journal_mode=WAL')
 c.execute('PRAGMA busy_timeout=5000')
-c.execute('''CREATE TABLE IF NOT EXISTS fix_iterations (
-    story_id TEXT NOT NULL,
-    iteration INTEGER NOT NULL,
-    model TEXT NOT NULL,
-    input_tokens INTEGER DEFAULT 0,
-    output_tokens INTEGER DEFAULT 0,
-    cache_tokens INTEGER DEFAULT 0,
-    cost_usd REAL DEFAULT 0.0,
-    error_hash TEXT,
-    failing_layer TEXT,
-    outcome TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (story_id, iteration)
-)''')
+# Table created by init-run-db.py — see SCHEMA_DDL
 c.execute('''INSERT OR REPLACE INTO fix_iterations
     (story_id, iteration, model, input_tokens, output_tokens, cache_tokens,
      cost_usd, error_hash, failing_layer, outcome)
@@ -446,5 +433,8 @@ Per briefing "Patterns > Git atomicity":
 - The worktree exists and contains committed code (fix-loop never creates worktrees)
 - `scripts/validation-runner.sh` exists and implements the `--layer compile|lint|test|all` and `--project-root` interface (provided by story-795)
 - Git is available and the worktree is on a valid branch with push access
+- The caller handles NEED_DECISION routing (per ORCHESTRATION section 15)
+- Fix-loop writes per-iteration cost data to `~/.claude/.claude/run-state.db` (`fix_iterations` table). The table is created if it does not exist. The caller can query `total_cost_usd` from the return message or aggregate from `fix_iterations WHERE story_id = $STORY_ID`.
+e is on a valid branch with push access
 - The caller handles NEED_DECISION routing (per ORCHESTRATION section 15)
 - Fix-loop writes per-iteration cost data to `~/.claude/.claude/run-state.db` (`fix_iterations` table). The table is created if it does not exist. The caller can query `total_cost_usd` from the return message or aggregate from `fix_iterations WHERE story_id = $STORY_ID`.
