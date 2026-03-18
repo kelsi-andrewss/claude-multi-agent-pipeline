@@ -48,7 +48,14 @@ Bootstrap mode performs its own full-repo scan. Run it standalone:
 ```
 
 **Bootstrap validation:** If `--bootstrap` is present:
-- Verify `<path>` exists and is a directory. If not, stop with an error.
+- If `<path>` does not exist, create it: `mkdir -p <path>`.
+- Verify `<path>` is a directory. If not, stop with an error.
+- If `<path>` is not a git repo (`git -C <path> rev-parse --git-dir` fails):
+  - Initialize: `git -C <path> init`
+  - If the directory has files, stage and commit them: `git -C <path> add -A && git -C <path> commit -m "initial commit"`
+  - If empty, create a minimal commit so branches work: `git -C <path> commit --allow-empty -m "initial commit"`
+  - Create dev branch: `git -C <path> branch dev`
+  - Log: `"Initialized git repo at <path> with dev branch."`
 - Set `bootstrap_mode = true`, `target_path = <path>`.
 - `topic` is not required in bootstrap mode.
 - Skip to Step 2b.
