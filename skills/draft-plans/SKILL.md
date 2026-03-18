@@ -152,10 +152,12 @@ These recorded decisions apply to files in this story's write scope. Treat as co
 |---|---|
 | <write_file> | <task description> |
 
+<!-- CODER_ONLY -->
 ## Tasks
 
 1. <task 1>
 2. <task 2>
+<!-- END_CODER_ONLY -->
 
 ## Acceptance criteria
 
@@ -165,6 +167,9 @@ These recorded decisions apply to files in this story's write scope. Treat as co
 
 - Confirm each task is implemented correctly
 - No changes outside write scope
+
+<!-- TESTER_ONLY -->
+<!-- END_TESTER_ONLY -->
 ```
 
 No `## Contract` section for fast-path stories.
@@ -203,10 +208,12 @@ These recorded decisions apply to files in this story's write scope. Treat as co
 
 <state management, data flow, integration points — written by main session based on task descriptions>
 
+<!-- CODER_ONLY -->
 ## Tasks
 
 1. <task 1>
 2. <task 2>
+<!-- END_CODER_ONLY -->
 
 ## Acceptance criteria
 
@@ -216,6 +223,9 @@ These recorded decisions apply to files in this story's write scope. Treat as co
 
 - Confirm each task is implemented correctly
 - No changes outside write scope
+
+<!-- TESTER_ONLY -->
+<!-- END_TESTER_ONLY -->
 ```
 
 Backend-only fast-path stories continue using the existing template above (no Frontend Design section, no Architecture section).
@@ -293,10 +303,12 @@ The Architecture section covers: state management, data flow, API connections, i
    |---|---|
    | <write_file> | <description from tasks> |
 
+   <!-- CODER_ONLY -->
    ## Read-only context
 
    These files inform the implementation but should not be modified:
    - `path/to/file` — why it's relevant
+   <!-- END_CODER_ONLY -->
 
    ## Contract
 
@@ -306,10 +318,12 @@ The Architecture section covers: state management, data flow, API connections, i
      - `method(param: Type) -> ReturnType`
    <import paths for shared interfaces that test agent needs>
 
+   <!-- CODER_ONLY -->
    ## Tasks
 
    1. <task 1>
    2. <task 2>
+   <!-- END_CODER_ONLY -->
 
    ## Acceptance criteria
 
@@ -319,6 +333,9 @@ The Architecture section covers: state management, data flow, API connections, i
    ## Verification
 
    - <how to verify the changes work>
+
+   <!-- TESTER_ONLY -->
+   <!-- END_TESTER_ONLY -->
 
    **For frontend/mixed stories** (when Gemini Design Spec is provided), use this
    alternate structure instead — replaces `## Read-only context` through `## Tasks`:
@@ -350,19 +367,23 @@ The Architecture section covers: state management, data flow, API connections, i
 
    <state management, data flow, integration points — written by the agent>
 
+   <!-- CODER_ONLY -->
    ## Read-only context
 
    These files inform the implementation but should not be modified:
    - `path/to/file` — why it's relevant
+   <!-- END_CODER_ONLY -->
 
    ## Contract
 
    <same contract rules as backend template>
 
+   <!-- CODER_ONLY -->
    ## Tasks
 
    1. <task 1>
    2. <task 2>
+   <!-- END_CODER_ONLY -->
 
    ## Acceptance criteria
 
@@ -373,8 +394,16 @@ The Architecture section covers: state management, data flow, API connections, i
 
    - <how to verify the changes work>
 
+   <!-- TESTER_ONLY -->
+   <!-- END_TESTER_ONLY -->
+
    Backend-only stories use the template above (no Frontend Design or Architecture sections).
 
+4.5. Wrap the `## Tasks` section and `## Read-only context` section in
+   `<!-- CODER_ONLY -->` / `<!-- END_CODER_ONLY -->` HTML comment delimiters.
+   These are invisible to markdown renderers but parsed by run-stories to filter
+   what each agent sees. Shared sections (Context, Decision Constraints, What changes,
+   Contract, Acceptance criteria, Verification) must NOT be wrapped — both agents need them.
 5. If briefing_path was provided, include it in read-only context and reference
    specific sections in task descriptions.
    Format: (see briefing ## <Section> > <Subsection> for <what>)

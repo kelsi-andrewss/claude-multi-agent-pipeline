@@ -90,6 +90,35 @@ SCHEMA_DDL = [
         last_heartbeat TEXT DEFAULT (datetime('now'))
     )""",
     """CREATE INDEX IF NOT EXISTS idx_heartbeats_story ON agent_heartbeats(story_id)""",
+    """CREATE TABLE IF NOT EXISTS regression_events (
+        id INTEGER PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES run_sessions(id),
+        trigger_story_id TEXT NOT NULL,
+        affected_story_id TEXT NOT NULL,
+        epic_id TEXT NOT NULL,
+        criterion TEXT NOT NULL,
+        result TEXT CHECK(result IN ('pass','fail','timeout','skip_manual','error')),
+        error_output TEXT,
+        overlapping_files TEXT,
+        checked_at TEXT DEFAULT (datetime('now'))
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_regression_trigger ON regression_events(trigger_story_id)""",
+    """CREATE INDEX IF NOT EXISTS idx_regression_affected ON regression_events(affected_story_id)""",
+    """CREATE TABLE IF NOT EXISTS fix_iterations (
+        story_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        cache_tokens INTEGER DEFAULT 0,
+        cost_usd REAL DEFAULT 0.0,
+        error_hash TEXT,
+        failing_layer TEXT,
+        outcome TEXT CHECK(outcome IN ('pass','fail','escalated','blocked')),
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (story_id, iteration)
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_fix_iterations_story ON fix_iterations(story_id)""",
 ]
 
 
