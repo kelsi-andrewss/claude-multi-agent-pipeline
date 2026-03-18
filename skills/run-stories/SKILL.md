@@ -20,6 +20,18 @@ User has requested: `/run-stories {{args}}`
 
 ---
 
+## Step 0: Parse flags
+
+Strip flags from `{{args}}` before processing story/epic tokens:
+
+- `--project-root <path>` — override the project root directory. The next token after `--project-root` is the absolute path. Defaults to the current working directory if not provided. Use this when the target codebase is in a different git repo than the orchestration project (e.g., `/factory` created stories for an external repo).
+
+After stripping flags, the remaining tokens are story/epic IDs processed by Step 1.
+
+All references to `<project-root>` throughout this skill use the resolved value from this flag.
+
+---
+
 ## Output policy
 - Do not emit any text between tool calls. Run all tools silently.
 - The only output is the final summary (Step 6). No execution plan block, no progress narration.
