@@ -177,16 +177,43 @@ If validation fails, print all errors (not just the first) and stop.
    - `tech` scope with `translations` value → note i18n requirement for UI stages
 
 4. For each conflict found, classify as:
-   - **BLOCK** — spec directly contradicts a decision and cannot proceed without resolution. Example: spec says "REST API" but decision says "tRPC only for internal features."
-   - **ADAPT** — spec's generic pattern must be adapted to match the decision. The factory can handle this automatically by adjusting stage titles, tasks, and file paths. Example: renaming `rest_endpoints` stage to use tRPC routers.
-   - **WARNING** — spec implies something the project may not support, but it's not a hard conflict. Example: `sensitive: true` but no vault infrastructure.
+   - **CONFLICT** — spec's default pattern differs from a recorded decision. Requires human choice.
+   - **WARNING** — spec implies something the project may not support, but it's not a direct conflict. Example: `sensitive: true` but no vault infrastructure.
 
-5. Report:
-   - **BLOCK conflicts:** Stop and report. List each conflict with the decision ID, content, and what the spec implies. User must resolve (modify spec or override decision).
-   - **ADAPT conflicts:** Log adaptations and continue. These are applied in Step 1 (decomposition) and Step 2 (planning prompt). Example: `"Decision 6: tRPC for internal → adapting rest_endpoints stage to use tRPC routers instead of REST."`
-   - **WARNINGS:** Log and continue. Include in the Step 5 report.
+5. **Human-in-the-loop decision point.** If any CONFLICTs exist, present them ALL to the user in a single prompt. Do NOT silently adapt. The user needs to see what the spec implies vs what the project requires.
 
-6. Store the parsed decisions as `project_decisions` for inclusion in the Step 2 planner prompt. This ensures Gemini sees the project's constraints when generating concrete file paths and tasks.
+   Format:
+   ```
+   Decision conflicts found (N):
+
+     [decision-1] error-handling: "AppError with string codes"
+       Spec implies: generic Error throwing (CRUD+UI default)
+       Options:
+         (a) ADAPT — use AppError pattern, spec intent preserved
+         (b) CHANGE DECISION — supersede decision-1 (requires rationale)
+
+     [decision-6] api-design: "tRPC for internal features"
+       Spec implies: REST API endpoints (CRUD+UI default)
+       Options:
+         (a) ADAPT — use tRPC routes instead of REST, spec intent preserved
+         (b) CHANGE DECISION — supersede decision-6 (requires rationale)
+
+     ...
+
+   Enter choices (e.g., "all adapt", "1a 2a 3b", or review each):
+   ```
+
+   **Response handling:**
+   - `"all adapt"` or `"adapt all"` — apply all adaptations, continue.
+   - Per-conflict choices like `"1a 2b"` — apply adapts, prompt for rationale on changes.
+   - `"b"` on any conflict — call `pm_supersede_decision(decision_id, rationale)` before continuing. The decision is permanently changed, not overridden per-spec.
+   - If user picks (b), the old decision is superseded in the DB with the user's rationale. Future factory runs against this project won't hit the same conflict.
+
+   **Why this matters:** The spec is the input contract. If the factory silently transforms it, the spec becomes misleading — it says "CRUD+UI" but the output is tRPC-shaped. The user should know exactly where the spec's defaults diverge from the project's conventions and consciously approve each adaptation.
+
+   **WARNINGs** do not require a choice — they are logged and included in the Step 5 report for awareness.
+
+6. Store the resolved decisions (adapted or changed) as `project_decisions` for inclusion in the Step 2 planner prompt. This ensures Gemini sees the project's constraints when generating concrete file paths and tasks.
 
 ---
 
