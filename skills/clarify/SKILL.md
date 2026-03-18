@@ -85,8 +85,8 @@ Record the user's response:
 
 **Skip if `--quick` flag is set.** Proceed directly to Step 4 with empty decisions.
 
-1. Load Gemini: `ToolSearch: select:mcp__gemini__gemini_chat`
-2. Call `gemini_chat` with prompt — **use the research-aware variant when research data is loaded with non-empty synthesized_findings, otherwise use the standalone variant**:
+1. Load Gemini: `ToolSearch: select:mcp__gemini__analyze`
+2. Call `analyze` with prompt — **use the research-aware variant when research data is loaded with non-empty synthesized_findings, otherwise use the standalone variant**:
 
    **Standalone variant** (no research, or empty findings):
    ```

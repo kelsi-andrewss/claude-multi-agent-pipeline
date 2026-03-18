@@ -378,7 +378,7 @@ Do not edit any protected files. <If protected-files.md exists: "Protected files
 
 ## Tool constraints
 You are the coder. Write all code yourself.
-Do NOT call any mcp__gemini__* tools (gemini_generate, gemini_chat, analyze, audit, find_bug, plan, test, etc.).
+Do NOT call any mcp__gemini__* tools (gemini_generate, analyze, audit, find_bug, plan, test, etc.).
 Do NOT call any pm_* tools except pm_update_story (for state transitions).
 Gemini is a research tool for the orchestrator — not available to coders.
 
@@ -624,7 +624,7 @@ If the agent result doesn't include usage metadata, skip — merge-worktree hand
 
 **NEED_RESEARCH handling:** If any agent returns NEED_RESEARCH:
 1. Parse the research question and context from the response.
-2. Dispatch targeted Gemini research: `gemini_chat` with the specific question.
+2. Dispatch targeted Gemini research: `web_search` with the specific question.
 3. Resume the agent with: "Research result: <Gemini response>. Continue from where you left off."
 4. Wait for the resumed agent to return DONE, NEED_DECISION, or BLOCKED.
 5. NEED_RESEARCH does not count toward the BLOCKING escalation counter.

@@ -148,7 +148,7 @@ NEED_RESEARCH does not count toward the BLOCKING escalation counter. It is not a
 
 ## 8. MERGE & ESCALATION
 
-Procedures: merge-worktree/SKILL.md. After coder: NEED_DECISION → pick, resume. NEED_RESEARCH → dispatch targeted Gemini research (gemini_chat with the specific question + coder's context), resume coder with the answer. DONE → diff gate → test → review → merge. Auto-launch unblocked stories after merge.
+Procedures: merge-worktree/SKILL.md. After coder: NEED_DECISION → pick, resume. NEED_RESEARCH → dispatch targeted Gemini research (web_search with the specific question + coder's context), resume coder with the answer. DONE → diff gate → test → review → merge. Auto-launch unblocked stories after merge.
 
 **Escalation**: 2 BLOCKING → Opus (architect only). Still BLOCKING → `blocked`. **Restart**: plan was wrong (not coder) → new plan, same model, max 1. **Outcome logging**: every terminal transition → `merge_outcomes` table in run-state.db (merge-worktree Step 5.5). **Parallel**: no write-target overlap required; first merges, second rebases.
 

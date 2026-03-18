@@ -74,10 +74,10 @@ Generate 3-5 research angles for the topic. Each angle is:
 
 If scope constraints exist from Step 1, respect `out_of_scope` -- do not generate angles that fall outside scope boundaries.
 
-**Gemini angles** (via gemini_chat -- launch in parallel with Claude's inline reasoning):
+**Gemini angles** (via web_search -- launch in parallel with Claude's inline reasoning):
 
-1. Load Gemini: `ToolSearch: select:mcp__gemini__gemini_chat`
-2. Call `gemini_chat` with prompt:
+1. Load Gemini: `ToolSearch: select:mcp__gemini__web_search`
+2. Call `web_search` with prompt:
 ```
 You are a research decomposition specialist. Given a topic, suggest 3-5 independent
 research angles that would build comprehensive understanding. Each angle should target
@@ -120,7 +120,7 @@ Both models research simultaneously. **Launch ALL agents (gemini-researcher and 
 
 ### 4a: Gemini research (via gemini-researcher agents)
 
-Launch one `gemini-researcher` background agent per angle. The `gemini-researcher` agent type has access to `mcp__gemini__web_search` and `mcp__gemini__gemini_chat` (with native Google Search grounding).
+Launch one `gemini-researcher` background agent per angle. The `gemini-researcher` agent type has access to `mcp__gemini__web_search` (with native Google Search grounding).
 
 ```
 For each angle:
@@ -139,7 +139,7 @@ Starting queries: <angle.queries, one per line>
 
 Instructions:
 - Use web_search for each query in the starting queries list above.
-- After completing web searches, use gemini_chat to synthesize your findings into a structured result.
+- After completing web searches, use analyze to synthesize your findings into a structured result.
 - Prefer official documentation, academic papers, and primary sources over SEO content.
 - Be specific: version numbers, API endpoints, exact limits, dates. Every claim must cite a source URL.
 
