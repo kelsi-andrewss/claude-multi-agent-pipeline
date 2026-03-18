@@ -120,7 +120,7 @@ When refine mode is detected (Step 0):
 ## What this orchestrator does NOT do
 
 These are child skill responsibilities -- never call them directly from here:
-- `gemini_chat` or any `mcp__gemini__*` tools (scope/scout handle their own Gemini calls)
+- any `mcp__gemini__*` tools (scope/scout handle their own Gemini calls)
 - `WebSearch` / `WebFetch` (web research is /research's job -- /research calls /presearch, not the other way around)
 - `AskUser` for Q&A (only for router y/n prompts)
 - `pm_add_decision` / `openmemory_store` (decision recording is /briefing's job)

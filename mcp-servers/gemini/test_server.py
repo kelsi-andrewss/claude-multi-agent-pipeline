@@ -114,30 +114,6 @@ class TestGemini:
         assert result == "(empty response)"
 
 
-# ---------------------------------------------------------------------------
-# gemini_chat
-# ---------------------------------------------------------------------------
-
-class TestGeminiChat:
-    def test_formats_messages(self, mock_subprocess):
-        _, proc = mock_subprocess
-        messages = [
-            {"role": "user", "content": "hello"},
-            {"role": "model", "content": "hi there"},
-            {"role": "user", "content": "thanks"},
-        ]
-
-        asyncio.get_event_loop().run_until_complete(
-            server.gemini_chat(messages)
-        )
-
-        piped_input = proc.communicate.call_args[1]["input"].decode()
-        assert "User: hello" in piped_input
-        assert "Model: hi there" in piped_input
-        assert "User: thanks" in piped_input
-        # No-code instruction always present
-        assert server.NO_CODE_INSTRUCTION in piped_input
-
 
 # ---------------------------------------------------------------------------
 # fetch_doc
@@ -435,16 +411,6 @@ class TestTestTool:
 # ---------------------------------------------------------------------------
 
 class TestNoCodeEnforcement:
-    def test_gemini_chat_includes_no_code(self, mock_subprocess):
-        _, proc = mock_subprocess
-
-        asyncio.get_event_loop().run_until_complete(
-            server.gemini_chat([{"role": "user", "content": "hi"}])
-        )
-
-        piped_input = proc.communicate.call_args[1]["input"].decode()
-        assert server.NO_CODE_INSTRUCTION in piped_input
-
     def test_plan_includes_no_code(self, mock_subprocess):
         _, proc = mock_subprocess
 

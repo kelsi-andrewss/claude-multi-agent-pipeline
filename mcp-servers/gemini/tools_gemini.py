@@ -1,4 +1,4 @@
-"""Core Gemini tools: gemini_chat, fetch_doc, plan, analyze."""
+"""Core Gemini tools: fetch_doc, plan, analyze."""
 
 from __future__ import annotations
 
@@ -38,30 +38,6 @@ async def _do_plan(task: str, documents: list[str] | None = None) -> str:
 
 
 def register(mcp):
-    @mcp.tool()
-    async def gemini_chat(
-        messages: list[dict[str, str]],
-        model: str | None = None,
-        system_instruction: str | None = None,
-    ) -> str:
-        """Raw multi-turn Gemini conversation — no project context injected. Use for back-and-forth dialogue only.
-
-        Args:
-            messages: List of message objects with "role" ("user" or "model") and "content" keys.
-            model: Optional Gemini model ID. Omit to use CLI default.
-            system_instruction: Optional system instruction to guide the model.
-        """
-        lines = []
-        for msg in messages:
-            role = msg.get("role", "user").capitalize()
-            lines.append(f"{role}: {msg.get('content', '')}")
-        conversation = "\n".join(lines)
-
-        combined_instruction = NO_CODE_INSTRUCTION
-        if system_instruction:
-            combined_instruction = f"{NO_CODE_INSTRUCTION}\n\n{system_instruction}"
-        return await _gemini(conversation, model=model, system_instruction=combined_instruction)
-
     @mcp.tool()
     async def fetch_doc(document: str = "list") -> str:
         """Retrieve an Advocate project document by key (CLAUDE.md, REQUIREMENTS.md, etc.).
@@ -138,7 +114,6 @@ def register(mcp):
         return fmt_analyze(await _gemini(full_prompt, system_instruction=analyze_system))
 
     return {
-        "gemini_chat": gemini_chat,
         "fetch_doc": fetch_doc,
         "plan": plan,
         "analyze": analyze,

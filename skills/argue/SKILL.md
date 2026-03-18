@@ -54,7 +54,7 @@ Form two independent opening positions — neither model sees the other's take f
 
 **Claude's opening**: Reason about the topic yourself (considering any seed analysis and file context). Form a clear, specific position with supporting arguments. Write it down as your Round 1 position.
 
-**Gemini's opening**: Call `gemini_chat` with:
+**Gemini's opening**: Call `analyze` with:
 - `messages`: `[{"role": "user", "content": "<topic + context + seed if any>. Form a clear position on this topic with specific supporting arguments."}]`
 - `system_instruction`: the debate system instruction (see §Gemini System Instruction below)
 - `model`: the parsed `--model` value, or omit
@@ -67,7 +67,7 @@ Starting from round 2, up to `max_rounds`:
 
 1. **Claude counters Gemini**: Read Gemini's last position. Form a genuine counterargument — find the weakest point, introduce a new angle, or concede specific points that are stronger than your position. This must be real reasoning, not keyword extraction.
 
-2. **Send to Gemini**: Call `gemini_chat` with the full conversation history so far (alternating user/model roles, where "user" = Claude's turns, "model" = Gemini's turns), plus Claude's new counterargument as the latest user message. Include the debate system instruction.
+2. **Send to Gemini**: Call `analyze` with the full conversation history so far (alternating user/model roles, where "user" = Claude's turns, "model" = Gemini's turns), plus Claude's new counterargument as the latest user message. Include the debate system instruction.
 
 3. **Gemini responds**: Record the response.
 
@@ -136,7 +136,7 @@ Print the synthesis inline. Note:
 
 ## Gemini System Instruction
 
-Use this as the `system_instruction` parameter for every `gemini_chat` call in this debate:
+Use this as the `system_instruction` parameter for every `analyze` call in this debate:
 
 ```
 You are in an adversarial technical debate with another AI model. Your job:
