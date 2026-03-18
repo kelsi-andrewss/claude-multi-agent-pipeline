@@ -231,3 +231,14 @@
 {"timestamp": "2026-03-13T22:32:58Z", "date": "2026-03-13", "skill": "research", "args": "--scope .scope-web-search-mcp-command.json web search MCP command for Gemini MCP server", "session_id": "unknown"}
 {"timestamp": "2026-03-13T22:36:02Z", "date": "2026-03-13", "skill": "clarify", "args": "web search MCP command", "session_id": "unknown"}
 {"timestamp": "2026-03-13T22:36:09Z", "date": "2026-03-13", "skill": "scout", "args": "--scope .scope-web-search-mcp-command.json web search MCP command", "session_id": "unknown"}
+{"timestamp": "2026-03-18T17:10:35Z", "date": "2026-03-18", "skill": "scout", "args": "--bootstrap /Users/kelsiandrews/gauntlet/documenso", "args_len": 50, "session_id": "unknown"}
+{"timestamp": "2026-03-18T17:17:17Z", "date": "2026-03-18", "skill": "factory", "args": "/Users/kelsiandrews/gauntlet/documenso/specs/contacts.json", "args_len": 58, "session_id": "unknown"}
+{"timestamp": "2026-03-18T17:26:22Z", "date": "2026-03-18", "skill": "factory", "args": "/Users/kelsiandrews/gauntlet/documenso/specs/contacts.json", "args_len": 58, "session_id": "unknown"}
+{"timestamp": "2026-03-18T17:38:05Z", "date": "2026-03-18", "skill": "factory", "args": "/Users/kelsiandrews/gauntlet/documenso/specs/contacts.json", "args_len": 58, "session_id": "unknown"}
+{"timestamp": "2026-03-18T17:48:23Z", "date": "2026-03-18", "skill": "draft-plans", "args": ".ship-manifest.json --skip-critique", "args_len": 35, "session_id": "unknown"}
+{"timestamp": "2026-03-18T17:56:38Z", "date": "2026-03-18", "skill": "run-stories", "args": "--project-root /Users/kelsiandrews/gauntlet/documenso story-886 story-887 story-888 story-889 story-890 story-891", "args_len": 113, "session_id": "unknown"}
+{"timestamp": "2026-03-18T19:58:08Z", "date": "2026-03-18", "skill": "scout", "args": "--bootstrap /Users/kelsiandrews/gauntlet/apex-validator", "args_len": 55, "session_id": "unknown"}
+{"timestamp": "2026-03-18T20:05:57Z", "date": "2026-03-18", "skill": "factory", "args": "/Users/kelsiandrews/gauntlet/apex-validator/specs/new-validators.json", "args_len": 69, "session_id": "unknown"}
+{"timestamp": "2026-03-18T20:10:44Z", "date": "2026-03-18", "skill": "factory", "args": "/Users/kelsiandrews/gauntlet/apex-validator/specs/new-validators-v2.json", "args_len": 72, "session_id": "unknown"}
+{"timestamp": "2026-03-18T20:24:30Z", "date": "2026-03-18", "skill": "factory", "args": "--dry-run /Users/kelsiandrews/gauntlet/apex-validator/specs/new-validators-v3.json", "args_len": 82, "session_id": "unknown"}
+{"timestamp": "2026-03-18T20:25:52Z", "date": "2026-03-18", "skill": "factory", "args": "/Users/kelsiandrews/gauntlet/apex-validator/specs/new-validators-v3.json", "args_len": 72, "session_id": "unknown"}

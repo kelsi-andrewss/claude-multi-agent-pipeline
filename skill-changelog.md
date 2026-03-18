@@ -164,3 +164,13 @@ these dates to compare friction rates before and after skill changes.
 - 2026-03-13 modified /scout — Project introspection for implementation planning. Reads the codebase, queries r
 - 2026-03-13 modified /scope — Capture lightweight project definition, detect existing stack, and classify domain complexity to determine whether deep research is needed before clarify. Use when the user says \"/scope <topic>\" or \"/scope --skip-qa <topic>\".
 - 2026-03-13 modified /scope — Capture lightweight project definition, detect existing stack, and classify domain complexity to determine whether deep research is needed before clarify. Use when the user says \"/scope <topic>\" or \"/scope --skip-qa <topic>\".
+- 2026-03-17 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-18 modified /scout — Project introspection for implementation planning. Reads the codebase, queries r
+- 2026-03-18 modified /factory — Spec-driven feature decomposition: accepts a FeatureSpec JSON (product, pattern,
+- 2026-03-18 modified /factory — Spec-driven feature decomposition: accepts a FeatureSpec JSON (product, pattern,
+- 2026-03-18 modified /factory — Spec-driven feature decomposition: accepts a FeatureSpec JSON (product, pattern,
+- 2026-03-18 modified /factory — Spec-driven feature decomposition: accepts a FeatureSpec JSON (product, pattern,
+- 2026-03-18 modified /factory — Spec-driven feature decomposition: accepts a FeatureSpec JSON (product, pattern,
+- 2026-03-18 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
+- 2026-03-18 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
+- 2026-03-18 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
