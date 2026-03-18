@@ -80,8 +80,8 @@ If nothing found and no upstream constraints: greenfield mode.
 
 ## Step 3: Synthesize with Gemini
 
-1. Load Gemini: `ToolSearch: select:mcp__gemini__gemini_chat`
-2. Call `gemini_chat` with ALL accumulated context (scout implementation data, knowledge synthesis from research if in chain, clarify decisions, scope context, stack constraints) in a single prompt:
+1. Load Gemini: `ToolSearch: select:mcp__gemini__analyze`
+2. Call `analyze` with ALL accumulated context (scout implementation data, knowledge synthesis from research if in chain, clarify decisions, scope context, stack constraints) in a single prompt:
 
 ```
 Given this research, produce a structured technical briefing. Include:
@@ -176,7 +176,7 @@ Cross-check Gemini's synthesis:
 - Does the deployment path work? Is the recommended platform compatible with the stack (e.g. don't recommend Vercel for a Python-only backend)?
 
 ### 5b. Deep mode (optional)
-If the scout artifact metadata contains `deep: true`: run a second `gemini_chat` pass on uncertain areas identified in 5a. Feed the specific questions back to Gemini with the original scout and research context.
+If the scout artifact metadata contains `deep: true`: run a second `analyze` pass on uncertain areas identified in 5a. Feed the specific questions back to Gemini with the original scout and research context.
 
 ### 5c. Problem statement gate
 Check whether the Problem Statement section answers all four questions. If any are missing or vague:

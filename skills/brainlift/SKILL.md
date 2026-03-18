@@ -51,16 +51,16 @@ This is NOT technical research (APIs, packages). This is domain research — the
 Launch: `Agent(subagent_type="general-purpose", prompt=<prompt below>, run_in_background=true)`
 
 ```
-You are a domain researcher. Use gemini_chat (which has Google Search grounding built in)
+You are a domain researcher. Use web_search (which has Google Search grounding built in)
 to do broad discovery on a topic. Your job is to map the research landscape.
 
-TOOLS: First call ToolSearch to load gemini_chat:
-  ToolSearch: select:mcp__gemini__gemini_chat
-Then use gemini_chat for all research.
+TOOLS: First call ToolSearch to load web_search:
+  ToolSearch: select:mcp__gemini__web_search
+Then use web_search for all research.
 
 TOPIC: <topic>
 
-BUDGET: Ask <BUDGET> research questions via gemini_chat. Each should target a different
+BUDGET: Ask <BUDGET> research questions via web_search. Each should target a different
 dimension of the domain.
 
 For each call, investigate one of these dimensions:
