@@ -12,7 +12,8 @@ args:
     type: string
     description: >
       Path to a FeatureSpec JSON file, or --pattern <pattern> followed by inline JSON.
-      Optional flags: --dry-run (print decomposition without creating stories).
+      Optional flags: --dry-run (print decomposition without creating stories),
+      --format <gauntlet|canonical|auto> (spec format, default auto).
 ---
 
 # Factory Skill Invoked
@@ -28,6 +29,7 @@ Parse `{{args}}` to extract flags and input.
 **Flags (strip before processing tokens):**
 - `--dry-run` -- set `dry_run = true`. Prints the decomposition DAG without creating stories or writing a manifest.
 - `--pattern <pattern>` -- override the `pattern` field in the spec. Next token after `--pattern` is the pattern name.
+- `--format <format>` -- specify the input spec format. Accepted values: `gauntlet`, `canonical`, `auto` (default). Next token after `--format` is the format name. When omitted, defaults to `auto`.
 
 **Input modes (remaining tokens after flag stripping):**
 
@@ -35,17 +37,67 @@ Parse `{{args}}` to extract flags and input.
 2. **Inline mode**: remaining text is treated as inline JSON. Parse it directly.
 3. **No args**: error:
    ```
-   Usage: /factory <spec.json | inline JSON> [--pattern <pattern>] [--dry-run]
+   Usage: /factory <spec.json | inline JSON> [--pattern <pattern>] [--format <format>] [--dry-run]
 
    Examples:
      /factory specs/payments.json
      /factory --dry-run specs/payments.json
      /factory --pattern crud-ui '{"product":"collabboard","entity":"Template",...}'
+     /factory --format gauntlet specs/challenge.json
    ```
+
+After parsing, proceed to Step 0.5 for format detection and normalization before validating the schema.
+
+---
+
+## Step 0.5: Format detection and normalization
+
+This step runs BEFORE schema validation. It transforms the raw parsed JSON into canonical FeatureSpec form so that non-canonical input formats (e.g., Gauntlet challenge specs) pass validation without manual reformatting.
+
+See [adapters.md](adapters.md) for the full adapter contract, built-in adapters, and worked examples.
+
+**Format resolution:**
+
+1. If `--format` was explicitly provided, use that format directly (`explicit` detection).
+2. If `--format` is `auto` or was omitted, run the auto-detection heuristic chain.
+
+**Auto-detection heuristics (evaluated in order, first match wins):**
+
+- If any entry in `fields` has a `kind` key instead of `type` → `gauntlet`
+- If `permissions` is a string (not an array) → `gauntlet`
+- If `integrations` is a flat string array (elements are strings, not objects) → `gauntlet`
+- If `pattern` contains an underscore instead of a hyphen → `gauntlet`
+- If none of the above match → `canonical` (no transformation needed)
+- If multiple signals match, that reinforces the `gauntlet` detection
+
+**Gauntlet adapter normalization:**
+
+- `pattern`: replace underscores with hyphens (`crud_ui` → `crud-ui`)
+- `fields[].kind` → `fields[].type` (rename the key; preserve the value)
+- `fields[].values` → preserve as-is (enum values are accepted by canonical schema)
+- `permissions`: if a string, wrap in a single-element array (`"admin:write"` → `["admin:write"]`)
+- `integrations`: if a flat string array, convert each element to an object with sensible defaults: `"vault"` → `{"service": "vault", "direction": "bidirectional", "events": ["sync"]}`
+- All other fields pass through unchanged
+
+**Canonical adapter:** Identity pass-through. No transformation.
+
+**Idempotency:** Both adapters are idempotent. Running the gauntlet adapter on already-canonical input produces the same output (e.g., renaming `type` to `type` is a no-op, wrapping an already-array `permissions` is a no-op).
+
+**Logging:** After normalization, log:
+```
+Format detected: <gauntlet|canonical> (via <auto|explicit>). Normalized <N> fields.
+```
+Where `<N>` is the count of fields that were actually transformed (0 for canonical pass-through).
+
+---
+
+## Step 0.5b: Schema validation (post-normalization)
+
+Validate the **normalized** spec (output of Step 0.5), not the raw input.
 
 **FeatureSpec schema validation:**
 
-The parsed JSON must conform to the FeatureSpec shape:
+The normalized JSON must conform to the FeatureSpec shape:
 
 ```
 {
