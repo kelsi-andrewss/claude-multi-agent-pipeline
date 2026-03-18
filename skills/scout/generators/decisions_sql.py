@@ -42,6 +42,7 @@ def generate(data: dict, target_path: str = "") -> str:
         "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
         "    content TEXT NOT NULL,\n"
         "    reasoning TEXT,\n"
+        "    positive_framing TEXT,\n"
         "    status TEXT NOT NULL DEFAULT 'active'\n"
         "        CHECK (status IN ('active', 'deprecated', 'superseded', 'violated')),\n"
         "    source TEXT NOT NULL DEFAULT 'human'\n"

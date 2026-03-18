@@ -104,6 +104,21 @@ SCHEMA_DDL = [
     )""",
     """CREATE INDEX IF NOT EXISTS idx_regression_trigger ON regression_events(trigger_story_id)""",
     """CREATE INDEX IF NOT EXISTS idx_regression_affected ON regression_events(affected_story_id)""",
+    """CREATE TABLE IF NOT EXISTS fix_iterations (
+        story_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        cache_tokens INTEGER DEFAULT 0,
+        cost_usd REAL DEFAULT 0.0,
+        error_hash TEXT,
+        failing_layer TEXT,
+        outcome TEXT CHECK(outcome IN ('pass','fail','escalated','blocked')),
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (story_id, iteration)
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_fix_iterations_story ON fix_iterations(story_id)""",
 ]
 
 
