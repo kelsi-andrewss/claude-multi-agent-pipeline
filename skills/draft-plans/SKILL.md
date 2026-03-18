@@ -109,6 +109,30 @@ If no stories remain after filtering, stop: `"No eligible stories to plan."`
    - Store the result as `decision_constraints` per story.
    - If no decisions found, `decision_constraints` is empty (omit the section from the plan).
 
+6. **Exemplar matching** — for each story, find the most similar existing file to each write target. This captures file-level conventions that bootstrap misses (e.g., registration patterns, import style, function naming within a specific directory).
+
+   For each write_file in the story:
+   - Find existing files in the same directory (Glob `<dir>/*.{ext}`).
+   - Exclude test files (`*_test.*`) when matching implementation files, and vice versa.
+   - If matches found, pick the file with the closest name or purpose (heuristic: shortest edit distance to the write target's filename, or the first non-test file alphabetically).
+   - Read the exemplar file (first 100 lines max — enough for conventions, not entire implementation).
+   - Extract: package/module declaration, import patterns, exported function signatures, registration patterns (init(), Register*, export style), error handling style, comment conventions.
+
+   Store as `exemplar_conventions` per story. Format for inclusion in the plan-writer prompt:
+   ```
+   ## Exemplar Conventions
+
+   Nearest existing file to `<write_target>`: `<exemplar_path>`
+   Conventions observed:
+   - <pattern 1: e.g., "Exported functions use IsFoo naming (IsSemver, IsCron)">
+   - <pattern 2: e.g., "No init() — functions exported for manual registration via RegisterValidation()">
+   - <pattern 3: e.g., "Uses fl.Field().String() then regex match">
+   ```
+
+   If no exemplar found (greenfield directory), note: `"No exemplar — greenfield directory. Follow project-level conventions from CLAUDE.md."`
+
+   **Why this matters:** Bootstrap captures "non-standard validators in separate package" (architectural). Exemplar matching captures "notblank.go exports IsFoo functions without init()" (file-level). The plan writer sees both, so the plan matches actual conventions, not generic assumptions.
+
 ---
 
 ## Step 3b: Launch plan-writer agents
@@ -253,6 +277,14 @@ Include this section in the plan file after ## Context and before ## What change
 Coders must treat these as constraints — violating one requires NEED_DECISION.
 
 <decision_constraints output>
+
+<If exemplar_conventions is non-empty for this story:>
+## Exemplar Conventions (include verbatim in plan)
+
+These file-level conventions were extracted from the nearest existing file to each write target.
+The plan's tasks MUST follow these conventions. They override generic pattern defaults.
+
+<exemplar_conventions output>
 
 <If story has frontend: true or mixed: true, include:>
 ## Gemini Design Spec (include verbatim in plan)

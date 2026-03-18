@@ -607,6 +607,53 @@ conn.close()
 
 ---
 
+## Step 5.7: Coder divergence capture
+
+**Purpose:** When a coder deviates from the plan to follow actual codebase conventions, capture that as a proposed decision. This closes the loop — bootstrap catches architecture, exemplar matching catches file-level conventions, divergence capture catches everything else.
+
+**When to run:** After each successful merge (step 5 complete, story merged to dev). Skip for blocked or failed stories.
+
+**Procedure:**
+
+1. For each merged story, read the plan file and extract the `## Tasks` section.
+
+2. Read the coder agent's result (from the run-stories output or the commit message notes). Look for phrases indicating deviation:
+   - "matching codebase convention despite plan"
+   - "plan specified X but codebase uses Y"
+   - "adapted to actual pattern"
+   - "followed existing [file] pattern instead"
+   - Any coder note that contradicts a plan task
+
+3. For each divergence found, construct a proposed decision:
+   ```
+   Proposed decision: <what the coder actually did>
+   Evidence: <story_id> plan specified <X>, coder did <Y> after reading <exemplar file>.
+   Coder note: "<exact note from coder result>"
+   Source: ai-discovered (post-execution divergence)
+   Scope: <file or pattern scope inferred from the divergence>
+   ```
+
+4. Write proposed decisions to `<project-root>/.claude/proposed-decisions.md` (append, don't overwrite). This file is reviewed by the user — proposed decisions are NOT automatically added to decisions.sql.
+
+   Format:
+   ```markdown
+   ## Proposed decision (story-NNN, <date>)
+
+   **Convention:** <what the coder discovered>
+   **Evidence:** Plan said <X>. Coder did <Y> after reading <exemplar>.
+   **Scope:** <file pattern or directory>
+   **Status:** pending review
+   ```
+
+5. Include proposed decision count in the Step 6 report:
+   ```
+   Divergences captured: N proposed decisions → .claude/proposed-decisions.md
+   ```
+
+**Why proposed, not auto-added:** A coder divergence might be correct (following real convention) or incorrect (coder made a mistake the tests didn't catch). The user must review before it becomes a recorded decision. Auto-adding would pollute decisions.sql with unvalidated patterns.
+
+---
+
 ## Step 6: Report
 
 Print a summary using the information collected above:

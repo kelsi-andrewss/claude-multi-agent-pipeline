@@ -134,7 +134,7 @@ The normalized JSON must conform to the FeatureSpec shape:
 **Validation rules:**
 
 1. `product`, `entity`, and `pattern` are required strings. Reject with: `"Missing required field: <field>"`
-2. `pattern` must be one of: `crud-ui`, `integration`, `workflow`, `analytics`. Reject with: `"Invalid pattern: '<value>'. Must be one of: crud-ui, integration, workflow, analytics"`
+2. `pattern` must be one of: `crud-ui`, `integration`, `workflow`, `analytics`, `library-extension`. Reject with: `"Invalid pattern: '<value>'. Must be one of: crud-ui, integration, workflow, analytics, library-extension"`
 3. `fields` must be a non-empty array. Each field must have `name` (string) and `type` (string). Reject with: `"fields[N]: missing required property '<prop>'"`
 4. If `integrations` is present and non-empty, each entry must have `service`, `direction`, and `events` (non-empty array). Reject with: `"integrations[N]: missing required property '<prop>'"`
 5. If `--pattern` flag was provided, it overrides `spec.pattern` (log: `"Pattern override: <flag value>"`).
@@ -210,6 +210,8 @@ If validation fails, print all errors (not just the first) and stop.
    - If user picks (b), the old decision is superseded in the DB with the user's rationale. Future factory runs against this project won't hit the same conflict.
 
    **Why this matters:** The spec is the input contract. If the factory silently transforms it, the spec becomes misleading — it says "CRUD+UI" but the output is tRPC-shaped. The user should know exactly where the spec's defaults diverge from the project's conventions and consciously approve each adaptation.
+
+   **Prompt quality rule:** Every option must have equal detail. Show concrete consequences (what happens, what files change, what gets skipped) for ALL options — not just the one you'd recommend. Biasing detail toward one option is steering, not informing. If using AskUserQuestion with previews, every option gets a preview of equal depth.
 
    **WARNINGs** do not require a choice — they are logged and included in the Step 5 report for awareness.
 
@@ -316,6 +318,32 @@ Stage 5: admin_ui
   agent: architect
   description: Admin interface for managing <entity> workflow state, manual transitions, audit log.
 ```
+
+### Library-extension pattern
+
+```
+Stage 1: implementation
+  title: "<entity> — implementation"
+  depends_on: []
+  agent: architect
+  description: Implement new functions/types for <entity> following existing module patterns. Add to the appropriate package (core or non-standard based on project conventions).
+
+Stage 2: registration
+  title: "<entity> — registration"
+  depends_on: [implementation]
+  agent: quick-fixer
+  description: Wire new implementations into the existing registry/entry points. Update exports, maps, or init functions as needed.
+
+Stage 3: test_suite
+  title: "<entity> — test suite"
+  depends_on: [implementation]
+  agent: architect
+  description: Unit tests following project test conventions (table-driven, property-based, etc.).
+```
+
+**When to use:** Adding functions, types, or modules to an existing library. No database, no HTTP, no UI. The project is consumed as a dependency, not deployed as a service.
+
+**Merge rule for implementation + registration:** If both stages write to the same files (common when registration is a one-liner added to the implementation file), collapse them into a single stage. Registration as a separate stage only makes sense when the registry is in a different file than the implementation.
 
 ### Analytics pattern
 
