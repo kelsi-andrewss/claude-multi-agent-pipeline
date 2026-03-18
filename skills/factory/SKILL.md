@@ -143,6 +143,53 @@ If validation fails, print all errors (not just the first) and stop.
 
 ---
 
+## Step 0.75: Decision conflict check
+
+**Purpose:** Catch spec choices that conflict with the target project's recorded decisions before wasting tokens on planning and story creation. Fail fast.
+
+**When to run:** After schema validation passes. Skip if `--dry-run` is set (dry-run doesn't create stories, so conflicts are informational only — log them but don't block).
+
+**How:**
+
+1. Locate the target project's decisions file. Check (in order):
+   - `--project-root` flag value (if set) + `/.claude/decisions.sql`
+   - Current working directory + `/.claude/decisions.sql`
+   - If neither exists, skip this step (no decisions to check against). Log: `"No decisions.sql found — skipping conflict check."`
+
+2. Parse the SQL file. Extract decision content and scope from INSERT statements:
+   - Regex: `VALUES \(\d+, '([^']+)', '([^']+)'` captures (content, reasoning)
+   - Build a list of `{id, content, reasoning, scope_type, scope_value}` objects
+
+3. Check the normalized spec against each decision. Conflict detection rules:
+
+   | Spec implies | Decision says | Conflict? |
+   |---|---|---|
+   | REST endpoints (generic CRUD pattern) | "tRPC for internal" (scope: api-design) | YES — spec's `rest_endpoints` stage must be renamed/adapted to tRPC |
+   | Generic Error throwing | "AppError with codes" (scope: error-handling) | YES — generated code must use AppError, not throw Error |
+   | `sensitive: true` with vault encryption | No vault decision exists | WARNING — project may not have vault; check for encryption patterns |
+   | `ui` components with 'use client' | "No 'use client' directive" (scope: apps/remix/*) | YES — components must not use 'use client' |
+   | Standard REST API routes | "Dual API: REST (public) + tRPC (internal)" (scope: api-design) | ADAPT — internal features use tRPC, not REST |
+
+   The check is heuristic, not exhaustive. Match decision scope_type against spec implications:
+   - `tech` scope with `api-design` value → check if spec implies REST vs tRPC
+   - `tech` scope with `error-handling` value → note error pattern for stage generation
+   - `pattern` scope → check if spec's implied file paths fall within the scope glob
+   - `tech` scope with `translations` value → note i18n requirement for UI stages
+
+4. For each conflict found, classify as:
+   - **BLOCK** — spec directly contradicts a decision and cannot proceed without resolution. Example: spec says "REST API" but decision says "tRPC only for internal features."
+   - **ADAPT** — spec's generic pattern must be adapted to match the decision. The factory can handle this automatically by adjusting stage titles, tasks, and file paths. Example: renaming `rest_endpoints` stage to use tRPC routers.
+   - **WARNING** — spec implies something the project may not support, but it's not a hard conflict. Example: `sensitive: true` but no vault infrastructure.
+
+5. Report:
+   - **BLOCK conflicts:** Stop and report. List each conflict with the decision ID, content, and what the spec implies. User must resolve (modify spec or override decision).
+   - **ADAPT conflicts:** Log adaptations and continue. These are applied in Step 1 (decomposition) and Step 2 (planning prompt). Example: `"Decision 6: tRPC for internal → adapting rest_endpoints stage to use tRPC routers instead of REST."`
+   - **WARNINGS:** Log and continue. Include in the Step 5 report.
+
+6. Store the parsed decisions as `project_decisions` for inclusion in the Step 2 planner prompt. This ensures Gemini sees the project's constraints when generating concrete file paths and tasks.
+
+---
+
 ## Step 1: Decompose into stages
 
 Based on `spec.pattern`, produce a dependency-ordered stage list using these fixed DAGs:
