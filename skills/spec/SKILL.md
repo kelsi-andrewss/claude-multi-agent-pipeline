@@ -2,10 +2,11 @@
 name: spec
 description: >
   Interactive spec builder: takes a product name + natural language description and
-  produces a validated FeatureSpec JSON. Handles pattern selection, field typing,
-  decision conflict pre-check, and writes the spec file. Use when the user says
-  "/spec <product> <description>", "/spec --edit path/to/spec.json", or
-  "/spec --validate path/to/spec.json".
+  produces a full feature spec document (markdown) with machine-readable FeatureSpec JSON.
+  Covers objective, user stories, requirements, acceptance criteria, constraints,
+  integration points, out of scope, AI boundaries, and the JSON extract for /factory.
+  Use when the user says "/spec <product> <description>", "/spec --edit path/to/spec.md",
+  or "/spec --validate path/to/spec.md".
 args:
   - name: args
     type: string
@@ -23,85 +24,161 @@ User has requested: `/spec {{args}}`
 ## Step 0: Parse args
 
 **Flags:**
-- `--edit <path>` — load an existing spec JSON for interactive editing. Strip flag + path.
-- `--validate <path>` — validate an existing spec against the target project's decisions without running factory. Strip flag + path.
-- `--project-root <path>` — override project root for decision lookup. Strip flag + path.
+- `--edit <path>` — load an existing spec for interactive editing. Strip flag + path.
+- `--validate <path>` — validate spec against the target project's decisions without running factory. Strip flag + path.
+- `--project-root <path>` — override project root for decision lookup and integration point discovery. Strip flag + path.
 
 **Input modes (remaining tokens after flag stripping):**
 
-1. **Edit mode**: `--edit` was provided. Read the JSON file, display current spec, proceed to Step 2 for interactive refinement.
-2. **Validate mode**: `--validate` was provided. Read the JSON file, run Step 3 (decision check) only, report and stop.
+1. **Edit mode**: `--edit` was provided. Read the file, display current spec, proceed to Step 2 for refinement.
+2. **Validate mode**: `--validate` was provided. Read the file, run Step 4 (decision check) only, report and stop.
 3. **Build mode** (default): First token is the product name. Everything after is the natural language description. If no description provided, ask:
    > "Describe the feature you want to add to <product>:"
 
 ---
 
-## Step 1: Understand the feature (build mode only)
+## Step 1: Extract from description (build mode only)
 
-From the natural language description, extract:
+From the natural language description, extract content for each of the 9 spec sections.
 
-1. **Entity name** — the primary noun (e.g., "add contacts management" → Contact, "webhook notifications" → Webhook, "add semver validation" → Validator)
+### 1a: Objective
 
-2. **Pattern detection** — infer from the description:
-   - Mentions DB/CRUD/API/UI/form/list → `crud-ui`
-   - Mentions external service/sync/webhook/integration → `integration`
-   - Mentions state machine/approval/workflow/lifecycle → `workflow`
-   - Mentions dashboard/metrics/analytics/reports → `analytics`
-   - Mentions add function/validator/module/extend/library → `library-extension`
-   - If ambiguous, ask the user with equal-detail options.
+One sentence: what the feature is and why it exists. If the user only described *what*, infer the *why* from context (e.g., "add contacts" → "so users don't re-enter recipient details for every document").
 
-3. **Fields** — extract from description. For each mentioned attribute:
-   - Infer type: names/labels → string, counts → number, flags → boolean, dates → date, status/role → enum, foreign references → reference
-   - Infer required: explicitly optional → `required: false`, otherwise true
-   - Infer sensitive: passwords/tokens/keys/SSN/phone → `sensitive: true`
-   - If description mentions enum values, capture them in `values`
+### 1b: User Stories
 
-4. **Permissions** — if description mentions access control, roles, or permissions, extract as array. Otherwise empty.
+1-3 stories in the format: "As a [role], I want to [action] so that [benefit]."
 
-5. **Audit** — if description mentions logging, audit trail, or tracking changes, set true. Otherwise false.
+Infer roles from the description. If no roles mentioned, use generic "user." If the product has teams/orgs, include an admin story.
 
-6. **Integrations** — if description mentions external services, extract with direction and events. Otherwise empty.
+### 1c: Requirements
 
-7. **UI** — if description mentions list/table/form/detail/dashboard views, set corresponding flags. If pattern is `library-extension`, leave empty.
+Functional requirements as bullet points. Extract every concrete behavior mentioned in the description. Add obvious implied requirements (e.g., if "list contacts" is mentioned, pagination is implied).
+
+### 1d: Acceptance Criteria
+
+Testable given/when/then statements. One per requirement minimum. These must be behavioral — no implementation references (no function names, file paths, or technology choices).
+
+### 1e: Constraints
+
+Three categories combined in one section:
+
+- **What NOT to build** — features the user explicitly excluded, or features that are obviously out of the current scope. If the user didn't mention exclusions, infer reasonable ones (e.g., "no bulk import for v1").
+- **Project decisions that apply** — if `--project-root` is set and `decisions.sql` exists, parse it and list decisions relevant to this feature. If not available, note: "Run `/scout --bootstrap` first to detect project decisions."
+- **Non-functional requirements** — only if the feature has specific NFRs beyond project defaults (e.g., "p99 latency under 200ms", "HIPAA compliant data handling"). Don't add generic NFRs like "must be fast" — those are noise.
+
+### 1f: Integration Points
+
+Existing code, services, or data models this feature connects to. If `--project-root` is set, scan for:
+- Related models in the database schema (Prisma, SQL, etc.)
+- Existing API routes or functions this feature would call or extend
+- Shared utilities (auth, validation, error handling) the feature must use
+
+If no project root available, ask: "Does this feature integrate with any existing code? (models, APIs, services)"
+
+### 1g: Out of Scope
+
+Explicitly excluded features. This prevents AI agents from hallucinating related functionality. If the user didn't mention exclusions, propose reasonable ones based on the feature (e.g., for "contacts": "contact groups, CRM sync, merge/dedup, CSV import").
+
+Present these as proposals — the user can add or remove.
+
+### 1h: Boundaries
+
+Three-tier system for AI agent behavior during implementation:
+
+- **Always do** — safe actions for this feature (e.g., "follow existing test patterns", "use project error handling")
+- **Ask first** — high-impact decisions (e.g., "adding new dependencies", "changing shared models", "modifying auth logic")
+- **Never do** — hard stops (e.g., "never expose sensitive fields in API responses", "never modify migration files from other features", "never bypass permission checks")
+
+Infer from the feature description and project decisions. Sensitive fields get a "never expose" boundary automatically.
+
+### 1i: FeatureSpec JSON
+
+Extract the machine-readable FeatureSpec from the sections above:
+
+- **product** — from args
+- **pattern** — infer from description:
+  - DB/CRUD/API/UI/form/list → `crud-ui`
+  - External service/sync/webhook → `integration`
+  - State machine/approval/lifecycle → `workflow`
+  - Dashboard/metrics/reports → `analytics`
+  - Add function/validator/module/extend → `library-extension`
+  - If ambiguous, ask with equal-detail options
+- **entity** — primary noun from objective
+- **fields** — from requirements. Infer types: names → string, counts → number, flags → boolean, dates → date, status/role → enum (with values), FKs → reference. Sensitive fields marked.
+- **permissions** — from constraints/user stories if access control mentioned
+- **audit** — true if requirements or constraints mention logging/tracking
+- **integrations** — from integration points if external services involved
+- **ui** — from requirements if UI views mentioned. Empty for library-extension.
 
 ---
 
 ## Step 2: Present and refine
 
-Display the extracted spec as formatted JSON:
+Display the full spec document:
 
-```
-Spec for <product>:
+```markdown
+# <Entity> — Feature Spec
 
+## Objective
+<one sentence>
+
+## User Stories
+- As a <role>, I want to <action> so that <benefit>
+- ...
+
+## Requirements
+- <requirement 1>
+- <requirement 2>
+- ...
+
+## Acceptance Criteria
+- Given <precondition>, when <action>, then <outcome>
+- ...
+
+## Constraints
+**What NOT to build:**
+- <exclusion>
+
+**Project decisions:**
+- [decision-N] <decision content>
+
+**Non-functional (if non-default):**
+- <specific NFR>
+
+## Integration Points
+- <model/service/utility this connects to>
+- ...
+
+## Out of Scope
+- <excluded feature 1>
+- <excluded feature 2>
+
+## Boundaries
+- ✅ Always: <safe actions>
+- ⚠️ Ask first: <high-impact decisions>
+- 🚫 Never: <hard stops>
+
+## FeatureSpec
+​```json
 {
-  "product": "<product>",
-  "pattern": "<pattern>",
-  "entity": "<Entity>",
-  "fields": [
-    {"name": "<name>", "type": "<type>", ...},
-    ...
-  ],
-  "permissions": [...],
-  "audit": <bool>,
-  "integrations": [...],
-  "ui": {...}
+  "product": "...",
+  "pattern": "...",
+  ...
 }
+​```
 ```
 
 Then ask:
 
 ```
-Anything to change? (fields, pattern, permissions, etc. — or "good" to save)
+Anything to change? (sections, fields, scope, etc. — or "good" to save)
 ```
 
 **Refinement loop:**
-- User says "add field X" → add it, re-display
-- User says "remove field X" → remove it, re-display
-- User says "change pattern to Y" → update, re-display
-- User says "make X sensitive" → set sensitive: true on that field, re-display
-- User says "add permission Z" → append to permissions array, re-display
-- User says "good" / "save" / "looks good" / "yes" → proceed to Step 3
-- Max 5 refinement rounds. After 5, proceed regardless.
+- User requests changes → apply, re-display affected section
+- User says "good" / "save" / "yes" → proceed to Step 3
+- Max 5 rounds. After 5, proceed.
 
 ---
 
@@ -110,32 +187,31 @@ Anything to change? (fields, pattern, permissions, etc. — or "good" to save)
 Locate the target project's `decisions.sql`:
 - `--project-root` flag value + `/.claude/decisions.sql`
 - Current working directory + `/.claude/decisions.sql`
-- If not found, skip with: `"No decisions.sql found — skipping conflict pre-check."`
+- If not found, skip: `"No decisions.sql found — skipping conflict pre-check. Run /scout --bootstrap to enable."`
 
-If found, run the same conflict detection logic as `/factory` Step 0.75:
+If found, run conflict detection (same logic as `/factory` Step 0.75):
 - Parse decisions from SQL
-- Check spec against each decision
+- Check FeatureSpec JSON against each decision
 - Classify as CONFLICT or WARNING
 
-**Report conflicts inline** (don't block — this is a pre-check):
+**Report inline** (informational — don't block):
 
 ```
 Decision pre-check:
-  ✓ No conflicts (0 found)
+  ✓ No conflicts
 ```
 
 or:
 
 ```
 Decision pre-check:
-  ⚠ 3 conflicts found (will surface in /factory for resolution):
+  ⚠ 3 conflicts (will surface in /factory for resolution):
     [decision-1] error-handling: spec implies generic errors, project uses AppError
     [decision-6] api-design: spec implies REST, project uses tRPC
     [decision-10] translations: spec has no i18n, project requires Lingui
-  These will be presented as adapt/change choices when you run /factory.
 ```
 
-This is informational — the user can still save the spec. `/factory` handles the actual resolution.
+Conflicts found here are already included in the Constraints section. `/factory` handles the actual adapt/change resolution.
 
 ---
 
@@ -143,9 +219,9 @@ This is informational — the user can still save the spec. `/factory` handles t
 
 Determine output path:
 - If `--edit` mode: overwrite the original file
-- If build mode: write to `<project-root>/specs/<entity-lowercase>.json` or `specs/<entity-lowercase>.json` in cwd. Create `specs/` directory if needed.
+- If build mode: write to `specs/<entity-lowercase>.md` (relative to project root or cwd). Create `specs/` directory if needed.
 
-Write the JSON with 2-space indentation.
+Write the full markdown document. The FeatureSpec JSON is embedded in the `## FeatureSpec` section — `/factory` can extract it from there, or the user can copy it to a standalone `.json` file.
 
 ---
 
@@ -154,15 +230,16 @@ Write the JSON with 2-space indentation.
 ```
 Spec saved: <output-path>
 
-  Product: <product>
+  Objective: <one-line>
   Pattern: <pattern>
   Entity: <Entity>
-  Fields: <count> (<list names>)
-  Permissions: <list or "none">
-  Audit: <yes/no>
-  Integrations: <list or "none">
-  UI: <list of enabled views or "none">
+  Fields: <count> (<names>)
+  Stories: <count>
+  Acceptance criteria: <count>
+  Constraints: <count> (including <N> project decisions)
+  Out of scope: <count> items
   Decision pre-check: <N conflicts, M warnings | clean>
 
-Run: /factory <output-path>
+Run: /factory specs/<entity>.md
+  (or extract the FeatureSpec JSON and run /factory specs/<entity>.json)
 ```
