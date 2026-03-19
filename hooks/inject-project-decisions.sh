@@ -45,7 +45,7 @@ if [[ -z "$PROJECT_ROOT" ]]; then
   exit 0
 fi
 
-# Query decisions scoped to this file
+# Query decisions scoped to this file, apply freshness tiers
 DECISIONS=$(python3 - "$FILE_PATH" "$PROJECT_ROOT" <<'PYEOF' 2>/dev/null
 import sys, sqlite3, os
 
@@ -89,8 +89,37 @@ db.close()
 if not rows:
     sys.exit(0)
 
+# Load freshness scores from run-state.db
+scores = {}
+run_state_path = os.path.join(os.path.expanduser("~"), ".claude", ".claude", "run-state.db")
+if os.path.exists(run_state_path):
+    try:
+        rdb = sqlite3.connect(run_state_path, timeout=2)
+        ids = [str(r[0]) for r in rows]
+        placeholders = ",".join("?" * len(ids))
+        for rid, score in rdb.execute(
+            f"SELECT decision_id, staleness_score FROM decision_freshness WHERE decision_id IN ({placeholders})",
+            ids
+        ):
+            scores[rid] = score
+        rdb.close()
+    except Exception:
+        pass
+
+def one_line(text):
+    first = text.split(". ")[0].split(" — ")[-1].strip()
+    if not first.endswith("."):
+        first += "."
+    return first
+
 for did, content in rows:
-    print(f"[decision-{did}] {content}")
+    staleness = scores.get(did)
+    if staleness is None or staleness < 0.3:
+        print(f"[decision-{did}] {content}")
+    elif staleness <= 0.7:
+        print(f"[decision-{did}] {one_line(content)}")
+    else:
+        print(f"[STALE] [decision-{did}] {one_line(content)}")
 PYEOF
 )
 
