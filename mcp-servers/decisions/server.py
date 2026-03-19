@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import fnmatch
+import os
+import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _SERVER_DIR = Path(__file__).resolve().parent
@@ -61,6 +64,24 @@ def _format_decision(d: Decision) -> str:
     if d.created_at:
         parts.append(f"  Created: {d.created_at}")
     return "\n".join(parts)
+
+
+def _staleness_tier(created_at: str | None) -> str:
+    """Return 'fresh' (<7d), 'aging' (7-30d), 'stale' (>30d), or 'unknown'."""
+    if not created_at:
+        return "unknown"
+    try:
+        dt = datetime.fromisoformat(created_at)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        days = (datetime.now(timezone.utc) - dt).days
+        if days < 7:
+            return "fresh"
+        if days <= 30:
+            return "aging"
+        return "stale"
+    except (ValueError, TypeError):
+        return "unknown"
 
 
 @mcp.tool()
@@ -214,6 +235,106 @@ def sync_decision_store() -> str:
         return f"Rebuilt decision store from dump. Re-indexed {count} decision(s)."
 
     return "Rebuilt decision store from dump. Embedding index skipped (fastembed unavailable)."
+
+
+@mcp.tool()
+def get_decision(decision_id: int) -> str:
+    """Look up a single decision by ID. Returns full content, reasoning, scopes, and freshness score (if available).
+
+    Args:
+        decision_id: The numeric decision ID.
+    """
+    store = _get_store()
+    d = store.get(decision_id)
+    if d is None:
+        return f"Decision #{decision_id} not found."
+
+    lines = [_format_decision(d)]
+    lines.append(f"  Staleness: {_staleness_tier(d.created_at)}")
+
+    run_db = os.path.expanduser("~/.claude/.claude/run-state.db")
+    if os.path.exists(run_db):
+        rconn = sqlite3.connect(run_db, timeout=5)
+        try:
+            row = rconn.execute(
+                "SELECT staleness_score, days_since_activity, reinforcement_count "
+                "FROM decision_freshness WHERE decision_id = ?",
+                (decision_id,),
+            ).fetchone()
+            if row:
+                lines.append(
+                    f"  Freshness: score={row[0]:.2f}, "
+                    f"days_inactive={row[1]}, reinforcements={row[2]}"
+                )
+        except sqlite3.OperationalError:
+            pass
+        finally:
+            rconn.close()
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def query_decisions_by_domain(domain: str, limit: int = 10) -> str:
+    """Query decisions filtered by domain. Returns matching decisions with staleness tier labels.
+
+    Gracefully returns an empty result if the domain column doesn't exist yet (Phase 3 schema).
+
+    Args:
+        domain: Domain name to filter by (exact match or substring).
+        limit: Maximum results to return (default 10).
+    """
+    store = _get_store()
+    conn = store._get_connection()
+    try:
+        columns = conn.execute("PRAGMA table_info(decisions)").fetchall()
+        has_domain = any(col[1] == "domain" for col in columns)
+
+        if not has_domain:
+            return (
+                "No decisions found (domain column not available "
+                "-- Phase 3 schema required)."
+            )
+
+        rows = conn.execute(
+            "SELECT id, content, reasoning, status, source, superseded_by, "
+            "created_at, updated_at FROM decisions "
+            "WHERE domain = ? OR domain LIKE ? ORDER BY id LIMIT ?",
+            (domain, f"%{domain}%", limit),
+        ).fetchall()
+
+        if not rows:
+            return f"No decisions found for domain '{domain}'."
+
+        lines = [f"Found {len(rows)} decision(s) for domain '{domain}':\n"]
+        for row in rows:
+            scope_rows = conn.execute(
+                "SELECT id, decision_id, scope_type, scope_value "
+                "FROM decision_scopes WHERE decision_id = ?",
+                (row[0],),
+            ).fetchall()
+            scopes = [
+                DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
+                for s in scope_rows
+            ]
+            d = Decision(
+                id=row[0],
+                content=row[1],
+                reasoning=row[2],
+                status=row[3],
+                source=row[4],
+                superseded_by=row[5],
+                created_at=row[6],
+                updated_at=row[7],
+                scopes=scopes,
+            )
+            lines.append(_format_decision(d))
+            lines.append(f"  Staleness: {_staleness_tier(d.created_at)}")
+            lines.append("")
+
+        return "\n".join(lines)
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
