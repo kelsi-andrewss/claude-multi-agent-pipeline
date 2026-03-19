@@ -43,7 +43,8 @@ def generate_rules(
 
     try:
         rows = conn.execute(
-            "SELECT d.id, d.content, d.reasoning, ds.scope_type, ds.scope_value "
+            "SELECT d.id, d.content, d.reasoning, ds.scope_type, ds.scope_value, "
+            "d.domain, d.updated_at "
             "FROM decisions d "
             "LEFT JOIN decision_scopes ds ON d.id = ds.decision_id "
             "WHERE d.status = 'active' "
@@ -110,12 +111,49 @@ def _format_decision(did: int, content: str, reasoning: str | None, score: float
     return f"- [decision-{did}] {content}"
 
 
+def _tier_label(score: float) -> str:
+    if score < _TIER_FRESH:
+        return "fresh"
+    if score > _TIER_AGING:
+        return "stale"
+    return "aging"
+
+
+def _render_domain_summary(domain_ids: dict[str, set[int]], freshness: dict[int, float]) -> list[str]:
+    if not domain_ids:
+        return []
+
+    lines = ["## Domain summary", ""]
+    for domain in sorted(domain_ids):
+        ids = domain_ids[domain]
+        total = len(ids)
+        tier_counts: dict[str, int] = defaultdict(int)
+        for did in ids:
+            tier_counts[_tier_label(freshness.get(did, 0.5))] += 1
+
+        parts = []
+        for label in ("fresh", "aging", "stale"):
+            count = tier_counts.get(label, 0)
+            if count:
+                parts.append(f"{count} {label}")
+
+        breakdown = f" ({', '.join(parts)})" if parts else ""
+        lines.append(f"- {domain}: {total} decision{'s' if total != 1 else ''}{breakdown}")
+
+    lines.append("")
+    return lines
+
+
 def _render_markdown(rows: list[tuple], project_root: str, freshness: dict[int, float]) -> str:
     global_decisions: list[tuple[int, str, str | None]] = []
     scoped: dict[str, list[tuple[int, str, str | None]]] = defaultdict(list)
     seen_global: set[int] = set()
+    domain_ids: dict[str, set[int]] = defaultdict(set)
 
-    for did, content, reasoning, scope_type, scope_value in rows:
+    for did, content, reasoning, scope_type, scope_value, domain, _updated_at in rows:
+        if domain:
+            domain_ids[domain].add(did)
+
         if scope_type is None and scope_value is None:
             if did not in seen_global:
                 global_decisions.append((did, content, reasoning))
@@ -130,6 +168,8 @@ def _render_markdown(rows: list[tuple], project_root: str, freshness: dict[int, 
         f"> Regenerate: python3 -m decision_memory.rules_generator {project_root}",
         "",
     ]
+
+    lines.extend(_render_domain_summary(domain_ids, freshness))
 
     if global_decisions:
         lines.append("## Global decisions")
@@ -150,8 +190,6 @@ def _render_markdown(rows: list[tuple], project_root: str, freshness: dict[int, 
     if not global_decisions and not scoped:
         lines.append("No decisions recorded yet.")
         lines.append("")
-
-    # Phase 3 placeholder -- story-924 will replace with real domain summary
 
     return "\n".join(lines)
 
