@@ -146,17 +146,29 @@ Parse each token in `{{args}}`:
 - **No args** → call `pm_view(detail="summary")`, collect all stories where `state` is `draft` or `ready`
 
 After collecting, validate each story and **skip with a warning** if any of the following:
+- `state` is `done` or `archived` — note: "story-NNN is already {state} — skipping"
+- `state` is `in-progress` — note: "story-NNN is in-progress (claimed by another session) — skipping"
+- `agent` is null or empty — warn: "story-NNN has no agent assigned — set it with pm_update_story"
+- `agent` is `"manual"` — note: "story-NNN requires manual execution — skipping"
 - `plan_file` is null or empty:
   - Load `ToolSearch: select:mcp__gemini__pm_plan_story` and call `pm_plan_story(story_id=<id>)` for all unplanned stories **in parallel** (single message).
   - Wait for all `pm_plan_story` calls to complete.
   - Launch one background `general-purpose` agent per unplanned story to write the plan file (same prompt as draft-plan Step 5).
   - Wait for all agents to complete, then re-fetch each story to confirm `plan_file` is now set.
   - If still missing after auto-planning, skip with warning: "story-NNN: auto-planning failed — skipping."
-- `agent` is null or empty — warn: "story-NNN has no agent assigned — set it with pm_update_story"
-- `agent` is `"manual"` — note: "story-NNN requires manual execution — skipping"
-- `state` is `done`, `archived`, or `in-progress` — note: "story-NNN is already {state} — skipping"
 
-> **Note:** Stories in `ready` state are the primary target — do NOT skip them. Only skip states that indicate the story is already complete (`done`, `archived`) or already running elsewhere (`in-progress`).
+> **Note:** Stories in `ready` or `draft` state are the primary target. `in-progress` means another session claimed it — always skip.
+
+**Session claim (anti-collision):** After validation, immediately claim all eligible stories by transitioning them to `in-progress`:
+
+```
+For each eligible story:
+  pm_update_story(story_id, state="in-progress", force=True)
+```
+
+This happens in the resolution subagent BEFORE worktree creation or coder launch. The state transition is the lock — any other session running `/run-stories` concurrently will see `in-progress` and skip. If this session crashes before completing a story, the story stays `in-progress` and must be manually reset via `pm_update_story(story_id, state="ready", force=True)` or `/recover`.
+
+**Why state-based, not a separate lock table:** Adding a lock column or table creates a second source of truth that can drift from the actual state. The story state IS the lock. `in-progress` means "someone is working on this." If the state says `ready`, no one is. This is the simplest mechanism that prevents the collision.
 
 Deduplicate by story ID. If the list is empty after validation, stop and report all skips with reasons.
 
@@ -425,9 +437,8 @@ You MUST emit NEED_DECISION with "CRITICAL:" prefix for:
 
    Parse the JSON result. If `status` is not `"success"` or `verified` is not `true`, STOP and report: "Worktree setup failed: <error from JSON>".
 
-2. Mark the story in-progress and record the branch/worktree in the DB:
-   Call: pm_update_story("<story_id>", state="in-progress", branch="<story-branch>", worktree_path="<worktree-path>", worktree_active=True, force=True)
-   (Use force=True so this succeeds regardless of whether the story is in ready or draft state)
+2. Record the branch/worktree in the DB (story is already in-progress — claimed by the resolution subagent in Step 1):
+   Call: pm_update_story("<story_id>", branch="<story-branch>", worktree_path="<worktree-path>", worktree_active=True)
 
 3. Read the plan file at `<plan_file>`. Understand what changes are required.
 

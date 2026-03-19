@@ -14,7 +14,7 @@ def dump_to_sql(store: DecisionStore, dump_path: Path) -> None:
     conn = store._get_connection()
     try:
         decisions = conn.execute(
-            "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at "
+            "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain "
             "FROM decisions ORDER BY id"
         ).fetchall()
 
@@ -26,7 +26,7 @@ def dump_to_sql(store: DecisionStore, dump_path: Path) -> None:
         conn.close()
 
     lines: list[str] = []
-    lines.append(f"-- decision_memory dump v1")
+    lines.append(f"-- decision_memory dump v2")
     lines.append(f"-- generated {datetime.now(timezone.utc).isoformat()}")
     lines.append("")
 
@@ -41,7 +41,8 @@ def dump_to_sql(store: DecisionStore, dump_path: Path) -> None:
         "        CHECK (source IN ('human', 'ai-discovered', 'ai-proposed')),\n"
         "    superseded_by INTEGER REFERENCES decisions(id),\n"
         "    created_at TEXT NOT NULL DEFAULT (datetime('now')),\n"
-        "    updated_at TEXT NOT NULL DEFAULT (datetime('now'))\n"
+        "    updated_at TEXT NOT NULL DEFAULT (datetime('now')),\n"
+        "    domain TEXT\n"
         ");"
     )
     lines.append("")
@@ -57,11 +58,11 @@ def dump_to_sql(store: DecisionStore, dump_path: Path) -> None:
     lines.append("")
 
     for row in decisions:
-        did, content, reasoning, status, source, superseded_by, created_at, updated_at = row
+        did, content, reasoning, status, source, superseded_by, created_at, updated_at, domain = row
         lines.append(
-            f"INSERT OR REPLACE INTO decisions (id, content, reasoning, status, source, superseded_by, created_at, updated_at) "
+            f"INSERT OR REPLACE INTO decisions (id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain) "
             f"VALUES ({did}, {_sql_str(content)}, {_sql_str(reasoning)}, {_sql_str(status)}, "
-            f"{_sql_str(source)}, {_sql_int(superseded_by)}, {_sql_str(created_at)}, {_sql_str(updated_at)});"
+            f"{_sql_str(source)}, {_sql_int(superseded_by)}, {_sql_str(created_at)}, {_sql_str(updated_at)}, {_sql_str(domain)});"
         )
 
     if decisions:

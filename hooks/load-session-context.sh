@@ -294,6 +294,11 @@ print(f"CLAUDE_TRUST_LEVEL={level}")
 TRUSTEOF
   fi
 
+  # Background: compute decision freshness scores (no session output)
+  if [[ -f "$HOME/.claude/.claude/decisions.sql" || -f "$HOME/.claude/.claude/decisions.db" ]]; then
+    nohup python3 "$HOME/.claude/scripts/decision-freshness.py" --project-root "$HOME/.claude" > "/tmp/decision-freshness-${CLAUDE_SESSION_ID:-$$}.log" 2>&1 &
+  fi
+
   SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
 
   # OpenMemory health check — warn if Ollama is unreachable
@@ -307,6 +312,11 @@ TRUSTEOF
 
   # Session-start timestamp for debrief freshness check
   echo "$(date +%s)" > "/tmp/session-start-${SESSION_ID}"
+
+  # Background: decision freshness scoring (no session output)
+  if [[ -f "$HOME/.claude/.claude/decisions.sql" || -f "$HOME/.claude/.claude/decisions.db" ]]; then
+    nohup python3 "$HOME/.claude/scripts/decision-freshness.py" --project-root "$HOME/.claude" > "/tmp/decision-freshness-${SESSION_ID}.log" 2>&1 &
+  fi
 
   # Session agenda + stale detection (single Python block)
   DB_FILE="$HOME/.claude/.claude/epics.db"

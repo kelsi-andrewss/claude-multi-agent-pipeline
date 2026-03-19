@@ -24,6 +24,7 @@ class Decision:
     superseded_by: int | None
     created_at: str | None
     updated_at: str | None
+    domain: str | None = None
     scopes: list[DecisionScope] = field(default_factory=list)
 
     def __post_init__(self):
