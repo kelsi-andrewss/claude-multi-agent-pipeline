@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS decisions (
         CHECK (source IN ('human', 'ai-discovered', 'ai-proposed')),
     superseded_by INTEGER REFERENCES decisions(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    domain TEXT
 );
 
 CREATE TABLE IF NOT EXISTS decision_scopes (
@@ -51,6 +52,25 @@ CREATE VIRTUAL TABLE IF NOT EXISTS decision_embeddings USING vec0(
     embedding float[256]
 );
 """
+
+_DOMAIN_PREFIX_MAP = [
+    ("hooks/", "hooks"),
+    ("mcp-servers/", "mcp"),
+    ("scripts/", "scripts"),
+    ("decision_memory/", "decision-memory"),
+    ("skills/", "skills"),
+]
+
+
+def _derive_domain_from_scopes(scopes: list[DecisionScope]) -> str | None:
+    file_scopes = [s for s in scopes if s.scope_type == "file"]
+    if not file_scopes:
+        return None
+    for scope in file_scopes:
+        for prefix, domain in _DOMAIN_PREFIX_MAP:
+            if scope.scope_value.startswith(prefix):
+                return domain
+    return "general"
 
 
 class DecisionStore:
@@ -103,9 +123,12 @@ class DecisionStore:
         conn = self._get_connection()
         try:
             now = datetime.now(timezone.utc).isoformat()
+            domain = decision.domain
+            if domain is None and decision.scopes:
+                domain = _derive_domain_from_scopes(decision.scopes)
             cursor = conn.execute(
-                "INSERT INTO decisions (content, reasoning, status, source, superseded_by, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO decisions (content, reasoning, status, source, superseded_by, created_at, updated_at, domain) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     decision.content,
                     decision.reasoning,
@@ -114,6 +137,7 @@ class DecisionStore:
                     decision.superseded_by,
                     now,
                     now,
+                    domain,
                 ),
             )
             decision_id = cursor.lastrowid
@@ -139,7 +163,7 @@ class DecisionStore:
         conn = self._get_connection()
         try:
             row = conn.execute(
-                "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at "
+                "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain "
                 "FROM decisions WHERE id = ?",
                 (decision_id,),
             ).fetchone()
@@ -165,6 +189,7 @@ class DecisionStore:
                 superseded_by=row[5],
                 created_at=row[6],
                 updated_at=row[7],
+                domain=row[8],
                 scopes=scopes,
             )
         finally:
@@ -176,13 +201,13 @@ class DecisionStore:
         try:
             if status is not None:
                 rows = conn.execute(
-                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at "
+                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain "
                     "FROM decisions WHERE status = ? ORDER BY id",
                     (status,),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at "
+                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain "
                     "FROM decisions ORDER BY id"
                 ).fetchall()
 
@@ -206,6 +231,7 @@ class DecisionStore:
                         superseded_by=row[5],
                         created_at=row[6],
                         updated_at=row[7],
+                        domain=row[8],
                         scopes=scopes,
                     )
                 )
@@ -241,10 +267,20 @@ class DecisionStore:
         return stored_hash != (current_hash or "")
 
     def _init_schema(self, conn: sqlite3.Connection) -> None:
+        self._migrate_v1_to_v2(conn)
         conn.executescript(_SCHEMA_SQL)
         conn.executescript(_METADATA_SQL)
         conn.executescript(_FTS_SQL)
         self._try_create_vec_table(conn)
+
+    def _migrate_v1_to_v2(self, conn: sqlite3.Connection) -> None:
+        try:
+            cols = conn.execute("PRAGMA table_info(decisions)").fetchall()
+        except sqlite3.OperationalError:
+            return
+        col_names = {c[1] for c in cols}
+        if cols and "domain" not in col_names:
+            conn.execute("ALTER TABLE decisions ADD COLUMN domain TEXT")
 
     def _try_create_vec_table(self, conn: sqlite3.Connection) -> None:
         if self._vec_available is False:
