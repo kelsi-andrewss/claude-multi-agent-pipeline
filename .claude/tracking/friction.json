@@ -1326,5 +1326,37 @@
     "model": "claude-opus-4-6",
     "detail": "Retry succeeded",
     "resolved": true
+  },
+  {
+    "timestamp": "2026-03-18T22:58:30.919Z",
+    "date": "2026-03-18",
+    "session_id": "b56caced-e641-42cf-ab3b-72672907089c",
+    "turn_index": 618,
+    "source": "main",
+    "agent_type": null,
+    "agent_id": null,
+    "project": ".claude",
+    "category": "command_failed",
+    "tool_name": "Bash",
+    "skill": null,
+    "model": "claude-opus-4-6",
+    "detail": "Exit code 1\nerror: Your local changes to the following files would be overwritten by checkout:\n\t.claude/tracking/charts.html\n\t.claude/tracking/friction.json\n\t.claude/tracking/skill-telemetry.jsonl\n\tskill-changelog.md\nPlease commit your changes or stash them before you switch branches.\nAborting",
+    "resolved": null
+  },
+  {
+    "timestamp": "2026-03-18T22:58:39.340Z",
+    "date": "2026-03-18",
+    "session_id": "b56caced-e641-42cf-ab3b-72672907089c",
+    "turn_index": 619,
+    "source": "main",
+    "agent_type": null,
+    "agent_id": null,
+    "project": ".claude",
+    "category": "retry",
+    "tool_name": "Bash",
+    "skill": null,
+    "model": "claude-opus-4-6",
+    "detail": "Retry succeeded",
+    "resolved": true
   }
 ]

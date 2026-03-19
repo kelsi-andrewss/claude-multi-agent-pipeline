@@ -174,3 +174,16 @@ these dates to compare friction rates before and after skill changes.
 - 2026-03-18 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
 - 2026-03-18 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
 - 2026-03-18 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-18 modified /research — Deep web research + full presearch pipeline. Runs /scope, then fan-out/fan-in we
+- 2026-03-18 modified /research — Deep web research + full presearch pipeline. Runs /scope, then fan-out/fan-in we
+- 2026-03-18 modified /research — Deep web research + full presearch pipeline. Runs /scope, then fan-out/fan-in we
+- 2026-03-18 modified /presearch — Core project research pipeline: routes /scope -> /clarify+/scout (parallel) -> /briefing. No web search — that's /research's job. Produces a structured briefing (presearch/<slug>.md) for /ship. Use when the user says \"/presearch <topic>\", \"/presearch path/to/requirements.md\", \"/presearch presearch/existing-briefing.md\", or \"/presearch --deep <topic>\".
+- 2026-03-18 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-18 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-18 modified /clarify — Detect project constraints, analyze ambiguities via Gemini, batch Q&A to the user, and write a typed JSON artifact (.clarify-<slug>.json) for downstream consumption. Use when the user says \"/clarify <topic>\", \"/clarify path/to/requirements.md\", \"/clarify --quick <topic>\", or \"/clarify --research <path> <topic>\".
+- 2026-03-18 modified /quickfix — Standalone quickfix pipeline: validates criteria, writes plan, launches coder in
+- 2026-03-18 modified /briefing — Gemini synthesis + Claude critique + scope check + decision recording. Reads sco
+- 2026-03-18 modified /briefing — Gemini synthesis + Claude critique + scope check + decision recording. Reads sco
+- 2026-03-18 modified /argue — Adversarial Claude-vs-Gemini debate tool. Claude and Gemini form independent pos
+- 2026-03-18 modified /brainlift — Facilitated BrainLift creation: domain research via Gemini + WebSearch first, th
+- 2026-03-18 modified /spec — Interactive spec builder: takes a product name + natural language description an
