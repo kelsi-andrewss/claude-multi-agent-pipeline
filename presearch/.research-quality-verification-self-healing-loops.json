@@ -1,0 +1,115 @@
+{
+  "angle": "Quality Verification and Self-Healing Loops",
+  "hypothesis": "Achieving 80%+ CI pass rate on first-run AI output requires internal sandbox CI loops where the system detects failures and applies auto-fixes iteratively before the final PR is submitted.",
+  "findings": [
+    {
+      "claim": "SWE-agent (Princeton NLP) uses a ReAct loop with a specialized Agent-Computer Interface, achieving 18.29% resolve rate on full SWE-bench with GPT-4 in early 2024. The loop repeats up to 30+ steps, capturing stack traces and refining edits until tests pass or the turn limit is reached.",
+      "source_url": "https://swe-agent.com",
+      "confidence": "high"
+    },
+    {
+      "claim": "By 2025, agentic harnesses combined with higher-reasoning models (Claude 3.5/4) reached 40-50%+ on SWE-bench full, with top multi-agent teams reaching 77-79% on the human-verified SWE-bench Verified subset.",
+      "source_url": "https://vals.ai/blog/swe-bench-2025-state-of-the-art",
+      "confidence": "medium"
+    },
+    {
+      "claim": "OpenHands (formerly OpenDevin) resolves approximately 53% of SWE-bench Verified issues using Claude 3.5 Sonnet with a specialized CodeAct v2 environment for terminal commands and file management. Approximately 20% of its own repository commits are agent-authored.",
+      "source_url": "https://github.com/All-Hands-AI/OpenHands",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Aider uses an Architect/Editor pattern where a high-reasoning model plans fixes and a faster model applies diffs. It automatically runs linters and test suites after every edit, retrying up to 6 times on failure. Achieved 88% on its Polyglot benchmark and 26.3% on SWE-bench Lite in mid-2024.",
+      "source_url": "https://aider.chat/docs/benchmarks.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "Devin (Cognition Labs) uses a dual-agent architecture: a Coding Agent implements while a separate Review Agent (Bug Catcher) acts as skeptic, forcing repair loops before code reaches the terminal. Integrates with CI/CD and Sentry for automatic Diagnosis-Remediation-Validation cycles. Reported 13.86% on SWE-bench at March 2024 launch.",
+      "source_url": "https://www.cognition.ai/blog/devin-is-the-first-ai-software-engineer",
+      "confidence": "low"
+    },
+    {
+      "claim": "ReVeal (Microsoft Research Asia, June 2025) uses a Generation->Self-Verification->Tool Execution->Refinement loop with Turn-level Advantage Policy Optimization (TAPO). Key finding: a model trained on only 3 turns continues to improve over 20+ turns at inference, eventually surpassing much larger models like DeepSeek-R1.",
+      "source_url": "https://arxiv.org/abs/2506.11442",
+      "confidence": "high"
+    },
+    {
+      "claim": "The foundational iterative self-repair architecture has four components: Generator (produces code), Executor (sandboxed runtime), Critic/Reflector (analyzes failures via LLM), and Episodic Memory (stores failed attempts to prevent repetition). Established by Self-Debug (2023), Reflexion (2023), and LEVER (2023).",
+      "source_url": "https://arxiv.org/abs/2306.09896",
+      "confidence": "high"
+    },
+    {
+      "claim": "Self-Debug (2023) formalized the 'rubber duck debugging' loop for LLMs, showing that requiring a model to explain its code line-by-line before fixing it significantly improves repair success rates.",
+      "source_url": "https://arxiv.org/abs/2304.05128",
+      "confidence": "high"
+    },
+    {
+      "claim": "Reflexion (2023) introduced 'verbal reinforcement learning' where agents maintain persistent linguistic memory of mistakes to guide future actions, enabling cross-task learning from failures.",
+      "source_url": "https://arxiv.org/abs/2303.11366",
+      "confidence": "high"
+    },
+    {
+      "claim": "LDB - Large Language Model Debugger (2024) uses a 'segmentation' approach where the agent breaks code into small blocks and verifies intermediate variable states of each block, mimicking a human developer using a debugger watch window.",
+      "source_url": "https://arxiv.org/abs/2402.16906",
+      "confidence": "high"
+    },
+    {
+      "claim": "Modern pre-PR validation uses a four-layer architecture: (1) deterministic static analysis with LLM-hallucination-specific rulesets, (2) semantic/requirement alignment checking against Jira/Linear tickets, (3) dynamic runtime verification in sandboxed Micro-VMs (E2B), (4) agentic critique via LLM-as-Judge using a higher-reasoning model.",
+      "source_url": "https://coderabbit.ai/blog/agentic-code-validation",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Multi-agent orchestration for code repair uses specialized sub-agents: Diagnoser (repo navigation), Planner (managerial coordination), Engineer (implementation), and Validator (sandboxed testing). The Validator runs the full CI/CD suite and provides healing instructions back to the Engineer if regressions are detected.",
+      "source_url": "https://vals.ai/blog/swe-bench-2025-state-of-the-art",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Accenture reported an 84% increase in successful builds when using AI coding agents (GitHub Copilot integration) to catch syntax and logic errors before CI pipeline execution.",
+      "source_url": "https://github.blog/news-insights/enterprise-software-development/accenture-github-copilot-case-study",
+      "confidence": "low"
+    },
+    {
+      "claim": "Nubank reported 12x efficiency improvement in engineering hours and 20x cost savings during a massive ETL migration using Devin agents to handle repetitive refactoring tasks with autonomous CI fix loops.",
+      "source_url": "https://www.devin.ai/blog/nubank-migration-case-study",
+      "confidence": "low"
+    },
+    {
+      "claim": "CodeRabbit employs a two-stage agentic loop: stage 1 gathers deep context using AST-based Codegraph and Model Context Protocol (MCP), stage 2 uses a reasoning agent to filter false positives and enforce natural language quality gates.",
+      "source_url": "https://coderabbit.ai/blog/tools-in-jail-sandboxing",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Predictive test selection using AI semantic analysis of code changes can reduce feedback loop duration by 50-70% while maintaining safety, enabling faster iteration cycles for self-healing agents.",
+      "source_url": "https://devopstory.com/ai-agent-cicd-integration",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Spec-Driven Development (SDD) pattern: agents generate specification documents and acceptance tests BEFORE implementation. The PR gate only opens if the agent provides logs proving those specific tests passed in a sandbox.",
+      "source_url": "https://devopstory.com/ai-agent-cicd-integration",
+      "confidence": "medium"
+    },
+    {
+      "claim": "LEVER (2023) proposes a specialized verifier model trained to score the likelihood that a program is correct based on the combination of prompt, code, and execution result -- separating verification from generation.",
+      "source_url": "https://arxiv.org/abs/2302.04110",
+      "confidence": "high"
+    }
+  ],
+  "key_insights": [
+    "Self-healing loops follow a consistent four-component architecture (Generator, Executor, Critic, Episodic Memory) that has evolved from academic papers (2023) to production systems (2025), with the critical shift being from 'LLM-as-Judge' to 'Environment-as-Judge' where sandboxed runtimes provide objective pass/fail signals.",
+    "Iteration count matters more than model size: ReVeal showed a model trained on 3 turns can surpass larger models when given 20+ inference turns, and Aider's 6-retry loop with an Architect/Editor split achieves 88% on polyglot benchmarks -- the self-healing loop itself is the primary quality driver.",
+    "SWE-bench resolve rates jumped from ~18% (single-agent, 2024) to 53-79% (multi-agent orchestration, 2025-2026) by combining specialized sub-agents (Diagnoser, Planner, Engineer, Validator) with sandboxed CI execution, validating the hypothesis that internal sandbox CI loops are necessary for high pass rates."
+  ],
+  "gaps": [
+    "No reliable data on optimal iteration cap -- when do self-healing loops hit diminishing returns? ReVeal mentions 20+ turns but no systematic study of cost-vs-quality tradeoff curves across iteration counts.",
+    "Missing comparison of sandbox CI loop overhead (compute cost, wall-clock time) versus the quality gains -- no published cost-benefit analysis for running 6-30 iterations before PR submission.",
+    "No independent benchmarks for commercial tools (Devin, CodeRabbit) -- all performance claims come from vendor marketing; SWE-bench entries from commercial agents lack full reproducibility details.",
+    "Limited research on failure modes of self-healing loops -- when agents get stuck in infinite repair cycles, oscillate between fixes, or degrade code quality through accumulated patches across iterations.",
+    "No data on how self-healing loop effectiveness varies by language, framework, or codebase complexity -- all major benchmarks focus on Python repositories."
+  ],
+  "research_metadata": {
+    "queries_executed": 5,
+    "queries_succeeded": 4,
+    "queries_failed": 1,
+    "timestamp": "2026-03-17",
+    "model_used": "gemini via MCP with Google Search grounding"
+  }
+}

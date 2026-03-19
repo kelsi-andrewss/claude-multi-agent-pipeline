@@ -1,0 +1,227 @@
+{
+  "slug": "audit-memory-pipeline",
+  "scope": {
+    "files": 4,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [".clarify-audit-memory-pipeline.json"],
+  "skill": "scout",
+  "data": {
+    "topic": "Fix memory/correction pipeline bugs from AUDIT.md: BUG-5, BUG-6, BUG-10, BUG-11, R-7, CQ-6, CQ-10",
+    "findings": [
+      {
+        "category": "pattern",
+        "summary": "om_write() is the canonical gate for all OpenMemory writes — validates tags, dedup, budgets",
+        "details": "om_write(content, tags, user_id, sector, salience, decay_lambda) enforces ALLOWED_TAGS whitelist, 0.85 cosine similarity dedup, per-tag budget limits. Default feedback_score is the salience parameter (0.5). All writes must route through this function.",
+        "files": ["hooks/lib/om_write.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "signal_processor.py owns all correction detection logic (decision-43, decision-75)",
+        "details": "process_session_corrections() is the single entry point. Shell hooks call Python. stop_processor stages should delegate to signal_processor, not duplicate logic.",
+        "files": ["hooks/lib/signal_processor.py", "hooks/lib/stop_processor.py"],
+        "source": "decision"
+      },
+      {
+        "category": "constraint",
+        "summary": "decision-104 already decided: route _om_shadow_decision through om_write()",
+        "details": "Fixes both dedup bypass (BUG-6) and immediate pruning (BUG-11). om_write() sets feedback_score=0.5 by default. Requires MCP server sys.path to include project root for import.",
+        "files": ["mcp-servers/gemini/tools_knowledge.py", "hooks/lib/om_write.py"],
+        "source": "decision"
+      },
+      {
+        "category": "constraint",
+        "summary": "decision-103 decided fcntl.flock for stop_processor lockfile (not in scope but adjacent)",
+        "details": "Advisory locking, auto-releases on crash. Rejected O_CREAT|O_EXCL due to stale lock risk.",
+        "files": ["hooks/lib/stop_processor.py"],
+        "source": "decision"
+      },
+      {
+        "category": "architecture",
+        "summary": "stop_processor has 3 stages: correction_detection, signal_processing, distillation",
+        "details": "Stage 1 (line 82) calls process_session_corrections(). Stage 2 (line 145) calls it AGAIN — this is R-7. Stage 2 should only run signal/preference updates, not re-detect corrections.",
+        "files": ["hooks/lib/stop_processor.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "project_root computed via dirname chain from db_file path",
+        "details": "db_file = ~/.claude/.claude/epics.db. 3 dirname calls → ~ (HOME). Should be 2 dirname calls → ~/.claude. Found at signal_processor.py:388, signal_processor.py:732, stop_processor.py:144.",
+        "files": ["hooks/lib/signal_processor.py", "hooks/lib/stop_processor.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "enforce_budget() deletes oldest entries then returns — caller does INSERT separately",
+        "details": "Lines 84-126 in om_write.py. No transaction boundary wrapping delete+insert. Crash between delete and insert loses entries permanently.",
+        "files": ["hooks/lib/om_write.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "_compute_simhash uses MD5 hex truncation, not actual SimHash",
+        "details": "hashlib.md5(content.lower().strip().encode()).hexdigest()[:16]. Used as embedding fallback. Name misleads maintainers expecting near-duplicate detection.",
+        "files": ["hooks/lib/om_write.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "test",
+        "summary": "No unit tests exist for om_write.py, signal_processor.py, or stop_processor.py",
+        "details": "Only test_merge_gate.py and test_init_run_db.py exist. pytest framework with tmp_path fixtures and real subprocess calls (no mocking).",
+        "files": [".claude/tests/test_merge_gate.py", ".claude/tests/test_init_run_db.py"],
+        "source": "codebase"
+      }
+    ],
+    "decisions_relevant": [
+      {
+        "id": "decision-104",
+        "summary": "Shadow decision writes route through om_write() instead of direct INSERT",
+        "impact": "Directly resolves BUG-6 approach — use om_write() not direct INSERT. Also fixes BUG-11 since om_write sets feedback_score=0.5"
+      },
+      {
+        "id": "decision-43",
+        "summary": "Correction detection single source of truth in signal_processor.py",
+        "impact": "Confirms R-7 fix direction — stop_processor should not re-run correction detection"
+      },
+      {
+        "id": "decision-75",
+        "summary": "Correction pipeline unified into signal_processor.py process_session_corrections()",
+        "impact": "Supports CQ-6 — extract shared logic so stop_processor delegates rather than duplicates"
+      },
+      {
+        "id": "decision-79",
+        "summary": "Reduce to 3 persistence surfaces (correction_groups DB, rendered-prefs.md, openmemory.sqlite)",
+        "impact": "Context for why om_write correctness matters — it's one of only 3 persistence surfaces"
+      },
+      {
+        "id": "decision-103",
+        "summary": "Lockfile strategy: fcntl.flock advisory locking for stop_processor",
+        "impact": "Adjacent to BUG-3 (not in scope) — don't contradict this decision"
+      }
+    ],
+    "testable_assertions": [
+      {
+        "assertion": "om_write() wraps enforce_budget delete + new entry insert in a single transaction",
+        "category": "pattern_conformance",
+        "verification": "Read om_write.py, confirm 'with conn:' block covers both DELETE and INSERT",
+        "source": "codebase"
+      },
+      {
+        "assertion": "_om_shadow_decision calls om_write() instead of direct INSERT",
+        "category": "pattern_conformance",
+        "verification": "Read tools_knowledge.py, confirm no raw INSERT INTO memories in _om_shadow_decision",
+        "source": "decision-104"
+      },
+      {
+        "assertion": "project_root uses exactly 2 dirname calls on db_file, not 3",
+        "category": "architecture_boundary",
+        "verification": "Grep for os.path.dirname chains on db_file in signal_processor.py and stop_processor.py — should be exactly 2 nested calls",
+        "source": "codebase"
+      },
+      {
+        "assertion": "process_session_corrections is called exactly once per session stop",
+        "category": "architecture_boundary",
+        "verification": "Grep stop_processor.py for process_session_corrections — should appear in stage_correction_detection only, not in stage_signal_processing",
+        "source": "decision-43"
+      },
+      {
+        "assertion": "_compute_simhash is renamed to _content_hash",
+        "category": "pattern_conformance",
+        "verification": "Grep om_write.py for _compute_simhash — should return 0 matches; _content_hash should exist",
+        "source": "codebase"
+      },
+      {
+        "assertion": "No entries with feedback_score=0 are written to openmemory.sqlite",
+        "category": "pattern_conformance",
+        "verification": "Grep all Python files for feedback_score.*=.*0 — should find none writing to memories table",
+        "source": "codebase"
+      }
+    ],
+    "write_targets": [
+      "hooks/lib/om_write.py",
+      "hooks/lib/stop_processor.py",
+      "hooks/lib/signal_processor.py",
+      "mcp-servers/gemini/tools_knowledge.py"
+    ],
+    "read_targets": [
+      "hooks/lib/embedding_utils.py",
+      "hooks/lib/hook_generator.py",
+      ".claude/tests/test_merge_gate.py",
+      "AUDIT.md"
+    ],
+    "conflicts": [],
+    "completeness": {
+      "confidence": "exhaustive",
+      "occurrences": [
+        {
+          "target": "enforce_budget()",
+          "locations": ["hooks/lib/om_write.py:84-126", "hooks/lib/om_write.py:179 (caller)"],
+          "search_strategies": ["grep enforce_budget", "grep om_write imports"],
+          "blind_spots": []
+        },
+        {
+          "target": "_om_shadow_decision()",
+          "locations": ["mcp-servers/gemini/tools_knowledge.py:49-90 (def)", "mcp-servers/gemini/tools_knowledge.py:172 (call)"],
+          "search_strategies": ["grep _om_shadow_decision", "grep INSERT.*memories"],
+          "blind_spots": []
+        },
+        {
+          "target": "os.path.dirname chain on db_file",
+          "locations": ["hooks/lib/signal_processor.py:388", "hooks/lib/signal_processor.py:732", "hooks/lib/stop_processor.py:144"],
+          "search_strategies": ["grep dirname.*dirname.*dirname"],
+          "blind_spots": []
+        },
+        {
+          "target": "process_session_corrections calls in stop_processor",
+          "locations": ["hooks/lib/stop_processor.py:82 (stage1)", "hooks/lib/stop_processor.py:145 (stage2)"],
+          "search_strategies": ["grep process_session_corrections stop_processor.py"],
+          "blind_spots": []
+        },
+        {
+          "target": "_compute_simhash",
+          "locations": ["hooks/lib/om_write.py:38 (def)", "hooks/lib/om_write.py:66", "hooks/lib/om_write.py:190", "hooks/lib/om_write.py:194"],
+          "search_strategies": ["grep _compute_simhash", "grep simhash"],
+          "blind_spots": []
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "hooks/lib/om_write.py",
+        "dependents": ["hooks/lib/stop_processor.py (2 calls)", "hooks/lib/hook_generator.py (2 calls)"],
+        "test_coverage": [],
+        "runtime_contracts": ["om_write(content, tags, user_id, sector, salience, decay_lambda) → id or None"],
+        "failure_symptoms": "If om_write breaks: all OpenMemory writes fail silently (stderr only). Decision shadows, tool learnings, session summaries stop persisting. Dedup/budget may allow unbounded growth."
+      },
+      {
+        "write_target": "hooks/lib/stop_processor.py",
+        "dependents": ["hooks/stop-session.sh (launches via nohup)"],
+        "test_coverage": [],
+        "runtime_contracts": ["3-stage pipeline: correction_detection → signal_processing → distillation"],
+        "failure_symptoms": "If stop_processor breaks: corrections not detected, preferences not updated, session learning stops. Runs async so failures are silent."
+      },
+      {
+        "write_target": "hooks/lib/signal_processor.py",
+        "dependents": ["hooks/lib/stop_processor.py (imports process_session_corrections)", "hooks/load-session-context.sh (calls main())"],
+        "test_coverage": [],
+        "runtime_contracts": ["process_session_corrections(transcript_path, db_file, session_id, project_root) → list"],
+        "failure_symptoms": "If signal_processor breaks: correction counts wrong, auto-distillation fails, preference scores not updated."
+      },
+      {
+        "write_target": "mcp-servers/gemini/tools_knowledge.py",
+        "dependents": ["mcp-servers/gemini/server.py (registers tools)"],
+        "test_coverage": [],
+        "runtime_contracts": ["pm_add_decision MCP tool → shadows to OpenMemory"],
+        "failure_symptoms": "If tools_knowledge breaks: pm_add_decision tool errors out in MCP server. All decision recording fails."
+      }
+    ],
+    "gaps": [
+      "No unit tests for any of the 4 write targets — correctness verified only by manual observation",
+      "prune_expired() caller not found in visible codebase — likely in session startup hook inline Python",
+      "No WAL mode on openmemory.sqlite (BUG-4, out of scope but adjacent)"
+    ]
+  }
+}

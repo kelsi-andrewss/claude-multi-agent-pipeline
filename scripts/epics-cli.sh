@@ -164,11 +164,21 @@ db_path = sys.argv[3]
 conn = sqlite3.connect(db_path)
 conn.execute('PRAGMA journal_mode=WAL')
 
-# Auto-generate ID if not provided
+# Auto-generate ID if not provided — use id_sequences for consistency with _next_id()
 if 'id' not in story:
-    row = conn.execute('SELECT MAX(CAST(SUBSTR(id, 7) AS INTEGER)) FROM stories').fetchone()
-    next_num = (row[0] or 0) + 1
-    story['id'] = f'story-{next_num}'
+    conn.execute("INSERT OR IGNORE INTO id_sequences (prefix, last_id) VALUES ('story-', 0)")
+    conn.execute("UPDATE id_sequences SET last_id = MAX(last_id, COALESCE((SELECT MAX(CAST(SUBSTR(id, 7) AS INTEGER)) FROM stories), 0))")
+    conn.execute("UPDATE id_sequences SET last_id = last_id + 1 WHERE prefix = 'story-'")
+    row = conn.execute("SELECT last_id FROM id_sequences WHERE prefix = 'story-'").fetchone()
+    story['id'] = f'story-{row[0]}'
+else:
+    # Explicit ID provided — sync counter so _next_id() doesn't collide later
+    import re
+    m = re.match(r'story-(\d+)', story['id'])
+    if m:
+        explicit_num = int(m.group(1))
+        conn.execute("INSERT OR IGNORE INTO id_sequences (prefix, last_id) VALUES ('story-', 0)")
+        conn.execute("UPDATE id_sequences SET last_id = MAX(last_id, ?) WHERE prefix = 'story-'", (explicit_num,))
 
 conn.execute('''
     INSERT INTO stories (id, epic_id, title, state, branch, write_files,

@@ -1,0 +1,50 @@
+{
+  "slug": "audit-memory-pipeline",
+  "skill": "scope",
+  "scope": {
+    "files": 4,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [],
+  "data": {
+    "topic": "Fix memory/correction pipeline bugs from AUDIT.md: BUG-5 (non-atomic budget enforcement in om_write.py), BUG-6 (decision shadows set feedback_score=0 causing immediate pruning), BUG-10 (wrong dirname count in signal_processor.py/stop_processor.py), BUG-11 (prune_expired kills score=0 entries immediately), R-7 (double correction detection in stop_processor), CQ-6 (duplicated signal processing logic), CQ-10 (misnamed simhash function)",
+    "what": "Fix 7 bugs and code quality issues in the memory/correction pipeline identified by the code audit",
+    "audience": null,
+    "platform": "CLI orchestration infrastructure",
+    "in_scope": [
+      "BUG-5: Make budget enforcement atomic with insert in om_write.py",
+      "BUG-6: Fix decision shadow feedback_score=0 in tools_knowledge.py — use om_write() or set non-zero score",
+      "BUG-10: Fix dirname count in signal_processor.py and stop_processor.py (2 not 3)",
+      "BUG-11: Skip pruning for feedback_score=0 entries in om_write.py",
+      "R-7: Remove duplicate process_session_corrections call from stage_signal_processing in stop_processor.py",
+      "CQ-6: Extract shared logic from stop_processor/signal_processor into signal_processor.main_logic()",
+      "CQ-10: Rename _compute_simhash to _content_hash in om_write.py"
+    ],
+    "out_of_scope": [
+      "Hook shell injection fixes (BUG-1, BUG-2) — separate presearch",
+      "SQLite concurrency fixes (BUG-3, BUG-4) — separate presearch",
+      "PM tool bugs (BUG-7, BUG-8, BUG-9) — separate presearch"
+    ],
+    "stack_detected": [
+      {
+        "marker": "mcp-servers/gemini/requirements.txt",
+        "framework": "FastMCP",
+        "language": "python",
+        "dependencies": ["fastmcp", "google-genai", "ollama"]
+      },
+      {
+        "marker": "hooks/",
+        "framework": null,
+        "language": "bash/python",
+        "dependencies": ["sqlite3", "ollama"]
+      }
+    ],
+    "problem": "Memory pipeline has multiple correctness bugs: decision shadows are immediately pruned (feedback_score=0), budget enforcement is non-atomic (data loss on crash), correction counts are doubled per session, project root is computed wrong (breaks auto-distillation), and simhash function is misnamed",
+    "why": "The semantic memory persistence guarantee is hollow — pm_add_decision writes entries that get pruned within 24 hours. Correction counts are inflated, causing premature preference promotion. Auto-distillation looks in the wrong directory.",
+    "end_goal": "All 7 issues fixed, memory pipeline correctly persists decisions, counts corrections once, and computes correct paths",
+    "needs_research": false,
+    "complexity_reasoning": "All bugs have exact file/line locations in code we own — pure internal fixes requiring no external research"
+  }
+}

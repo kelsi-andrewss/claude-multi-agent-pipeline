@@ -1,0 +1,346 @@
+{
+  "slug": "iterative-auto-fix-loop",
+  "scope": {
+    "files": 3,
+    "stories": null,
+    "complexity": "medium"
+  },
+  "route_hint": null,
+  "prev": ["presearch/.research-iterative-auto-fix-loop.json"],
+  "skill": "scout",
+  "data": {
+    "topic": "iterative auto-fix loop skill for Claude Code CLI",
+    "findings": [
+      {
+        "category": "pattern",
+        "summary": "Ralph Loop (Step 5.0) already implements a detect-fix-revalidate loop for build errors inside run-stories",
+        "details": "run-stories/SKILL.md Step 5.0 ('Ralph Loop auto-review') runs build-verify.sh after each coder returns DONE, and on failure re-injects a retry agent with the build errors. It tracks retry_count, last_error_hash (SHA-256), consecutive_no_progress, and error_hash_counts. Circuit breakers: max 3 retries, 3 consecutive no-progress, 5 same-error. This is the closest existing pattern to a fix loop — but it's embedded inline in run-stories, not a standalone skill.",
+        "files": ["skills/run-stories/SKILL.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Coder escalation and restart patterns exist in merge-worktree for plan-level vs execution-level failures",
+        "details": "merge-worktree/SKILL.md defines two distinct recovery paths: (1) Escalation: 2 BLOCKING round-trips → Opus coder (architect only), still BLOCKING → blocked. (2) Restart: if plan was wrong (not coder incapable), reset worktree, write new plan, relaunch at same model level, max 1 restart. This restart-vs-escalation distinction maps to diagnosis: was the fix wrong, or was the plan wrong?",
+        "files": ["skills/merge-worktree/SKILL.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Ralph Loop plugin (installed, enabled) implements stop-hook-based session re-injection with iteration tracking",
+        "details": "The ralph-loop plugin at plugins/cache/claude-plugins-official/ralph-loop/ uses a Stop hook to intercept session exit. State stored in .claude/ralph-loop.local.md (markdown frontmatter with iteration count, max_iterations, completion_promise, session_id). Stop hook reads transcript, checks for <promise> tags indicating completion, and re-injects the same prompt. Session-scoped via session_id. This is the canonical pattern for iterative loops in Claude Code.",
+        "files": [
+          "plugins/cache/claude-plugins-official/ralph-loop/d5c15b861cd2/hooks/stop-hook.sh",
+          "plugins/cache/claude-plugins-official/ralph-loop/d5c15b861cd2/commands/ralph-loop.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Skills use YAML frontmatter in SKILL.md with standardized fields: name, description, args, optional disable-model-invocation",
+        "details": "All skills follow the same pattern: YAML frontmatter (name, description, args with name/type/description), then markdown body with numbered steps. Only prefs/SKILL.md uses disable-model-invocation: true. Skills reference each other via Skill tool invocations. Context: fork is not used by any existing skill.",
+        "files": ["skills/quickfix/SKILL.md", "skills/ship/SKILL.md", "skills/run-stories/SKILL.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Build verification uses a shared script (build-verify.sh) returning structured JSON with project-type detection",
+        "details": "run-stories and merge-worktree both reference build-verify.sh with --project-root flag. Returns JSON with status, build_result (pass/fail/skip), project_type, build_output, lint_warnings. Project type detected from filesystem markers (package.json, pubspec.yaml, Cargo.toml, go.mod, pyproject.toml). The script is referenced but lives at ~/.claude/scripts/build-verify.sh.",
+        "files": ["skills/run-stories/SKILL.md", "skills/merge-worktree/SKILL.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Verify skill implements hierarchical validation: review → build → test → acceptance criteria walk",
+        "details": "verify/SKILL.md runs in sequence: (1) integrated review via reviewer agent on full diff, (2) build and test with project-type detection, (3) acceptance criteria walk with programmatic vs manual verification classification. This is the closest existing skill to a validation pyramid.",
+        "files": ["skills/verify/SKILL.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Lint skill is a standalone pre-merge check that detects linter from package.json and runs npm run lint",
+        "details": "lint/SKILL.md resolves worktree path, detects lint script in package.json, runs npm run lint, reports errors/warnings. It does NOT auto-fix — it reports only. A fix loop would need to wrap this detection pattern with fix attempts.",
+        "files": ["skills/lint/SKILL.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Subagent return contract: DONE/NEED_DECISION/BLOCKED terminal status",
+        "details": "ORCHESTRATION.md §15 mandates every delegated subagent returns exactly one of: DONE: <summary>, NEED_DECISION: <question>, or BLOCKED: <reason>. The main session parses only the terminal status line. A fix-loop skill must conform to this contract.",
+        "files": ["ORCHESTRATION.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "Main session cannot use EnterWorktree — all worktrees created by background coder agents only",
+        "details": "ORCHESTRATION.md §1: 'MUST NOT use EnterWorktree or git worktree add'. Exception: merge-worktree uses ephemeral /tmp/ worktrees. A fix-loop skill in the main session must operate on existing worktrees or launch coders that create them.",
+        "files": ["ORCHESTRATION.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "Coder agents must not call mcp__gemini__* tools — Gemini is orchestrator-only",
+        "details": "All coder prompts include: 'Do NOT call any mcp__gemini__* tools. Gemini is a research tool for the orchestrator — not available to coders.' A fix loop that re-injects coders inherits this constraint.",
+        "files": ["skills/run-stories/SKILL.md", "skills/quickfix/SKILL.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "Model selection follows static table + trust-informed overrides (ORCHESTRATION §2)",
+        "details": "Coder default is Sonnet, escalation to Opus after 2 BLOCKING round-trips. Haiku only when ALL threshold criteria met (single file, exact code, no regex, no complex logic, not a pipeline file). Trust scores from merge_outcomes override when >=10 records exist.",
+        "files": ["ORCHESTRATION.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Hook system supports PreToolUse, PostToolUse, Stop, SessionStart, SubagentStop, UserPromptSubmit",
+        "details": "settings.json defines hooks with matchers (Edit|Write, Bash, EnterWorktree, Read, Skill, TaskUpdate) and command scripts. Stop hooks can block session exit by returning {decision: 'block', reason: <prompt>}. The Ralph Loop plugin uses this mechanism. A fix-loop could use Stop hooks for re-injection OR could use the skill system with explicit iteration.",
+        "files": ["settings.json"],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Scripts directory pattern: shared bash/python scripts in ~/.claude/scripts/ returning structured JSON",
+        "details": "Established pattern: scripts like build-verify.sh, diff-gate.sh, worktree-setup.sh, worktree-cleanup.sh live in ~/.claude/scripts/ and return JSON on stdout. Exit codes: 0=success, 1=functional error, 2=system error. Skills call these scripts and parse JSON results. Currently only 5 actual scripts exist (setup-memory.sh, om-cleanup.py, brainlift_pdf.py, claude-profile.sh, log-correction.sh) — the build/gate scripts are referenced but may not exist yet.",
+        "files": ["scripts/"],
+        "source": "codebase"
+      },
+      {
+        "category": "dependency",
+        "summary": "Ralph Loop plugin is installed and enabled globally",
+        "details": "plugins/installed_plugins.json shows ralph-loop@claude-plugins-official installed. settings.json has enabledPlugins: {ralph-loop@claude-plugins-official: true}. The plugin's Stop hook will fire in every session. A new fix-loop skill must coordinate with or wrap the Ralph Loop, not duplicate it.",
+        "files": ["settings.json", "plugins/installed_plugins.json"],
+        "source": "codebase"
+      },
+      {
+        "category": "test",
+        "summary": "No test infrastructure exists in the dotclaude orchestration project",
+        "details": "No package.json, no test directories under ~/.claude/, no test framework. The project is shell scripts, Python scripts, SKILL.md markdown files, and JSON configs. Testing is done via /smoke-test skill (integration testing with throwaway artifacts) rather than unit tests. The .claude/.claude/tests/ directory exists but was not explored.",
+        "files": [],
+        "source": "codebase"
+      },
+      {
+        "category": "completeness",
+        "summary": "All occurrences of fix/retry loop patterns mapped across the codebase",
+        "details": "Fix/retry patterns found in: (1) run-stories Step 5.0 Ralph Loop, (2) run-stories Step 5b merge gate retry (compile_error → test agent retry, logic_failure → coder retry, max 1 retry each), (3) merge-worktree escalation (2 BLOCKING → Opus) and restart (plan wrong → new plan, max 1), (4) critique SKILL.md self-critique loop (max 2 iterations + Gemini escalation), (5) Ralph Loop plugin stop hook. No other retry/fix loop patterns exist.",
+        "files": [
+          "skills/run-stories/SKILL.md",
+          "skills/merge-worktree/SKILL.md",
+          "skills/critique/SKILL.md",
+          "plugins/cache/claude-plugins-official/ralph-loop/d5c15b861cd2/hooks/stop-hook.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "blast_radius",
+        "summary": "A new fix-loop skill would integrate with run-stories (Step 5.0 replacement) and ship pipeline",
+        "details": "The primary integration points are: (1) run-stories Step 5.0 could delegate to /fix-loop instead of inline Ralph Loop retry, (2) ship pipeline Step 5 runs run-stories which triggers Step 5.0, (3) quickfix Step 7 launches a coder that currently has no auto-fix loop, (4) merge-worktree Step 2.5 smoke test could trigger fix-loop on failure. Standalone /fix-loop invocation would be a new entry point.",
+        "files": [
+          "skills/run-stories/SKILL.md",
+          "skills/ship/SKILL.md",
+          "skills/quickfix/SKILL.md",
+          "skills/merge-worktree/SKILL.md"
+        ],
+        "source": "codebase"
+      }
+    ],
+    "decisions_relevant": [
+      {
+        "id": "decision-91",
+        "summary": "Agent health monitoring: dual-gate pattern detection + soft resource budget with watchdog in run-state.db",
+        "impact": "Fix loop must respect the agent-watchdog.py monitoring. Re-injected fix agents should be monitored by the same watchdog, or the fix-loop needs its own iteration-level health check."
+      },
+      {
+        "id": "decision-89",
+        "summary": "Merge queue: priority queue with dependency locking, non-conflicting stories skip queue",
+        "impact": "Fix loop operates within a single story's worktree — merge queue is downstream. But fix-loop must not hold up the merge queue by running indefinitely."
+      },
+      {
+        "id": "decision-90",
+        "summary": "Graduated autonomy: global trust + domain-scoped overrides from merge_outcomes",
+        "impact": "Fix loop iterations could feed into trust scores. Stories that require many fix-loop iterations should reduce trust for that domain."
+      },
+      {
+        "id": "decision-78",
+        "summary": "Policy-mechanism split: extract procedural blocks to scripts, keep orchestration in SKILL.md",
+        "impact": "Fix loop should follow this pattern — detection/verification scripts in scripts/, orchestration/retry logic in SKILL.md."
+      },
+      {
+        "id": "decision-76",
+        "summary": "Transient state in separate run-state.db, not epics.db",
+        "impact": "Fix loop iteration state (retry counts, error hashes, progress metrics) should go to run-state.db if persisted."
+      },
+      {
+        "id": "decision-42",
+        "summary": "Visual iteration loop: 3-cycle budget with evolutionary prompt regeneration",
+        "impact": "Established precedent for bounded iteration with evolution. Fix loop should use similar bounded iteration with error context injection (not just re-running the same prompt)."
+      }
+    ],
+    "testable_assertions": [
+      {
+        "assertion": "Fix loop skill SKILL.md follows the established frontmatter pattern (name, description, args fields) and step-numbered body",
+        "category": "pattern_conformance",
+        "verification": "Read the SKILL.md file, verify YAML frontmatter has name/description/args, body has numbered steps",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix loop uses build-verify.sh for compilation/lint detection, not reimplementing project-type detection",
+        "category": "pattern_conformance",
+        "verification": "Grep SKILL.md for build-verify.sh reference",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix loop circuit breakers match or extend the Ralph Loop thresholds: max 3 retries, 3 consecutive no-progress, 5 same-error",
+        "category": "pattern_conformance",
+        "verification": "Read SKILL.md, extract circuit breaker thresholds, compare to run-stories Step 5.0",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix loop coders receive the standard tool constraint block (no mcp__gemini__* tools, no pm_* tools except pm_update_story)",
+        "category": "architecture_boundary",
+        "verification": "Read SKILL.md coder prompt, verify tool constraints present",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix loop does not use EnterWorktree from the main session — worktree creation delegated to coder agents or uses existing worktrees",
+        "category": "architecture_boundary",
+        "verification": "Grep SKILL.md for EnterWorktree — should not appear",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix loop returns DONE/NEED_DECISION/BLOCKED conforming to ORCHESTRATION §15 subagent contract",
+        "category": "pattern_conformance",
+        "verification": "Read SKILL.md final step, verify terminal status format",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix loop tracks error hash for oscillation detection using SHA-256 of build/test output",
+        "category": "pattern_conformance",
+        "verification": "Read SKILL.md, verify error_hash computation and consecutive_no_progress tracking",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix loop uses the validation pyramid ordering: syntax/compile → lint → type check → unit tests → integration tests",
+        "category": "architecture_boundary",
+        "verification": "Read SKILL.md, verify validation steps are ordered fast-to-slow with gating",
+        "source": "codebase + research"
+      },
+      {
+        "assertion": "Fix loop does not duplicate Ralph Loop plugin functionality — either wraps it, replaces the inline Step 5.0, or coordinates with it",
+        "category": "dependency_constraint",
+        "verification": "Read SKILL.md, check for Ralph Loop plugin awareness and deconfliction strategy",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix loop state (if persisted) goes to run-state.db, not epics.db",
+        "category": "dependency_constraint",
+        "verification": "Grep SKILL.md for database references, verify run-state.db not epics.db",
+        "source": "decision-76"
+      }
+    ],
+    "write_targets": [
+      "skills/fix-loop/SKILL.md"
+    ],
+    "read_targets": [
+      "skills/run-stories/SKILL.md",
+      "skills/merge-worktree/SKILL.md",
+      "skills/quickfix/SKILL.md",
+      "skills/verify/SKILL.md",
+      "skills/lint/SKILL.md",
+      "skills/critique/SKILL.md",
+      "agents/quick-fixer.md",
+      "ORCHESTRATION.md",
+      "settings.json",
+      "plugins/cache/claude-plugins-official/ralph-loop/d5c15b861cd2/hooks/stop-hook.sh",
+      "refs/artifact-contract.md"
+    ],
+    "conflicts": [
+      {
+        "subject": "Stop hook vs explicit skill iteration for loop control",
+        "codebase_says": "Ralph Loop plugin uses Stop hook re-injection (decision: block + reason: prompt). This is the established pattern for iterative loops. The plugin is installed and enabled.",
+        "research_says": "Research documents both stop-hook-based (Ralph Loop) and explicit-loop patterns (Aider's --auto-test, SWE-agent's state machine). Research also notes that Claude Code skills support context: fork for isolated subagent execution.",
+        "resolution": "Codebase wins. The new fix-loop skill should either (a) extend/configure the Ralph Loop plugin for its specific use case, or (b) implement its own iteration loop inline in the skill SKILL.md using the same stop-hook pattern. Since the fix loop needs structured multi-phase validation (not just re-running one prompt), an explicit skill with per-iteration logic is likely better than pure stop-hook re-injection. The Ralph Loop handles 'keep running this prompt until done' — a fix loop needs 'run different commands at each phase'."
+      },
+      {
+        "subject": "Unified fix loop vs embedded in run-stories",
+        "codebase_says": "Run-stories Step 5.0 has the Ralph Loop inline with circuit breakers. This handles build errors only. Step 5b handles test failures via merge gate retry (max 1 retry). These are separate mechanisms for different error types.",
+        "research_says": "Research recommends a unified detect→diagnose→fix→revalidate loop handling all error types. A hierarchical validation pyramid (syntax→lint→types→tests) is structural, not optional.",
+        "resolution": "Research wins on unification. A standalone /fix-loop skill extracts and unifies the inline retry logic from run-stories Step 5.0 and Step 5b into one reusable skill. Run-stories delegates to /fix-loop instead of inlining. This also makes the loop callable from /quickfix and standalone."
+      },
+      {
+        "subject": "Iteration budget: 3 retries (codebase) vs 3-5 for tight loops / 10 for patch budgets (research)",
+        "codebase_says": "Run-stories Step 5.0 uses max 3 retries. Merge-worktree allows max 1 restart. Critique allows max 2 self-iterations.",
+        "research_says": "Aider uses 3 reflections, ChatRepair/ThinkRepair use 5, Art of Repair uses 10 total patches across strategies. SWE-agent recommends 50 turns with $1 cost cap.",
+        "resolution": "Codebase pattern wins for default — 3 retries per error type is consistent with established practice. But the fix loop should allow configurable --max-retries flag for callers that want more budget (e.g., standalone invocation vs embedded in run-stories)."
+      }
+    ],
+    "completeness": {
+      "confidence": "exhaustive",
+      "occurrences": [
+        {
+          "target": "retry/fix loop patterns",
+          "locations": [
+            "skills/run-stories/SKILL.md:574-666 (Step 5.0 Ralph Loop)",
+            "skills/run-stories/SKILL.md:682-759 (Step 5b merge gate retry)",
+            "skills/merge-worktree/SKILL.md:25-33 (escalation + restart)",
+            "skills/critique/SKILL.md:87-113 (self-critique iterations)",
+            "plugins/cache/claude-plugins-official/ralph-loop/d5c15b861cd2/hooks/stop-hook.sh (plugin stop hook)"
+          ],
+          "search_strategies": [
+            "grep -i 'retry|fix.?loop|ralph|auto.?review|circuit|oscillat|revalidat|re-inject'",
+            "grep -i 'build-verify|merge-gate|diff-gate'",
+            "glob skills/**/SKILL.md + read each for iteration/retry patterns"
+          ],
+          "blind_spots": [
+            "Dynamic tool references in hook scripts that might load additional retry logic at runtime"
+          ]
+        },
+        {
+          "target": "build/test verification entry points",
+          "locations": [
+            "skills/run-stories/SKILL.md:243-270 (Step 2c build verification)",
+            "skills/run-stories/SKILL.md:522-545 (Step 4.1 batch verification)",
+            "skills/run-stories/SKILL.md:574 (Step 5.0 build-verify call)",
+            "skills/merge-worktree/SKILL.md:258-270 (Step 2.5 smoke test)",
+            "skills/verify/SKILL.md:118-153 (Step 2 build and test)",
+            "skills/lint/SKILL.md:22-42 (lint detection and run)"
+          ],
+          "search_strategies": [
+            "grep 'build-verify\\|npm run lint\\|npm test\\|flutter test\\|cargo test'",
+            "grep 'verification\\|smoke.test\\|validate'"
+          ],
+          "blind_spots": []
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "skills/fix-loop/SKILL.md",
+        "dependents": [
+          "skills/run-stories/SKILL.md (Step 5.0 would delegate to /fix-loop instead of inline Ralph Loop)",
+          "skills/ship/SKILL.md (Step 5 runs run-stories, transitively affected)",
+          "skills/quickfix/SKILL.md (Step 7 coder launch could use /fix-loop for post-coder validation)",
+          "ORCHESTRATION.md (may need §8 update if fix-loop changes escalation semantics)",
+          "settings.json (may need permission entry if fix-loop uses new hook scripts)"
+        ],
+        "test_coverage": [
+          "skills/smoke-test/SKILL.md (would need a new mode to test fix-loop)"
+        ],
+        "runtime_contracts": [
+          "build-verify.sh JSON output contract (fix-loop depends on same schema)",
+          "Subagent return contract: DONE/NEED_DECISION/BLOCKED (fix-loop must conform)",
+          "run-state.db schema (if fix-loop logs iteration state)"
+        ],
+        "failure_symptoms": "If fix-loop has a bug: (1) infinite loops if circuit breakers fail, (2) stories marked DONE despite failing builds if fix-loop falsely reports success, (3) context window exhaustion if error output is not truncated, (4) merge queue stalls if fix-loop holds a story indefinitely"
+      }
+    ],
+    "gaps": [
+      "No established pattern for visual regression detection in the codebase — screenshot capture, comparison, and diff-to-text conversion would be entirely greenfield",
+      "No unified error normalization exists — build-verify.sh returns raw build_output, lint and test errors are project-type-specific strings, no structured error schema",
+      "No pattern for runtime error detection (catching errors from a running dev server or app) — all existing validation is build-time or test-time",
+      "No counterexample injection pattern exists — failed patches are not tracked as negative examples for subsequent fix attempts",
+      "No adaptive convergence detection — all existing patterns use fixed iteration limits rather than measuring whether fixes are trending toward resolution",
+      "The referenced scripts (build-verify.sh, diff-gate.sh, merge-gate.py, worktree-setup.sh, worktree-cleanup.sh) are specified in SKILL.md files but may not all be implemented yet — need to verify existence before depending on them"
+    ]
+  }
+}

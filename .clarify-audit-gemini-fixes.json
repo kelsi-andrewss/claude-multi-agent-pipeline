@@ -1,0 +1,43 @@
+{
+  "slug": "audit-gemini-fixes",
+  "skill": "clarify",
+  "scope": {
+    "files": 6,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [".scope-audit-gemini-fixes.json"],
+  "data": {
+    "topic": "Fix PM tool bugs (BUG-7, BUG-8, BUG-9), code quality issues (CQ-1, CQ-4, CQ-5, CQ-7, CQ-11), and resilience gaps (Gemini-High, Gemini-Medium-1, Gemini-Medium-2) from audit reports",
+    "input_summary": "Fix 11 findings across two audit reports covering PM tool correctness, MCP server code quality, and system resilience. All bugs in owned code with clear fix patterns.",
+    "decisions": [],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "Gemini MCP server is Python (FastMCP) — fixes to tools_pm_helpers.py, tools_pm_organize.py, tools_pm_write.py, server.py must stay Python",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "hooks/lib/embedding_utils.py is the canonical embedding module — tools_knowledge.py should import from it or a shared location",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Hooks are Bash scripts with inline Python — JSON validation helper should be a standalone Python module callable from bash",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "No DB migration framework — fix schema issues inline",
+        "source": "user"
+      },
+      {
+        "type": "scope",
+        "value": "CQ-11 (format_response.py) is flag-only — no decomposition in this epic, just add a TODO comment",
+        "source": "user"
+      }
+    ]
+  }
+}

@@ -1,0 +1,292 @@
+{
+  "slug": "audit-gemini-fixes",
+  "skill": "scout",
+  "prev": [".scope-audit-gemini-fixes.json", ".clarify-audit-gemini-fixes.json"],
+  "data": {
+    "findings": [
+      {
+        "id": "BUG-7",
+        "title": "_detect_cycles uses unbounded recursive DFS + _set_story_deps wipes all deps on cycle",
+        "file": "mcp-servers/gemini/tools_pm_helpers.py",
+        "lines": "265-326",
+        "severity": "high",
+        "description": "_detect_cycles (line 265) uses a recursive inner function `dfs()` with no depth limit. Python default recursion limit is 1000. A dependency graph with 300+ stories in a chain will raise RecursionError, crashing the MCP tool. Additionally, _set_story_deps (line 297) deletes ALL dependencies of a story when any cycle is detected (line 323: `DELETE FROM story_dependencies WHERE story_id = ?`), wiping legitimate deps if a single new dep is cyclic.",
+        "current_code_summary": "Recursive dfs() function at line 276 with path.append/pop and in_stack tracking. _set_story_deps at line 316 calls _detect_cycles, and on any cycle involving story_id, runs DELETE FROM story_dependencies WHERE story_id = ? — removing all deps, not just the cyclic one.",
+        "fix_approach": "Convert _detect_cycles to iterative DFS using explicit stack. In _set_story_deps, only remove the newly-added deps that created cycles: track which dep_ids were just inserted, and on cycle detection, only remove those specific deps that are part of the cycle path, keeping pre-existing deps intact.",
+        "blast_radius": {
+          "callers": ["_set_story_deps (line 316)", "_apply_plan_to_story (line 492)"],
+          "imports": ["tools_pm_write.py (line 34)", "tools_pm_plan.py (line 18)"],
+          "downstream_tools": ["pm_create_story", "pm_update_story", "pm_plan_story", "pm_plan_stories", "pm_plan_bulk"]
+        },
+        "what_could_break": "If iterative DFS has different cycle detection semantics (e.g., misses multi-node cycles), existing valid dep graphs could incorrectly detect cycles. Test with: no deps, linear chain, diamond, actual cycle, near-cycle."
+      },
+      {
+        "id": "BUG-8",
+        "title": "pm_triage WHERE clause contradiction returns empty backlog when epic_id given",
+        "file": "mcp-servers/gemini/tools_pm_organize.py",
+        "lines": "133-136",
+        "severity": "high",
+        "description": "The backlog query hardcodes `WHERE s.epic_id = 'epic-backlog'` then conditionally appends `AND s.epic_id = ?` with the user's epic_id. This creates `epic_id = 'epic-backlog' AND epic_id = '<user_epic>'` — impossible condition, always returns 0 rows for backlog section when epic_id is provided.",
+        "current_code_summary": "Line 133-136: f-string SQL with hardcoded epic-backlog condition + conditional AND epic_id = ? appended when epic_id parameter is set.",
+        "fix_approach": "Skip the backlog query entirely when epic_id is given. Only query backlog stories when doing the full triage view (epic_id is None). The other triage sections (unassigned, draft_without_tasks) already use epic_filter correctly.",
+        "blast_radius": {
+          "callers": ["pm_triage tool (line 123)"],
+          "imports": [],
+          "downstream_tools": ["pm_triage"]
+        },
+        "what_could_break": "None — this purely fixes a bug. The backlog section was always empty with epic_id anyway."
+      },
+      {
+        "id": "BUG-9",
+        "title": "pm_create_story hardcodes task IDs t1/t2 causing potential collision",
+        "file": "mcp-servers/gemini/tools_pm_write.py",
+        "lines": "162-169",
+        "severity": "medium",
+        "description": "pm_create_story inserts tasks with hardcoded `task_id = f't{i}'` starting at t1 (line 164). The helper _add_task_to_story correctly computes next ID via MAX query. If tasks are deleted and re-created, the hardcoded path can collide. Same issue in pm_plan_items (lines 338-344).",
+        "current_code_summary": "Lines 163-169: `for i, task_title in enumerate(tasks or [], start=1): task_id = f't{i}'` with direct INSERT. _add_task_to_story (line 433 in helpers) already exists and computes MAX+1.",
+        "fix_approach": "Replace the inline loop with calls to _add_task_to_story(conn, story_id, task_title). Already imported in tools_pm_write.py (line 27). Fix same pattern in pm_plan_items (line 338-344).",
+        "blast_radius": {
+          "callers": ["pm_create_story (line 162)", "pm_plan_items (line 338)"],
+          "imports": [],
+          "downstream_tools": ["pm_create_story", "pm_plan_items"]
+        },
+        "what_could_break": "Minimal — _add_task_to_story produces the same IDs on a fresh story, just with one extra SELECT per task."
+      },
+      {
+        "id": "CQ-1",
+        "title": "Duplicated embedding utilities between tools_knowledge.py and hooks/lib/embedding_utils.py",
+        "file": "mcp-servers/gemini/tools_knowledge.py",
+        "lines": "32-46",
+        "severity": "medium",
+        "description": "tools_knowledge.py defines _get_embedding() (timeout=30s) and _embedding_to_blob() as local functions identical to hooks/lib/embedding_utils.py (timeout=10s). MCP server runs from mcp-servers/gemini/ and can't directly import hooks.lib without sys.path manipulation.",
+        "fix_approach": "In tools_knowledge.py, add PROJECT_ROOT parent to sys.path and import get_embedding and embedding_to_blob from hooks.lib.embedding_utils. Use 30s timeout as parameter or accept the 10s default (Ollama should already be loaded). Delete the local _get_embedding and _embedding_to_blob functions.",
+        "blast_radius": {
+          "callers_knowledge": ["_om_shadow_decision (lines 56, 69)"],
+          "callers_hooks": ["om_write.py", "signal_processor.py", "stop_processor.py"],
+          "downstream_tools": ["pm_add_decision"]
+        },
+        "what_could_break": "If import path is wrong, _om_shadow_decision fails silently (catches all exceptions). Timeout change from 30s to 10s — 10s is fine since Ollama should be loaded."
+      },
+      {
+        "id": "CQ-4",
+        "title": "Three near-identical _ensure_*_column functions",
+        "file": "mcp-servers/gemini/tools_pm_helpers.py",
+        "lines": "329-363",
+        "severity": "low",
+        "description": "_ensure_order_idx_column (329), _ensure_read_files_column (341), _ensure_test_files_column (353) follow identical try/ALTER TABLE/catch-duplicate pattern. Only difference is column name, type, and optional default.",
+        "fix_approach": "Consolidate into _ensure_column(conn, table, name, col_type, default=None). Replace three functions with calls to _ensure_column in startup_migrate. The _ensure_epic_columns function (line 365) already uses a loop — extend its pattern.",
+        "blast_radius": {
+          "callers": ["startup_migrate (lines 58-60)"],
+          "downstream_tools": ["Server startup only"]
+        },
+        "what_could_break": "None — pure refactor of startup-only code."
+      },
+      {
+        "id": "CQ-5",
+        "title": "Stale CHECK constraint in _ensure_knowledge_tables patterns CREATE TABLE",
+        "file": "mcp-servers/gemini/tools_pm_helpers.py",
+        "lines": "406-413",
+        "severity": "medium",
+        "description": "_ensure_knowledge_tables creates patterns table with CHECK (category IN ('react', 'firebase', ...)). Migration v5 (line 135-158) drops this constraint. The CREATE TABLE IF NOT EXISTS won't re-fire if table exists, but the initial schema should match the v5 target (no category CHECK).",
+        "fix_approach": "Remove the CHECK (category IN (...)) from line 410 in the CREATE TABLE statement. Keep severity and status CHECK constraints as they are still valid.",
+        "blast_radius": {
+          "callers": ["startup_migrate (line 56)"],
+          "downstream_tools": ["pm_add_pattern"]
+        },
+        "what_could_break": "None — removing CHECK makes schema more permissive."
+      },
+      {
+        "id": "CQ-7",
+        "title": "globals().update obscures MCP tools from static analysis",
+        "file": "mcp-servers/gemini/server.py",
+        "lines": "28-62",
+        "severity": "low",
+        "description": "12 calls to globals().update(_r_*(mcp) or {}) inject tool function names into module namespace. FastMCP registers tools at @mcp.tool() decoration time — the globals().update is unnecessary for tool registration.",
+        "fix_approach": "Remove all globals().update(...) calls. Replace with plain calls: `_r_gemini(mcp)`, `_r_test(mcp)`, etc. No code imports tool functions from server.py by name.",
+        "blast_radius": {
+          "callers": ["server.py main module scope"],
+          "downstream_tools": ["All MCP tools — but registration is via @mcp.tool() decorator"]
+        },
+        "what_could_break": "If any code imports tools by name from server.py — grep confirms none do. The __main__ block references only startup_migrate, _get_db, _migrate_pitfalls."
+      },
+      {
+        "id": "CQ-11",
+        "title": "format_response.py at 853 lines approaching decomposition threshold",
+        "file": "mcp-servers/gemini/format_response.py",
+        "lines": "1-853",
+        "severity": "low",
+        "description": "Single-responsibility module with 21 fmt_* functions. At 853 lines. Not urgent — flag only.",
+        "fix_approach": "Add a TODO comment at module top noting the split plan at ~1000 lines. No code change in this epic.",
+        "blast_radius": {
+          "callers": ["Every tools_*.py file imports specific fmt_* functions"],
+          "downstream_tools": ["All PM tools"]
+        },
+        "what_could_break": "N/A — comment only."
+      },
+      {
+        "id": "GEMINI-HIGH",
+        "title": "Silent embedding failures return null — no logging, no way to diagnose",
+        "file": "hooks/lib/embedding_utils.py",
+        "lines": "10-19",
+        "severity": "high",
+        "description": "get_embedding() returns None on any error (URLError, OSError, JSONDecodeError, KeyError) with no logging. Callers (om_write.py, signal_processor.py, stop_processor.py, tools_knowledge.py, update-prompts-index.py) treat None as 'unavailable' and silently degrade. No way to know embedding system is broken. om_write.py already logs 'ollama_fallback' at line 65 but only after dedup_check — the initial failure is silent.",
+        "fix_approach": "Add sys.stderr logging in get_embedding() on failure, similar to om_write.py's existing pattern. Keep None return for backward compatibility. Log the exception type and message so failures are visible in hook stderr output.",
+        "blast_radius": {
+          "callers": ["om_write.py (2 call sites)", "signal_processor.py (4 call sites)", "stop_processor.py (1)", "tools_knowledge.py (1)", "tracking/update-prompts-index.py (2)"],
+          "downstream_tools": ["All OpenMemory writes", "pm_add_decision shadows", "Signal processing"]
+        },
+        "what_could_break": "Adding logging changes no behavior. Stderr output goes to hook logs, not user terminal."
+      },
+      {
+        "id": "GEMINI-MED-1",
+        "title": "Cost calc defaults to Opus pricing for non-matching models",
+        "file": "tracking/cost.py",
+        "lines": "1-7",
+        "severity": "medium",
+        "description": "compute_cost() only checks `if 'opus' in model`, everything else gets Sonnet pricing ($3/$15). Haiku ($0.25/$1.25) gets charged at Sonnet rates — 12x overestimate. Any future models also default to Sonnet.",
+        "current_code_summary": "7-line function: if 'opus' in model -> Opus rates, else -> Sonnet rates. No haiku branch, no unknown model handling.",
+        "fix_approach": "Add explicit 'haiku' check with correct pricing ($0.25 input, $0.3125 cache_creation, $0.025 cache_read, $1.25 output per 1M). Add 'sonnet' check. Default unknown models to Sonnet pricing with stderr warning.",
+        "blast_radius": {
+          "callers": ["tracking/write-turns.py", "tracking/cost-summary.py", "tracking/generate-charts.py", "tracking/backfill.py"],
+          "downstream_tools": ["Cost dashboard", "cost-alert.sh"]
+        },
+        "what_could_break": "Historical cost data computed with wrong rates won't retroactively change. New sessions use correct rates."
+      },
+      {
+        "id": "GEMINI-MED-2",
+        "title": "Unvalidated JSON input in hooks — repeated inline parsing pattern",
+        "file": "hooks/*.sh (10+ files)",
+        "lines": "various",
+        "severity": "medium",
+        "description": "10+ hooks parse JSON from stdin via `echo \"$INPUT\" | python3 -c 'import sys, json; d = json.load(sys.stdin); ...'` with `2>/dev/null`. If INPUT is empty/malformed, extracted value is empty string, hook falls through to default behavior. Impossible to debug. Same pattern copy-pasted 10+ times.",
+        "fix_approach": "Create hooks/lib/parse_hook_input.py — a standalone Python script: reads stdin JSON, extracts dot-path field (e.g., 'tool_input.file_path'), prints it, exits 0 on any error with empty output. Usage: `VALUE=$(echo \"$INPUT\" | python3 \"$CLAUDE_ROOT/hooks/lib/parse_hook_input.py\" tool_input.file_path)`. Migrate 2-3 hooks as proof of concept; full migration in follow-up.",
+        "blast_radius": {
+          "callers": ["context-check.sh", "track-skill-changes.sh", "guard-protected-files.sh", "log-skill-invocation.sh", "cost-alert.sh", "session-learning-check.sh", "guard-direct-edit.sh", "warn-sync-heavy-bash.sh", "block-env-read.sh", "inject-tier2-context.sh"],
+          "downstream_tools": ["All hook-driven behavior"]
+        },
+        "what_could_break": "New helper with different semantics could break hooks. Start with helper + migrate 2 hooks; full migration is follow-up."
+      }
+    ],
+    "testable_assertions": [
+      {
+        "id": "TA-1",
+        "assertion": "_detect_cycles on a graph with 500 nodes in a linear chain completes without RecursionError",
+        "bug": "BUG-7",
+        "verification": "Create 500 story_dependencies rows A->B->C->...->Z, call _detect_cycles, verify returns empty list"
+      },
+      {
+        "id": "TA-2",
+        "assertion": "_set_story_deps with one cyclic dep and two valid deps keeps the valid deps",
+        "bug": "BUG-7",
+        "verification": "Story A has deps [B, C]. Add dep D where D->A exists. After _set_story_deps, A should still depend on B and C"
+      },
+      {
+        "id": "TA-3",
+        "assertion": "_detect_cycles correctly finds a cycle in A->B->C->A",
+        "bug": "BUG-7",
+        "verification": "Insert story_dependencies A->B, B->C, C->A. _detect_cycles returns non-empty list containing [A,B,C,A] or equivalent"
+      },
+      {
+        "id": "TA-4",
+        "assertion": "pm_triage(epic_id='epic-42') returns non-empty unassigned/draft sections when those stories exist in epic-42",
+        "bug": "BUG-8",
+        "verification": "Create stories in epic-42 with agent=NULL and state='draft', call pm_triage(epic_id='epic-42'), verify those stories appear"
+      },
+      {
+        "id": "TA-5",
+        "assertion": "pm_triage(epic_id=None) returns backlog stories from epic-backlog",
+        "bug": "BUG-8",
+        "verification": "Create stories in epic-backlog, call pm_triage(), verify backlog_stories is non-empty"
+      },
+      {
+        "id": "TA-6",
+        "assertion": "pm_create_story with tasks=['a','b'] followed by pm_add_task creates t1, t2, t3 with no collision",
+        "bug": "BUG-9",
+        "verification": "Create story with 2 tasks, add 1 more task, verify all 3 task IDs are unique (t1, t2, t3)"
+      },
+      {
+        "id": "TA-7",
+        "assertion": "tools_knowledge.py no longer defines _get_embedding or _embedding_to_blob locally",
+        "bug": "CQ-1",
+        "verification": "grep -c '_get_embedding\\|_embedding_to_blob' tools_knowledge.py returns 0 definitions (only import references)"
+      },
+      {
+        "id": "TA-8",
+        "assertion": "Only one _ensure_column function exists in tools_pm_helpers.py (no _ensure_order_idx_column etc.)",
+        "bug": "CQ-4",
+        "verification": "grep -c 'def _ensure_.*_column' tools_pm_helpers.py returns 1"
+      },
+      {
+        "id": "TA-9",
+        "assertion": "patterns CREATE TABLE in _ensure_knowledge_tables has no category CHECK constraint",
+        "bug": "CQ-5",
+        "verification": "Read _ensure_knowledge_tables, verify patterns table definition has `category TEXT NOT NULL` without CHECK"
+      },
+      {
+        "id": "TA-10",
+        "assertion": "server.py contains no globals().update calls",
+        "bug": "CQ-7",
+        "verification": "grep -c 'globals()' server.py returns 0"
+      },
+      {
+        "id": "TA-11",
+        "assertion": "get_embedding() logs to stderr when Ollama is unreachable",
+        "bug": "GEMINI-HIGH",
+        "verification": "With Ollama stopped, call get_embedding('test'), verify stderr contains error message"
+      },
+      {
+        "id": "TA-12",
+        "assertion": "compute_cost with model='haiku' uses $0.25/$1.25 rates, not $3/$15",
+        "bug": "GEMINI-MED-1",
+        "verification": "compute_cost(1000000, 1000000, 0, 0, 'claude-3-haiku') returns ~1.50 not ~18.00"
+      },
+      {
+        "id": "TA-13",
+        "assertion": "parse_hook_input.py returns empty string on invalid JSON input",
+        "bug": "GEMINI-MED-2",
+        "verification": "echo 'not json' | python3 parse_hook_input.py tool_input.file_path prints empty string, exits 0"
+      }
+    ],
+    "completeness": {
+      "all_11_items_covered": true,
+      "files_read": [
+        "mcp-servers/gemini/tools_pm_helpers.py",
+        "mcp-servers/gemini/tools_pm_organize.py",
+        "mcp-servers/gemini/tools_pm_write.py",
+        "mcp-servers/gemini/tools_knowledge.py",
+        "hooks/lib/embedding_utils.py",
+        "mcp-servers/gemini/server.py",
+        "mcp-servers/gemini/format_response.py",
+        "hooks/lib/om_write.py",
+        "tracking/cost.py",
+        "hooks/cost-alert.sh",
+        "AUDIT.md",
+        "mcp-servers/gemini/AUDIT-GEMINI.md"
+      ],
+      "callers_verified": true
+    },
+    "blast_radius_summary": {
+      "story_1_pm_correctness": "High blast radius — affects all dependency management tools (pm_create_story, pm_update_story, pm_plan_*) and pm_triage. 3 write targets: tools_pm_helpers.py, tools_pm_organize.py, tools_pm_write.py.",
+      "story_2_code_quality": "Low-Medium blast radius — mostly startup/static changes. CQ-1 affects pm_add_decision shadow path (silent failure is existing behavior). 3 write targets: tools_knowledge.py, tools_pm_helpers.py, server.py.",
+      "story_3_resilience": "Medium blast radius — embedding logging affects all OM write paths but changes no behavior. Cost calc affects dashboards. Hook helper is new file. 3+ write targets: embedding_utils.py, cost.py, new parse_hook_input.py."
+    },
+    "write_targets": [
+      "mcp-servers/gemini/tools_pm_helpers.py",
+      "mcp-servers/gemini/tools_pm_organize.py",
+      "mcp-servers/gemini/tools_pm_write.py",
+      "mcp-servers/gemini/tools_knowledge.py",
+      "mcp-servers/gemini/server.py",
+      "mcp-servers/gemini/format_response.py",
+      "hooks/lib/embedding_utils.py",
+      "tracking/cost.py",
+      "hooks/lib/parse_hook_input.py"
+    ],
+    "read_targets": [
+      "AUDIT.md",
+      "mcp-servers/gemini/AUDIT-GEMINI.md",
+      "hooks/lib/om_write.py",
+      "hooks/cost-alert.sh",
+      "mcp-servers/gemini/tools_pm_plan.py"
+    ]
+  }
+}

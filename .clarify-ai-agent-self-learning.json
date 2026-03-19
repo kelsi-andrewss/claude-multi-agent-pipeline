@@ -1,0 +1,38 @@
+{
+  "slug": "ai-agent-self-learning",
+  "skill": "clarify",
+  "scope": {
+    "files": 4,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": ["presearch/.research-ai-agent-self-learning.json"],
+  "data": {
+    "topic": "AI agent self-learning and behavioral conditioning — refactoring our memory pipeline to close the feedback loop",
+    "input_summary": "Refactor the existing memory/self-learning pipeline to close three broken feedback channels: (1) create the missing decision_preferences table so Stage 2 signal processing can correlate corrections to decisions, (2) create the missing compliance/ directory so Stage 5 hook generation can produce enforcement hooks, (3) render decision scores into session context so negatively-scored decisions influence future behavior.",
+    "decisions": [],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "Python/Bash/SQL orchestration infrastructure for Claude Code CLI. SQLite (epics.db, run-state.db, openmemory.sqlite), Ollama for embeddings (nomic-embed-text), shell hooks for session lifecycle.",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "No training-time RLHF, no fine-tuning, no weight updates. All behavioral conditioning must happen at inference time via prompt injection, structural guardrails, or statistical scoring.",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "Existing working components (correction detection, threshold promotion, rendered-prefs, OpenMemory storage, trust calibration) must not be disrupted.",
+        "source": "detected"
+      },
+      {
+        "type": "scope",
+        "value": "Write targets limited to: load-session-context.sh (schema migration + decision score rendering), stop_processor.py (Stage 5 mkdir fix), and potentially signal_processor.py (if decision_preferences integration needs adjustment). Hook_generator.py code is already correct — just needs its output directory.",
+        "source": "detected"
+      }
+    ]
+  }
+}

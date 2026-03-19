@@ -1,0 +1,80 @@
+{
+  "slug": "refactor-run-stories-skill",
+  "skill": "clarify",
+  "scope": {
+    "files": 7,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [".scope-refactor-run-stories-skill.json"],
+  "data": {
+    "topic": "Refactor run-stories SKILL.md: extract procedural logic into Python/bash scripts, reduce SKILL.md to concise orchestration prompt",
+    "input_summary": "Extract 640-line run-stories SKILL.md into callable scripts for procedural logic (worktree setup, conflict detection, merge gate, batch verification) while keeping orchestration decisions and agent coordination in the SKILL.md prompt.",
+    "decisions": [
+      {
+        "area": "State management between scripts and SKILL.md",
+        "choice": "Separate run-state.db SQLite file (~/.claude/.claude/run-state.db). Scripts write transient execution state (resolved stories, execution groups, batch results, merge verdicts). SKILL.md reads via sqlite3. Cleaned up after each run completes.",
+        "reasoning": "Survives context compaction and session crashes (portability). Keeps epics.db contract intact (ORCHESTRATION §4 — Claude writes only plan_file and state). Scripts own their own state without coordination with Gemini pm_* tools. No schema pollution of permanent data.",
+        "source": "user"
+      },
+      {
+        "area": "Coder prompt construction",
+        "choice": "Scripts return structured data blocks (pitfalls, learnings, write targets, gitignore warnings). SKILL.md assembles the full coder prompt with prose and context-specific nuance.",
+        "reasoning": "LLM retains flexibility to inject session-specific context, model-specific warnings, and adapt tone. Scripts handle data retrieval, not prompt engineering.",
+        "source": "user"
+      },
+      {
+        "area": "Failure attribution in merge gate",
+        "choice": "Python script classifies test output using pattern matching (compile error vs logic failure). Returns structured verdict JSON.",
+        "reasoning": "Deterministic, testable, doesn't consume context tokens. Same heuristic as current SKILL.md but extractable and unit-testable.",
+        "source": "user"
+      },
+      {
+        "area": "Worktree setup timing",
+        "choice": "Move worktree creation to before agent launch (in main session or resolution subagent). Coder agents only verify they're on the correct branch.",
+        "reasoning": "Eliminates duplicated bash in coder and test agent prompts. Reduces agent prompt complexity. Worktree creation is 100% deterministic — no LLM judgment needed.",
+        "source": "gemini"
+      },
+      {
+        "area": "Conflict reclassification (symbol-level)",
+        "choice": "Keep inline in SKILL.md. Not extracted to scripts.",
+        "reasoning": "Symbol-level conflict reclassification requires semantic judgment about whether two annotations targeting the same file are truly independent. This is the LLM's strength.",
+        "source": "gemini"
+      },
+      {
+        "area": "Cross-skill reuse",
+        "choice": "build-verify and worktree-cleanup scripts shared between run-stories and merge-worktree skills.",
+        "reasoning": "Both skills currently duplicate ~100 lines of build verification and worktree cleanup logic. Shared scripts eliminate drift between them.",
+        "source": "gemini"
+      }
+    ],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "bash/python scripts only. No new dependencies or build systems.",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "epics.db contract (ORCHESTRATION §4) must not be violated. Claude writes only plan_file and state via pm_update_story.",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "Agent tool invocations must stay in SKILL.md — scripts cannot launch Claude Code agents.",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "No changes to the worktree isolation model, Gemini/Claude dual-model architecture, or merge-worktree skill contract.",
+        "source": "user"
+      },
+      {
+        "type": "scope",
+        "value": "Auto-planning (pm_plan_story + plan-writing agents) stays in SKILL.md — requires MCP and Agent tool calls.",
+        "source": "detected"
+      }
+    ]
+  }
+}

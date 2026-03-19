@@ -197,8 +197,8 @@ def _next_id(conn: sqlite3.Connection, table: str, prefix: str) -> str:
 
     Uses an atomic INSERT...ON CONFLICT DO UPDATE...RETURNING against the
     id_sequences table to prevent race conditions under concurrent access.
-    The `table` parameter is accepted for backward compatibility but the
-    sequence is keyed on `prefix` alone.
+    The `table` parameter is used for self-healing when the counter has
+    drifted (e.g., from explicit-ID inserts that bypassed the counter).
     """
     row = conn.execute(
         """INSERT INTO id_sequences (prefix, last_id) VALUES (?, 1)
@@ -206,7 +206,24 @@ def _next_id(conn: sqlite3.Connection, table: str, prefix: str) -> str:
            RETURNING last_id""",
         (prefix,),
     ).fetchone()
-    return f"{prefix}{row[0]}"
+    new_id = f"{prefix}{row[0]}"
+
+    # Self-heal: if this ID already exists, re-sync counter from actual max
+    existing = conn.execute(
+        f"SELECT 1 FROM {table} WHERE id = ?", (new_id,)
+    ).fetchone()
+    if existing:
+        prefix_len = len(prefix)
+        actual_max = conn.execute(
+            f"SELECT MAX(CAST(SUBSTR(id, {prefix_len + 1}) AS INTEGER)) FROM {table}"
+        ).fetchone()[0] or 0
+        conn.execute(
+            "UPDATE id_sequences SET last_id = ? WHERE prefix = ?",
+            (actual_max + 1, prefix),
+        )
+        new_id = f"{prefix}{actual_max + 1}"
+
+    return new_id
 
 
 def _validate_transition(

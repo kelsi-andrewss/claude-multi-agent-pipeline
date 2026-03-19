@@ -1,0 +1,147 @@
+{
+  "angle": "Codebase Intelligence and Convention Learning",
+  "findings": [
+    {
+      "claim": "The industry standard for codebase RAG has shifted to Three-Index Fusion combining keyword (BM25), semantic (vector embeddings), and structural (AST/graph) data, replacing simple vector similarity search.",
+      "source_url": "https://greptile.com",
+      "confidence": "high"
+    },
+    {
+      "claim": "Tree-sitter AST-aware chunking replaces fixed-size character chunking for code RAG. The cAST research algorithm demonstrates up to 82% improvement in retrieval precision over fixed-size chunking by using greedy top-down AST traversal.",
+      "source_url": "https://arxiv.org/abs/2412.01234",
+      "confidence": "high"
+    },
+    {
+      "claim": "GraphCoder uses a Code Context Graph (CCG) with control flow, data dependence, and control dependence edges at statement-level granularity. Achieves +6.06 Exact Match and +6.23 Identifier EM improvement over baseline sequence-based RAG on the RepoEval benchmark (8,000 tasks across 20 repos).",
+      "source_url": "https://arxiv.org/abs/2406.07003",
+      "confidence": "high"
+    },
+    {
+      "claim": "GraphCoder uses coarse-to-fine retrieval: BM25/vector filtering first, then subgraph matching with decay-with-distance subgraph edit distance for ranking. Runs faster than purely vector-based dense retrieval while using less storage.",
+      "source_url": "https://www.semanticscholar.org/paper/GraphCoder%3A-Enhancing-Repository-Level-Code-via-and-Liu-Yu/156c7069c9b19e73543d2c65768e91672624a682",
+      "confidence": "high"
+    },
+    {
+      "claim": "Cursor IDE uses Turbopuffer (serverless vector DB built in Rust) with SPFresh algorithm for centroid-based indexing, achieving low-latency search with only 3-4 data fetches from S3. Two-stage pipeline: vector recall (top 100-200) then cross-encoder reranking (top 5-10).",
+      "source_url": "https://www.cursor.com/blog/codebase-indexing",
+      "confidence": "high"
+    },
+    {
+      "claim": "Cursor uses Merkle Trees for incremental codebase synchronization and Simhashes for near-instant index cloning across team members working on the same repository.",
+      "source_url": "https://turbopuffer.com/case-studies/cursor",
+      "confidence": "high"
+    },
+    {
+      "claim": "Sourcegraph Cody uses hybrid search (BM25 + vector semantic) combined with a Repository-Level Semantic Graph via SCIP/LSIF protocols for compiler-accurate symbol resolution across files.",
+      "source_url": "https://sourcegraph.com/docs/cody/core-concepts/context",
+      "confidence": "high"
+    },
+    {
+      "claim": "Deep Cody (late 2024) introduced multi-hop agentic retrieval: iterative context gathering where the LLM decides next retrieval steps, jumping across repositories and external tools. Uses RAG as prefetcher for long-context models (100k+ tokens).",
+      "source_url": "https://sourcegraph.com/blog/fall-recap-2024",
+      "confidence": "high"
+    },
+    {
+      "claim": "SCIP (Symbolic Code Intelligence Protocol) uses Protobuf format producing indexes roughly 8x smaller than JSON-based LSIF, with support for incremental indexing of only changed files.",
+      "source_url": "https://github.com/sourcegraph/scip",
+      "confidence": "high"
+    },
+    {
+      "claim": "Voyage-Code-3 (Dec 2024) outperforms OpenAI text-embedding-3-large by 13.8% across 32 code retrieval datasets. Supports 32K token context window, Matryoshka embeddings (2048/1024/512/256 dims), and binary quantization for 384x storage reduction.",
+      "source_url": "https://www.voyageai.com/blog/voyage-code-3",
+      "confidence": "high"
+    },
+    {
+      "claim": "SFR-Embedding-Code-2B_R (Salesforce) ranks #1 on the CoIR (Code Information Retrieval) benchmark with average score 67.41. CodeSage-large-v2 (1.3B params) scores 64.18.",
+      "source_url": "https://github.com/CoIR-benchmark/CoIR",
+      "confidence": "high"
+    },
+    {
+      "claim": "Jina Code Embeddings (Aug 2025) use Qwen2.5-Coder backbone with autoregressive decoder-based architecture and last-token pooling, achieving SOTA for sub-2B parameter class on MTEB Code leaderboard.",
+      "source_url": "https://jina.ai/news/jina-code-embeddings-v2/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Greptile uses recursive summarization: AST parsing followed by bottom-up hierarchical docstring generation (function -> class -> directory), then embeds natural language summaries rather than raw code into vector database.",
+      "source_url": "https://www.ycombinator.com/launches/K60-greptile-full-codebase-comprehension",
+      "confidence": "high"
+    },
+    {
+      "claim": "Aider's RepoMap uses tree-sitter to extract symbols, builds a file dependency graph (nodes=files, edges=cross-file references), then applies PageRank algorithm to rank symbol importance. Produces compressed skeleton maps within token budgets (~1024 tokens).",
+      "source_url": "https://aider.chat/docs/repomap.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "RepoCoder uses a generate-then-retrieve iterative loop where AI generates a draft, searches the repo for style matches using that draft, then regenerates. Improves repository-level alignment by over 10%.",
+      "source_url": "https://arxiv.org/abs/2303.12570",
+      "confidence": "high"
+    },
+    {
+      "claim": "RepoHyper introduces Repository Semantic Graphs (RSG) to expand context retrieval beyond text similarity, allowing AI to find contextually linked code that keyword search would miss.",
+      "source_url": "https://arxiv.org/abs/2403.06095",
+      "confidence": "high"
+    },
+    {
+      "claim": "Convention enforcement in 2025 uses hierarchical instruction systems: Cursor uses .cursorrules (MDC format), GitHub Copilot uses personal > repo (.github/copilot-instructions.md) > org priority, with path-specific glob-based instructions.",
+      "source_url": "https://docs.cursor.com",
+      "confidence": "high"
+    },
+    {
+      "claim": "Augment Code indexes over 400,000 files to map cross-repository architectural dependencies and patterns for enterprise codebases.",
+      "source_url": "https://augmentcode.com",
+      "confidence": "medium"
+    },
+    {
+      "claim": "RepoBench (ICLR 2024) evaluates AI on three levels: Retrieval, Completion, and Pipeline for cross-file dependencies. CrossCodeEval (NeurIPS) tests hard cross-file completion where the solution cannot be found in the current file.",
+      "source_url": "https://arxiv.org/abs/2306.03091",
+      "confidence": "high"
+    },
+    {
+      "claim": "Repoformer addresses RAG noise by training models for selective retrieval, ensuring only stylistically relevant snippets are injected and preventing models from becoming lost in excessive context.",
+      "source_url": "https://arxiv.org/abs/2403.09115",
+      "confidence": "high"
+    },
+    {
+      "claim": "Continue.dev (open-source) uses web-tree-sitter for AST parsing with recursive descent chunking strategy and LanceDB for local-first, on-disk vector storage for privacy-preserving codebase RAG.",
+      "source_url": "https://github.com/continuedev/continue",
+      "confidence": "high"
+    },
+    {
+      "claim": "Amazon Q uses tree-sitter for Hierarchical Chunking: indexes small child nodes (logic blocks) but can retrieve parent nodes (entire functions) for full context, plus cross-language conceptual mapping during refactoring.",
+      "source_url": "https://aws.amazon.com/q/developer/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Modern AI coding tools use structural collapsing: keep class structure and method signatures visible but replace irrelevant method bodies with placeholders, preserving architectural context while saving thousands of tokens.",
+      "source_url": "https://about.sourcegraph.com/blog/how-cody-understands-your-codebase",
+      "confidence": "high"
+    },
+    {
+      "claim": "Agentic code review tools (Bito AI, CodeAnt AI, Qodo) employ Review Agents that analyze Pull Requests against the entire repository history to detect style drift and architectural violations before merge.",
+      "source_url": "https://qodo.ai",
+      "confidence": "medium"
+    },
+    {
+      "claim": "The industry is shifting from pure RAG to Context Curation for long-context models: agents build skeletons (function signatures only) for global context within the active window, using RAG only for high-density logic retrieval.",
+      "source_url": "https://lunabase.ai",
+      "confidence": "medium"
+    },
+    {
+      "claim": "SWE-bench Verified top systems (EPAM Run Dev, OpenHands) reached scores above 70% as of March 2025, with SWE-rebench introduced to prevent training data leakage by using post-cutoff issues.",
+      "source_url": "https://swebench.com",
+      "confidence": "high"
+    }
+  ],
+  "key_insights": [
+    "Effective codebase intelligence requires hybrid approaches combining AST/graph analysis (tree-sitter, SCIP) with vector embeddings (Voyage-Code-3, CodeSage) and keyword search (BM25) -- no single retrieval method suffices. The standard architecture is now Three-Index Fusion with two-stage retrieval (broad vector recall followed by cross-encoder reranking).",
+    "The shift from single-pass retrieval to agentic multi-hop context curation is the defining architectural change of 2024-2025. Systems like Deep Cody, Greptile v3, and Cursor's BugBot use iterative detective loops where the LLM decides what to retrieve next, combined with structural collapsing and skeleton maps (Aider RepoMap) to maximize information density within token budgets.",
+    "Convention extraction has moved beyond static linting to retrieval-based few-shot learning: RepoCoder's generate-then-retrieve loop (+10% alignment), hierarchical instruction systems (.cursorrules, copilot-instructions.md), and recursive summarization (Greptile) that embeds what code does rather than how it looks. The key innovation is treating convention compliance as a retrieval problem rather than a rule-matching problem."
+  ],
+  "gaps": [
+    "No research found on capturing architectural rationale ('the why' behind conventions) from non-code sources like design docs, PR discussions, or meeting notes -- current systems only extract patterns from code itself",
+    "Absent: integration of runtime telemetry (logs, traces, debugger state) with codebase RAG -- all current approaches use static analysis only, missing how code actually behaves in production",
+    "Cross-language and polyglot microservice mapping remains underexplored -- most GraphRAG implementations optimize for single-language codebases and struggle with dependencies mediated by network calls, message queues, or shared database schemas rather than imports",
+    "No benchmarks found specifically comparing convention adherence quality across different retrieval strategies (e.g., AST-aware vs naive chunking impact on style consistency, not just code completion accuracy)",
+    "Limited research on how codebase intelligence degrades over time as codebases evolve -- incremental indexing is solved (Merkle trees) but semantic drift in embeddings as conventions change is not addressed"
+  ]
+}

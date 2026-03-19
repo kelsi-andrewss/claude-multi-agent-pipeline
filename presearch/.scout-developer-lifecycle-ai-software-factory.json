@@ -1,0 +1,404 @@
+{
+  "slug": "developer-lifecycle-ai-software-factory",
+  "scope": {
+    "files": null,
+    "stories": null,
+    "complexity": null
+  },
+  "route_hint": null,
+  "prev": ["presearch/.research-developer-lifecycle-ai-software-factory.json"],
+  "skill": "scout",
+  "data": {
+    "topic": "developer lifecycle best practices with AI software factory",
+    "findings": [
+      {
+        "category": "architecture",
+        "summary": "Codebase implements 5 of 6 canonical factory components identified by research",
+        "details": "Research identified six converging factory components: Orchestrator, Planner/Reasoning Engine, Sandbox Executor, Agent-Computer Interface, Memory (vector+RAG), Verification Pipeline. The codebase maps as follows:\n\n1. ORCHESTRATOR: ORCHESTRATION.md (constitution) + /ship skill (one-shot pipeline: QUEUE->PLAN->DRAFT->RUN->MERGE) + /run-stories (parallel execution coordinator with dependency DAG, conflict detection, batch verification).\n2. PLANNER/REASONING ENGINE: Gemini MCP server (mcp-servers/gemini/server.py) provides research + planning via pm_plan_story/pm_plan_stories. Claude acts as critic. /draft-plan skill bridges the two: Gemini researches, Claude critiques via refs/orch-critique-checklist.md, then writes plan files.\n3. SANDBOX EXECUTOR: Git worktrees provide per-story isolation (scripts/worktree-setup.sh, scripts/worktree-cleanup.sh). Coder agents work exclusively inside worktree paths. Main session MUST NOT use EnterWorktree (decision-18).\n4. MEMORY: Three-surface architecture (decision-6/decision-79): correction_groups (epics.db), rendered-prefs.md (sidecar), OpenMemory (semantic store with per-category budgets via om_write.py). Per-project decision memory (decision_memory/ module) uses hybrid SQL dump + sqlite-vec.\n5. VERIFICATION PIPELINE: Multi-layer — build-verify.sh (compile/lint), diff-gate.sh (scope enforcement), /fix-loop (iterative self-repair with circuit breakers), /critique (self-critique + Gemini escalation), /verify (integrated review + build + test + acceptance walk), merge-gate.py (test_files stories), conflict-check.sh (two-tier git merge-tree + symbol analysis).\n\nMISSING: Dedicated Agent-Computer Interface layer. The codebase relies on Claude Code's native tool interface (Read/Write/Edit/Bash) rather than a custom ACI layer. No containerized sandbox (Docker/copy-on-write) — worktrees provide git-level isolation but not process/filesystem isolation.",
+        "files": [
+          "ORCHESTRATION.md",
+          "skills/ship/SKILL.md",
+          "skills/run-stories/SKILL.md",
+          "skills/draft-plan/SKILL.md",
+          "skills/fix-loop/SKILL.md",
+          "skills/critique/SKILL.md",
+          "skills/verify/SKILL.md",
+          "skills/merge-worktree/SKILL.md",
+          "mcp-servers/gemini/server.py",
+          "mcp-servers/decisions/server.py",
+          "hooks/lib/om_write.py",
+          "hooks/lib/signal_processor.py",
+          "scripts/build-verify.sh",
+          "scripts/diff-gate.sh",
+          "scripts/worktree-setup.sh",
+          "scripts/conflict-check.sh",
+          "decision_memory/store.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Orchestration topology is hybrid: sequential handoff + limited parallelism, matching research findings that topology should match task shape",
+        "details": "Research identified three competing architectures: multi-agent symphony (DAG), single-threaded master loop, and static pipeline. The codebase uses a hybrid:\n\n- SEQUENTIAL HANDOFF: /ship drives a strict pipeline: plan-stories -> draft-plans -> critique -> env-preflight -> run-stories -> verify. Each phase completes before the next starts.\n- PARALLEL WITHIN PHASES: /run-stories supports parallelism within batches — stories with non-overlapping write targets run concurrently as background agents. Conflict detection (pm_check_conflicts + conflict-check.sh) serializes overlapping stories.\n- DEPENDENCY DAG: Stories have depends_on fields, topologically sorted into execution groups. Group 0 runs first, Group 1 after, etc. Bootstrap detection auto-serializes bootstrap stories before feature stories.\n- CONTEXT SHARDING: Batches >8 stories split into shards of 3-5 with 'lead' agents (Step 3.5).\n\nThis matches the research finding that 'per-step validation gates — not the topology — are the critical differentiator.' The codebase's batch verification (Step 4.1) after each wave is exactly this pattern.",
+        "files": [
+          "ORCHESTRATION.md",
+          "skills/run-stories/SKILL.md",
+          "skills/ship/SKILL.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Train/test isolation partially implemented via test agent pattern",
+        "details": "Research identified train/test isolation as 'the critical architectural invariant.' The codebase implements a partial version:\n\n- TEST AGENT separation: When stories have test_files, a separate test agent writes tests from the plan's acceptance criteria ONLY — not from the implementation. Test agent creates its own worktree branched from dev (NOT the story branch), explicitly prevented from reading source implementation files.\n- MERGE GATE: merge-gate.py combines coder code + test code in a merge-candidate worktree and runs tests. Tests that were written blind to the implementation validate the coder's output.\n- LIMITATION: Only applies to stories with test_files field set. Stories without test_files get a unit-tester agent that writes tests AFTER seeing the implementation (weaker isolation). Most stories likely don't have test_files specified.\n- MISSING: No holdout scenarios (StrongDM pattern), no digital twin/service clones, no immutable DAG of changes (CXDB pattern). The test agent can technically see the plan file which describes the implementation approach.",
+        "files": [
+          "skills/run-stories/SKILL.md",
+          "skills/merge-worktree/SKILL.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Self-repair loop implements bounded iteration with circuit breakers, matching research on diminishing returns",
+        "details": "Research showed 'diminishing returns beyond 3-5 repair iterations' for general-purpose LLMs. The /fix-loop skill implements exactly this:\n\n- DEFAULT MAX_RETRIES: 3 (configurable up to 10)\n- THREE CIRCUIT BREAKERS: (1) max retries hard stop, (2) no-progress detector (3 consecutive same-hash errors), (3) same-error recurrence (5 total occurrences of identical error hash)\n- VALIDATION PYRAMID: compile -> lint -> tests, strictly gated (compile blocks lint blocks tests)\n- MODEL ESCALATION: Sonnet -> Opus after 3 consecutive no-progress iterations. Opus gets remaining budget. Opus stall (2 more no-progress) -> BLOCKED\n- REGRESSION DETECTION: If error count increases after fix, auto-rollback via git reset --hard HEAD~1\n- ERROR HASHING: SHA-256 of error output tracks oscillation detection\n\nThis aligns with the NeurIPS 2024 finding that bounded self-repair outperforms unbounded loops, and with ReVeal's finding that trained verification loops sustain value longer.",
+        "files": [
+          "skills/fix-loop/SKILL.md",
+          "scripts/validation-runner.sh",
+          "scripts/build-verify.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Per-step validation gates implemented at every pipeline phase",
+        "details": "Research found hierarchical validation gates improve iteration success from 22.6% to 41.1%. The codebase implements validation at every pipeline transition:\n\n1. PLAN CRITIQUE: /critique skill runs 2 self-iterations (5 lenses each) + Gemini escalation before plans reach coders\n2. CODER COMPLETION: build-verify.sh runs after coder returns DONE (Step 5.0)\n3. FIX-LOOP: Validation pyramid (compile->lint->test) with termination gate requiring full-suite pass\n4. DIFF GATE: diff-gate.sh verifies only expected files changed (scope enforcement)\n5. MERGE GATE: merge-gate.py for test_files stories — tests run in isolated merge-candidate worktree\n6. BATCH VERIFICATION: build-verify.sh runs after each batch merges to dev (Step 4.1) before launching next batch\n7. BOOTSTRAP GATE: Dev branch verified after bootstrap story merges before feature stories launch\n8. INTEGRATED VERIFY: /verify runs reviewer agent + build + test + acceptance criteria walk on the full dev diff\n\nThis is a comprehensive gate chain — more validation points than any system described in the research.",
+        "files": [
+          "skills/critique/SKILL.md",
+          "skills/fix-loop/SKILL.md",
+          "skills/verify/SKILL.md",
+          "skills/run-stories/SKILL.md",
+          "scripts/build-verify.sh",
+          "scripts/diff-gate.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Codebase intelligence relies on explicit rules (CLAUDE.md, decisions) + keyword-based context injection, not three-index fusion",
+        "details": "Research identified 'Three-Index Fusion (BM25 + vector embeddings + structural graph)' as industry standard. The codebase uses a different approach:\n\n- EXPLICIT RULES: CLAUDE.md (global + project), ORCHESTRATION.md, .claude/rules/decisions.md (auto-generated glob rules). These are always-loaded (Tier 1 context).\n- DECISION INJECTION: inject-project-decisions.sh (PreToolUse hook) queries decisions.db for file-scoped decisions when editing files. Uses SQL matching (LIKE patterns), not semantic search.\n- DECISION MEMORY: decision_memory/ module provides FTS5 text search + optional sqlite-vec semantic search (256d Matryoshka via FastEmbed nomic-embed-text-v1.5). This IS a hybrid approach but only for decisions.\n- TIERED CONTEXT: Tier 1 always loaded (CLAUDE.md, ORCHESTRATION.md, rendered-prefs.md). Tier 2 keyword-triggered (inject-tier2-context.sh). Tier 3 async (distillation, correction patterns).\n- OPENMEMORY: Semantic store with Ollama nomic-embed-text (768d). Provides tool-learnings, session summaries, prompt patterns. Queried on demand.\n- AGENTIC RETRIEVAL: The /scout, /presearch, and /research skills do multi-step context curation but for external knowledge, not codebase indexing.\n\nMISSING: No structural graph (AST/SCIP). No BM25 keyword index over the codebase. No RepoMap-style skeleton maps. No convention inference from code. All conventions are manually authored in CLAUDE.md.",
+        "files": [
+          "CLAUDE.md",
+          ".claude/rules/decisions.md",
+          "hooks/inject-project-decisions.sh",
+          "hooks/inject-tier2-context.sh",
+          "hooks/load-session-context.sh",
+          "hooks/lib/embedding_utils.py",
+          "decision_memory/store.py",
+          "decision_memory/search.py",
+          "mcp-servers/decisions/server.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Progressive autonomy implemented via trust calibration and decision autonomy levels",
+        "details": "Research identified progressive autonomy (Shadow Mode -> Review-First -> Sandboxed Autonomy -> Permission Escalation) as the emerging trust pattern. The codebase implements graduated autonomy:\n\n- TRUST CALIBRATION: signal_processor.py:compute_trust_scores() computes global + per-domain trust from merge_outcomes table. Three levels: high (>=0.85), medium (>=0.70), low (<0.70). Domain overrides on divergence >= 0.15 with 3+ samples.\n- MODEL SELECTION BY TRUST: ORCHESTRATION.md section 2 defines trust-informed model selection (high trust enables auto-approve for proven domains, low trust requires mandatory approval and earlier escalation).\n- DECISION AUTONOMY LEVELS: Three-tier system in ORCHESTRATION.md section 7 — Tactical (coder resolves autonomously), Strategic (emit NEED_DECISION), Critical (NEED_DECISION with CRITICAL: prefix, user confirmation required).\n- QUICKFIX/HOTFIX fast-paths: Small, well-scoped changes skip the full pipeline. Auto-classification in /ship routes based on file count, schema keywords, AI tool keywords, protected file presence.\n- CORRECTION FEEDBACK: Semantic delta correction detection (signal_processor.py) adjusts decision_preferences signal scores. Negative signals surface in rendered-prefs.md. Auto-promotion at count >= 3.\n- COMPLIANCE HOOKS: hook_generator.py auto-generates warn-only hooks from promoted correction groups, enforcing behavioral patterns learned from user corrections.\n\nThis is the most sophisticated trust system identified in the research (decision-90 in OpenMemory: 'no production system does this yet').",
+        "files": [
+          "ORCHESTRATION.md",
+          "hooks/lib/signal_processor.py",
+          "hooks/lib/hook_generator.py",
+          "hooks/lib/stop_processor.py",
+          "hooks/load-session-context.sh",
+          "hooks/guard-protected-files.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Structured verification contracts implemented via plan files with Contract and Acceptance Criteria sections",
+        "details": "Research identified 'PR Contract pattern: intent, proof of functionality, risk tier, review focus areas' as emerging trust solution. The codebase implements this via plan file structure:\n\n- INTENT: ## Context section explains what the story is about\n- CHANGES: ## What changes section lists specific changes per task\n- CONTRACT: ## Contract section (required for test_files stories) specifies function signatures test agents need\n- ACCEPTANCE CRITERIA: ## Acceptance criteria section with given/when/then format, each criterion mapped to tasks and test files\n- VERIFICATION: ## Verification section describes how to verify correctness\n- REVIEW FOCUS: /critique enforces 5-lens analysis (requirement coverage, gap analysis, weakest part, alternative design, assumption audit) + Gemini escalation\n\nThe plan file serves as the 'verification contract' between orchestrator, coder, and test agent. The /verify skill then walks acceptance criteria programmatically after merge.",
+        "files": [
+          "skills/draft-plan/SKILL.md",
+          "skills/critique/SKILL.md",
+          "skills/verify/SKILL.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Shared state backbone is git + SQLite — not LLM context",
+        "details": "Research identified shared state backbone as 'the critical architectural differentiator.' The codebase uses multiple shared state stores:\n\n- GIT: Primary state backbone. Worktrees provide isolation. Story branches, dev branch, main branch encode the full execution history. Git merge-tree simulation for conflict detection.\n- EPICS.DB: Story/epic state (Gemini writes via pm_* tools, Claude writes plan_file + state). correction_groups table, decision_preferences table.\n- RUN-STATE.DB: Transient execution state (merge_outcomes, batch verifications). Decision-17: separate from epics.db to keep contracts intact.\n- OPENMEMORY.SQLITE: Semantic memory store with HSG sectors, per-tag budgets, decay-weighted pruning.\n- DECISIONS.DB: Per-project decision memory. Hybrid SQL dump + local DB rebuild (decision-21).\n- PLAN FILES: Persistent artifacts in plans/ directory. Survive /clear, survive sessions.\n\nThis aligns with the research finding about OpenHands pub/sub Event Stream, Factory.ai CI/CD Droids, and StrongDM CXDB — the shared state outlives any individual agent session.",
+        "files": [
+          "ORCHESTRATION.md",
+          "decision_memory/store.py",
+          "hooks/lib/om_write.py",
+          "scripts/worktree-setup.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Correction detection uses semantic delta (not regex), matching research on convention enforcement challenges",
+        "details": "Research noted 'convention extraction from code is unsolved in production — current tools use explicit developer-authored rules.' The codebase takes a middle path:\n\n- CORRECTION DETECTION: signal_processor.py uses semantic embedding (Ollama nomic-embed-text) with cosine similarity against curated prototype corrections (threshold 0.55). NOT regex (decision-11).\n- PREFERENCE DISTILLATION: Stop hook (stop_processor.py) runs 5-stage pipeline: correction detection -> signal processing -> session summary -> auto-distillation -> hook generation.\n- AUTO-PROMOTION: correction_groups accumulate; at count >= 3, auto-promoted to rendered-prefs.md for session-start injection.\n- RULE GENERATION: At count >= 5, generate_rule() converts corrections to positive-instruction rules (decision-11 positive framing).\n- COMPLIANCE HOOKS: hook_generator.py converts promoted corrections to warn-only enforcement hooks.\n\nThis is closer to 'convention inference from behavior' than the explicit-rules approach described in the research, but it requires user corrections as input rather than inferring conventions from code.",
+        "files": [
+          "hooks/lib/signal_processor.py",
+          "hooks/lib/stop_processor.py",
+          "hooks/lib/hook_generator.py",
+          "hooks/lib/om_write.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Dual-model critique pattern (Claude self-critique + Gemini escalation) implements multi-agent verification",
+        "details": "Research showed 'separate validation agent' as key to quality. The /critique skill implements a three-stage verification:\n\n1. CLAUDE SELF-CRITIQUE: 2 iterations of 5-lens analysis with NMIP gating per question\n2. GEMINI ESCALATION: Always fires (even if all NMIP). Gemini challenges Claude's NMIP declarations, brings fresh perspective.\n3. BLIND SPOT TRACKING: When Gemini catches something Claude NMIP'd, it's stored in OpenMemory (gemini-blind-spot tag) for future sessions to check explicitly.\n\nThis maps to the research pattern of separate generator + verifier agents with different model perspectives. The blind spot feedback loop is a novel addition not described in the research — it creates a learning correction mechanism between the two models.",
+        "files": [
+          "skills/critique/SKILL.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "Three persistence surface limit constrains memory architecture growth",
+        "details": "Decision-6/decision-79: Memory infrastructure limited to 3 persistence surfaces — correction_groups (epics.db), rendered-prefs.md (sidecar), openmemory.sqlite. All other surfaces are dead/redundant and must not be recreated. Per-project decisions.db is exempt (decision-24). This constrains any future memory/intelligence additions to use existing surfaces.",
+        "files": [
+          "CLAUDE.md",
+          "hooks/lib/om_write.py"
+        ],
+        "source": "decision"
+      },
+      {
+        "category": "constraint",
+        "summary": "Policy-mechanism split governs what goes in scripts vs skills",
+        "details": "Decision-19: Deterministic/testable operations (worktree setup, build verify, merge gate, diff gate, worktree cleanup) go to scripts. Orchestration, agent coordination, conflict reclassification, and failure attribution stay in SKILL.md. This is the codebase's version of the 'separation of concerns' pattern identified in the research between the orchestrator and sandbox executor.",
+        "files": [
+          "scripts/build-verify.sh",
+          "scripts/diff-gate.sh",
+          "scripts/worktree-setup.sh",
+          "scripts/conflict-check.sh",
+          "skills/merge-worktree/SKILL.md",
+          "skills/run-stories/SKILL.md"
+        ],
+        "source": "decision"
+      },
+      {
+        "category": "test",
+        "summary": "Test infrastructure is partial — hook_generator has inline tests, most components have no automated tests",
+        "details": "hook_generator.py has a comprehensive _run_tests() function (16 test cases). decision_memory/test_e2e.py exists (untracked). No test framework (pytest, jest) detected for the orchestration infrastructure itself. build-verify.sh, diff-gate.sh, conflict-check.sh have no unit tests — they're tested implicitly via the pipeline. The /fix-loop, /run-stories, and /merge-worktree skills have no automated verification beyond the pipeline's own self-validation.",
+        "files": [
+          "hooks/lib/hook_generator.py",
+          "decision_memory/test_e2e.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "dependency",
+        "summary": "Embedding infrastructure uses two separate systems for different purposes",
+        "details": "Decision-22: Two embedding systems coexist:\n1. Ollama nomic-embed-text (768d) — used by OpenMemory, signal_processor.py, om_write.py dedup. Requires local Ollama server.\n2. FastEmbed ONNX nomic-embed-text-v1.5 (256d Matryoshka) — used by decision_memory module. Runs locally without server.\n\nNo migration or backward compat concerns between them (decision-22). The research mentions Voyage-Code-3 as best-in-class for code retrieval but neither embedding system is code-specialized.",
+        "files": [
+          "hooks/lib/embedding_utils.py",
+          "decision_memory/store.py"
+        ],
+        "source": "decision"
+      }
+    ],
+    "decisions_relevant": [
+      {
+        "id": "decision-6/decision-79",
+        "summary": "Memory infrastructure limited to 3 persistence surfaces",
+        "impact": "Constrains how codebase intelligence and memory features can be extended"
+      },
+      {
+        "id": "decision-11",
+        "summary": "Correction detection uses semantic delta (cosine similarity), not regex",
+        "impact": "Defines the convention learning mechanism — closest thing to convention inference from behavior"
+      },
+      {
+        "id": "decision-18",
+        "summary": "Worktree creation happens in pre-launch, coder agents verify only",
+        "impact": "Establishes the sandbox isolation boundary for code execution"
+      },
+      {
+        "id": "decision-19",
+        "summary": "Policy-mechanism split: scripts for deterministic ops, skills for orchestration",
+        "impact": "Governs the boundary between the executor layer and the orchestrator layer"
+      },
+      {
+        "id": "decision-21/decision-22",
+        "summary": "Per-project decision memory uses hybrid SQL dump + two separate embedding systems",
+        "impact": "Defines how project knowledge is stored and retrieved — the codebase intelligence layer"
+      },
+      {
+        "id": "decision-23",
+        "summary": "Decision injection uses three layers: MCP hook-triggered, glob rules, explicit query",
+        "impact": "Defines how decisions are surfaced during editing — the convention enforcement mechanism"
+      },
+      {
+        "id": "decision-90",
+        "summary": "Graduated autonomy with layered trust — global baseline + domain overrides",
+        "impact": "Core of the progressive autonomy implementation — no production system does this yet"
+      }
+    ],
+    "testable_assertions": [
+      {
+        "assertion": "The pipeline implements per-step validation gates at every phase transition",
+        "category": "architecture_boundary",
+        "verification": "Trace the execution path from /ship through each phase and verify a validation step exists between each transition: plan->critique, coder->build-verify, fix-loop->termination-gate, batch->batch-verification, merge->smoke-test",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Test agent isolation prevents the test writer from seeing the coder's implementation",
+        "category": "architecture_boundary",
+        "verification": "Verify test agent worktree branches from dev (not story branch) and prompt explicitly forbids reading source implementation files",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Trust calibration adjusts model selection and approval policy based on merge_outcomes history",
+        "category": "pattern_conformance",
+        "verification": "Check compute_trust_scores() queries merge_outcomes, returns global + per-domain scores, and ORCHESTRATION.md section 2 references trust levels for model selection",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Fix-loop circuit breakers terminate iteration within 3-5 attempts for general-purpose LLMs",
+        "category": "pattern_conformance",
+        "verification": "Verify default MAX_RETRIES=3, no-progress threshold=3 consecutive, same-error recurrence=5 total. Matches research finding on diminishing returns.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "All OpenMemory writes are gated through om_write.py with tag validation and budget enforcement",
+        "category": "dependency_constraint",
+        "verification": "Grep for openmemory writes outside of om_write.py — should find none except direct MCP calls from the main session",
+        "source": "decision"
+      },
+      {
+        "assertion": "Shared state persists across session boundaries via git, SQLite DBs, and plan files",
+        "category": "architecture_boundary",
+        "verification": "Verify that /clear in ORCHESTRATION.md section 9 lists what survives: git branches, worktrees, epics.db, plan files. All execution state is recoverable.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Correction detection uses semantic embedding similarity, not regex pattern matching",
+        "category": "pattern_conformance",
+        "verification": "Verify signal_processor.py extract_corrections() calls is_correction() which uses get_embedding() + cosine_similarity() against CORRECTION_PROTOTYPES. No regex fallback for detection (only pre-filtering).",
+        "source": "decision"
+      }
+    ],
+    "write_targets": [],
+    "read_targets": [
+      "ORCHESTRATION.md",
+      "CLAUDE.md",
+      ".claude/rules/decisions.md",
+      "skills/ship/SKILL.md",
+      "skills/run-stories/SKILL.md",
+      "skills/draft-plan/SKILL.md",
+      "skills/fix-loop/SKILL.md",
+      "skills/critique/SKILL.md",
+      "skills/verify/SKILL.md",
+      "skills/merge-worktree/SKILL.md",
+      "mcp-servers/gemini/server.py",
+      "mcp-servers/decisions/server.py",
+      "hooks/lib/signal_processor.py",
+      "hooks/lib/stop_processor.py",
+      "hooks/lib/om_write.py",
+      "hooks/lib/embedding_utils.py",
+      "hooks/lib/hook_generator.py",
+      "hooks/load-session-context.sh",
+      "hooks/inject-project-decisions.sh",
+      "hooks/guard-protected-files.sh",
+      "scripts/build-verify.sh",
+      "scripts/diff-gate.sh",
+      "scripts/conflict-check.sh",
+      "scripts/worktree-setup.sh",
+      "scripts/worktree-cleanup.sh",
+      "decision_memory/store.py",
+      "decision_memory/search.py",
+      "agents/architect.md",
+      "agents/quick-fixer.md"
+    ],
+    "conflicts": [
+      {
+        "subject": "Codebase intelligence approach — three-index fusion vs explicit rules",
+        "codebase_says": "Convention knowledge is manually authored in CLAUDE.md, ORCHESTRATION.md, and .claude/rules/decisions.md. Decision injection uses SQL LIKE matching on file paths. No BM25 keyword index, no AST/structural graph over the codebase.",
+        "research_says": "Industry standard is Three-Index Fusion: BM25 keyword + vector embeddings + structural graph (AST/SCIP). Removing graph component degrades cross-file F1 by 4-6%. Agentic multi-hop retrieval is the 2024-2025 shift.",
+        "resolution": "Codebase wins for the current scale. The orchestration project (~35 skills, ~15 hooks, ~14 scripts) is small enough that explicit rules + decision injection is adequate. Three-index fusion would be warranted for target projects (the codebases being worked ON by this system), not necessarily for the orchestration infrastructure itself. The decision_memory module's hybrid FTS5 + sqlite-vec search is a step toward this for decisions specifically."
+      },
+      {
+        "subject": "Sandbox isolation — worktrees vs containerized sandboxes",
+        "codebase_says": "Git worktrees provide per-story filesystem isolation. Coders work exclusively in worktree paths. No Docker containers, no copy-on-write snapshots, no process isolation.",
+        "research_says": "Fault-tolerant sandbox with copy-on-write filesystem snapshots achieves 100% interception rate for high-risk commands, 100% rollback success, only 14.5% latency overhead. StrongDM uses Digital Twin Universe for service clones.",
+        "resolution": "Codebase approach is pragmatic for the current use case. Worktrees provide sufficient isolation for story-level parallel execution. Containerized sandboxes would add significant complexity for marginal benefit — the pipeline's diff-gate and fix-loop already catch scope violations and regressions. Worth revisiting if agents start touching production infrastructure or databases directly."
+      },
+      {
+        "subject": "Convention inference — automated vs manual",
+        "codebase_says": "Conventions are manually authored in CLAUDE.md and enforced via rules, hooks, and decision injection. Corrections are detected semantically and promoted to preferences/rules, but this is reactive (requires user corrections), not proactive inference from code patterns.",
+        "research_says": "Convention enforcement via hierarchical instruction (Cursor MDC+glob, GitHub copilot-instructions.md). Automatic inference from code is unsolved in production. RepoCoder treats convention compliance as a retrieval problem.",
+        "resolution": "No conflict — research confirms automatic inference is unsolved. The codebase's correction-to-preference pipeline is actually more advanced than what the research describes for production systems. The gap is in proactive convention detection, which remains a research problem."
+      },
+      {
+        "subject": "Iteration count in self-repair loops",
+        "codebase_says": "Fix-loop defaults to max 3 retries with circuit breakers at 3 consecutive no-progress and 5 total same-error recurrences.",
+        "research_says": "ReVeal (trained verification loop) sustains value over 20+ turns. NeurIPS 2024 shows diminishing returns beyond 3-5 iterations for general-purpose LLMs.",
+        "resolution": "Codebase aligns with the NeurIPS finding for general-purpose LLMs. The fix-loop uses standard Sonnet/Opus, not a specifically trained repair loop. The current bounds are correct. If a trained repair model became available, the max could be raised."
+      }
+    ],
+    "completeness": {
+      "confidence": "exhaustive",
+      "occurrences": [
+        {
+          "target": "factory component mapping",
+          "locations": [
+            "ORCHESTRATION.md (orchestrator constitution)",
+            "skills/ship/SKILL.md (one-shot pipeline)",
+            "skills/run-stories/SKILL.md (parallel executor)",
+            "skills/draft-plan/SKILL.md (planner bridge)",
+            "mcp-servers/gemini/server.py (reasoning engine)",
+            "scripts/worktree-setup.sh (sandbox)",
+            "hooks/lib/om_write.py (memory layer)",
+            "hooks/lib/signal_processor.py (trust/learning)",
+            "skills/fix-loop/SKILL.md (self-repair)",
+            "skills/critique/SKILL.md (verification)",
+            "skills/verify/SKILL.md (integrated verification)",
+            "scripts/build-verify.sh (build validation)",
+            "scripts/diff-gate.sh (scope validation)",
+            "scripts/conflict-check.sh (conflict detection)",
+            "decision_memory/store.py (per-project decisions)",
+            "mcp-servers/decisions/server.py (decision MCP interface)"
+          ],
+          "search_strategies": ["Glob skills/*/SKILL.md", "Glob hooks/*.sh", "Glob scripts/*.sh", "Glob hooks/lib/*.py", "Glob mcp-servers/*/server.py", "Read ORCHESTRATION.md", "Read CLAUDE.md"],
+          "blind_spots": ["Gemini MCP server tool implementations (tools_knowledge.py, tools_pm.py) not individually read — only the server entry point"]
+        },
+        {
+          "target": "trust and autonomy mechanisms",
+          "locations": [
+            "hooks/lib/signal_processor.py:compute_trust_scores()",
+            "hooks/lib/signal_processor.py:get_trust_level()",
+            "hooks/lib/signal_processor.py:recommend_model()",
+            "hooks/lib/signal_processor.py:extract_corrections()",
+            "hooks/lib/signal_processor.py:process_session_corrections()",
+            "hooks/lib/stop_processor.py (5-stage post-session pipeline)",
+            "hooks/lib/hook_generator.py (compliance hook generation)",
+            "hooks/load-session-context.sh (trust level display at session start)",
+            "hooks/guard-protected-files.sh (permission gates)",
+            "ORCHESTRATION.md section 2 (model selection by trust)",
+            "ORCHESTRATION.md section 7 (decision autonomy levels)"
+          ],
+          "search_strategies": ["Read all hooks/lib/*.py", "Read ORCHESTRATION.md", "OpenMemory query for trust/autonomy"],
+          "blind_spots": []
+        }
+      ]
+    },
+    "blast_radius": [],
+    "gaps": [
+      "No containerized sandbox — worktrees provide git isolation only, not process/filesystem isolation",
+      "No structural code graph (AST/SCIP) for codebase intelligence — relies on explicit rules and keyword matching",
+      "Convention inference from code patterns is not attempted — all conventions are manually authored",
+      "No holdout test scenarios (StrongDM pattern) — test agent sees the plan which describes the implementation approach",
+      "No cost-benefit tracking per self-repair iteration — fix-loop tracks iteration count and error hashes but not token cost per iteration",
+      "No longitudinal analysis of AI-generated code duplication or maintainability degradation across stories",
+      "Cumulative correctness across commits (SWE-CI concern) — batch verification catches build breaks but not semantic regressions across stories",
+      "No Spec-Driven Development in the purest sense — specs/acceptance criteria are generated alongside implementation plans, not independently before implementation begins",
+      "Agent-Computer Interface is inherited from Claude Code, not custom — no interception layer for high-risk commands beyond hooks",
+      "Trust calibration requires 10+ merge_outcomes before activating — cold start problem for new projects"
+    ]
+  }
+}

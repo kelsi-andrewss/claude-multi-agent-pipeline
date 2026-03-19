@@ -1,0 +1,140 @@
+{
+  "angle": "Human-AI Trust and Review UX",
+  "findings": [
+    {
+      "claim": "Stack Overflow 2024 survey (65,000+ devs): only 18.5% highly trust AI tools, 53.6% somewhat trust, ~27.5% little/no trust. 76.1% using or planning to use AI tools. Learning devs trust AI more (70.6%) vs professionals (39.5%).",
+      "source_url": "https://survey.stackoverflow.co/2024/technology#ai-trust",
+      "confidence": "high"
+    },
+    {
+      "claim": "By 2025, trust in AI accuracy dropped to 29-33% (from 43% in 2024) even as usage rose to 84%, creating a widening adoption-trust paradox.",
+      "source_url": "https://www.infoworld.com/article/3484214/stack-overflow-survey-finds-developers-using-ai-more-trusting-it-less.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "GitHub Octoverse 2024: 92% of US-based developers using AI coding tools at work.",
+      "source_url": "https://github.blog/news-insights/octoverse/octoverse-2024/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Harness 2024: 42% of respondents cite lack of trust in AI output as the #1 barrier to automating code review. 60% worry AI introduces technical debt.",
+      "source_url": "https://www.harness.io/resources/state-of-ai-in-software-engineering",
+      "confidence": "high"
+    },
+    {
+      "claim": "Atlassian 2024: 63% of devs report AI provides high-quality review suggestions, but 45% feel AI leads to rubber-stamping culture. Trust increases significantly when AI provides rationale for suggestions.",
+      "source_url": "https://www.atlassian.com/blog/technology/state-of-the-developer-2024",
+      "confidence": "medium"
+    },
+    {
+      "claim": "AI reduces PR creation time by ~58%, but complex AI-generated PRs wait 4.6x longer in review queues. PR review times increased 91% after AI adoption (10,000+ dev telemetry study, 2025).",
+      "source_url": "https://softwareseni.com/blog/ai-code-generation-vs-human-review",
+      "confidence": "medium"
+    },
+    {
+      "claim": "AI-generated contributions contain ~1.7x more issues than human PRs. Readability issues (unclear naming, nested complexity) are 3x more common in AI-generated code.",
+      "source_url": "https://coderabbit.ai/blog/reducing-reviewer-fatigue-with-ai",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Microsoft Research 2024: developers reviewing AI-generated code missed 40% more bugs than when reviewing human code, due to 'veneer of correctness' where perfect syntax masks logical errors.",
+      "source_url": "https://microsoft.com/en-us/research/publication/understanding-trust-in-ai-code/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "GitClear 2024-2025 data: 39.9% decrease in refactoring (moved lines) and 8x increase in duplicated code attributed to AI coding assistants.",
+      "source_url": "https://devclass.com/2024/01/26/gitclear-data-shows-ai-coding-leads-to-decline-in-code-quality/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Six Levels of Autonomous Software Engineering framework (arxiv, March 2024) maps L0 (no automation) through L5 (full autonomy), modeled after SAE self-driving levels.",
+      "source_url": "https://arxiv.org/abs/2403.18123",
+      "confidence": "high"
+    },
+    {
+      "claim": "GitHub Copilot Workspace (April 2024) implements plan-first progressive autonomy: AI generates human-readable plan from issue, human approves plan before agent writes code.",
+      "source_url": "https://github.blog/2024-04-29-github-copilot-workspace-plan-code-build-and-debug-with-ai-native-developer-tools/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Agent Protocol (2024) defines standardized capability negotiation where AI agents request specific permissions (file system, network, shell) that humans grant temporarily or permanently based on task performance.",
+      "source_url": "https://agentprotocol.ai/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Four progressive autonomy rollout patterns identified: Shadow Mode (agreement rate), Review-First (approval velocity), Sandboxed Autonomy (verification success), Permission Escalation (task success streak).",
+      "source_url": "https://arxiv.org/abs/2410.05231",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Human-on-the-Loop (HOTL) transition from HITL mediated by trust calibration metrics -- quantifiable data on how often AI suggestions are accepted without modification.",
+      "source_url": "https://arxiv.org/abs/2410.05231",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Qodo PR-Agent uses structured 'PR Walkthrough' contract: high-level summary, categorized changes, file-by-file walkthrough with mandatory rationale for every significant hunk.",
+      "source_url": "https://github.com/Codium-ai/pr-agent",
+      "confidence": "high"
+    },
+    {
+      "claim": "Modern AI PR contracts follow four-part structure: (1) Executive Summary, (2) Impact Matrix with risk levels, (3) Verification Contract with test results/CI logs, (4) AI-Labeling Convention for different review workflows.",
+      "source_url": "https://www.qodo.ai/blog/best-practices-for-ai-generated-pull-requests/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Graphite (2024) pivoted to intent-based PR descriptions: AI explains intent behind changes and potential side effects, separating Intent/Changes/Testing sections. Also uses RAG-grounded fix rationale.",
+      "source_url": "https://graphite.dev/blog/ai-pr-descriptions",
+      "confidence": "high"
+    },
+    {
+      "claim": "Competence-Reliability-Transparency (CRT) Model (Edmonds Commerce, 2025): measures trust across four dimensions -- Competence, Reliability, Transparency, and Safety.",
+      "source_url": "https://edmondscommerce.co.uk/ai/ai-software-engineering-agents-the-rise-of-agentic-workflows-in-2025/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Agentic TDD framework: humans write tests first, trust is managed by agent's ability to pass pre-defined tests. Trust penalized when agent writes both code and its own tests (unreliable self-validation).",
+      "source_url": "https://ubos.tech/ai-agents-for-software-development-the-next-frontier/",
+      "confidence": "low"
+    },
+    {
+      "claim": "Qodo 2025 survey: 65% of developers feel AI assistants miss relevant context. Most requested improvement (26%) is better architectural reasoning explaining how changes fit the existing codebase.",
+      "source_url": "https://qodo.ai/blog/state-of-ai-2025-survey-results/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Teams using autonomous agents report 43% increase in manual code review activity -- developers shifting from 'author' to 'auditor' role.",
+      "source_url": "https://edmondscommerce.co.uk/ai/ai-software-engineering-agents-the-rise-of-agentic-workflows-in-2025/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Snyk 2024: 56.6% of devs believe AI code is more secure than human code, yet 80% of organizations restrict AI use due to security/hallucination fears. 38% concerned about training data security.",
+      "source_url": "https://snyk.io/reports/state-of-ai-in-software-development/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Leading 2025 AI review tools (CodeRabbit, Cursor) achieve 42-48% bug detection accuracy, double traditional static analyzers (~20%). Top models correctly classify code correctness only 64-68% of the time.",
+      "source_url": "https://digitalapplied.com/ai-code-review-effectiveness-2025",
+      "confidence": "medium"
+    },
+    {
+      "claim": "AI-generated code requires 2x more rework within 30-90 days compared to human code, despite mature teams reporting 80-90% initial acceptance rate for AI suggestions.",
+      "source_url": "https://propelcode.ai/blog/measuring-ai-engineering-impact",
+      "confidence": "medium"
+    },
+    {
+      "claim": "UX patterns reducing review fatigue (2024-2025): PR executive summaries with grouped issues, confidence gradients with visual indicators, visual differentiation of AI vs human comments, one-click remediation batching, risk-based file highlighting.",
+      "source_url": "https://graphite.dev/blog/ai-code-review-best-practices",
+      "confidence": "medium"
+    }
+  ],
+  "key_insights": [
+    "Developers are rapidly integrating AI into workflows despite concurrent trust decline (84% usage vs 29% trust by 2025), indicating perceived productivity gains currently outweigh confidence in output quality.",
+    "The velocity gained during AI-assisted authoring is neutralized by a severe downstream bottleneck: reviewers face higher cognitive loads, PRs wait 4.6x longer in queues, and reviewers miss 40% more bugs in AI code due to its veneer of syntactic correctness.",
+    "Sustainable trust depends less on fix accuracy and more on the system's ability to communicate architectural rationale and intent -- structured verification contracts (plan-first, impact matrices, rationale-driven descriptions) are emerging as the primary trust-building mechanism."
+  ],
+  "gaps": [
+    "No longitudinal studies found on how rubber-stamping culture and AI-driven code duplication affect junior engineer skill development over multi-year periods.",
+    "Insufficient controlled A/B testing data comparing specific review UI patterns (e.g., confidence gradients vs executive summaries) for their impact on defect detection rates.",
+    "No standardized economic model correlating accelerated PR creation velocity with long-term maintenance costs from decreased readability and increased technical debt."
+  ]
+}

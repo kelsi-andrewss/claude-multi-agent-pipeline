@@ -1,0 +1,35 @@
+{
+  "slug": "web-search-mcp-command",
+  "skill": "scope",
+  "scope": {
+    "files": 3,
+    "stories": 2,
+    "complexity": "small"
+  },
+  "route_hint": "standard",
+  "prev": [],
+  "data": {
+    "topic": "web search MCP command",
+    "what": "Add a web search tool to the existing Gemini MCP server",
+    "audience": "Kelsi (Claude Code orchestration project)",
+    "platform": "CLI / MCP server",
+    "in_scope": [
+      "Web search tool exposed via Gemini MCP",
+      "Structured search results returned to Claude Code"
+    ],
+    "out_of_scope": [
+      "Separate standalone MCP server",
+      "Browser automation or scraping"
+    ],
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": null,
+        "language": "shell/python",
+        "dependencies": ["gemini-mcp", "openmemory-mcp"]
+      }
+    ],
+    "needs_research": false,
+    "complexity_reasoning": "Adding a tool to an existing MCP server the user owns — the codebase defines the patterns. Scout will find them."
+  }
+}

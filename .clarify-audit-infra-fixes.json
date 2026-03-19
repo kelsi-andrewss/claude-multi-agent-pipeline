@@ -1,0 +1,19 @@
+{
+  "slug": "audit-infra-fixes",
+  "mode": "quick",
+  "decisions": [],
+  "constraints": [
+    "All hooks must exit 0 on error (advisory hooks never block the tool call)",
+    "PreToolUse hooks have 5s timeout — changes must not add latency",
+    "SessionStart hooks have 10s timeout — latency tolerance is higher here",
+    "stop_processor.py runs as detached nohup background process — no timeout constraint",
+    "om_write.py is imported by stop_processor.py and load-session-context.sh — changes propagate to both callers",
+    "profile.sh exports SESSION_ID from CLAUDE_SESSION_ID with PPID fallback — BUG-13 fix scope is guard-protected-files.sh only, do NOT change profile.sh",
+    "settings.json is read by Claude Code runtime — invalid JSON breaks the entire session",
+    "Existing safe pattern: load-session-context.sh line 36 uses python3 - \"$VAR\" <<'PYEOF' with sys.argv[1]",
+    "fcntl.flock is the agreed lockfile approach per decision-103",
+    "3 persistence surfaces per decision-79: epics.db, openmemory.sqlite, run-state.db"
+  ],
+  "open_questions": [],
+  "created_at": "2026-03-14"
+}

@@ -1,0 +1,333 @@
+{
+  "slug": "ai-agent-self-learning",
+  "skill": "research",
+  "scope": {
+    "files": null,
+    "stories": null,
+    "complexity": null
+  },
+  "route_hint": null,
+  "prev": [".scope-ai-agent-self-learning.json"],
+  "data": {
+    "topic": "AI agent self-learning and behavioral conditioning — persistent memory architectures, correction-to-preference pipelines, decision-outcome correlation, hook/guardrail generation from patterns, inference-time RLHF alternatives",
+    "angles_generated": 6,
+    "partial_research": false,
+    "synthesized_findings": [
+      {
+        "theme": "Tiered Memory Architecture",
+        "claims": [
+          {
+            "claim": "Letta (formerly MemGPT) uses a multi-tier memory architecture inspired by OS virtual memory: Core Memory (always in context, editable via tool calls, ~2000 tokens), Recall Storage (searchable conversation history in SQL), and Archival Storage (vector-searchable long-term store). Core = RAM, archival/recall = disk.",
+            "source_urls": ["https://docs.letta.com/guides/agents/memory/", "https://docs.letta.com/guides/agents/memory-blocks/", "https://arxiv.org/abs/2310.08560"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "LangMem implements three named memory types: semantic (facts as profiles or collections), episodic (successful interaction examples), and procedural (behavioral guidelines encoded in evolving system instructions). Procedural memory is the primary behavioral preference persistence mechanism.",
+            "source_urls": ["https://langchain-ai.github.io/langmem/concepts/conceptual_guide/", "https://github.com/langchain-ai/langmem"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "LangMem distinguishes profiles (single documents, schema-validated, updated in-place — ideal for user preferences) from collections (unbounded append-only records for historical recall). This is the key design pattern for behavioral preference storage.",
+            "source_urls": ["https://langchain-ai.github.io/langmem/concepts/conceptual_guide/"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Neither Letta nor LangMem implements automatic rule-based promotion/demotion between memory tiers. In Letta, tier movement is LLM-driven (agent decides via tool calls). In LangMem, the Memory Manager LLM decides what to extract/update/delete.",
+            "source_urls": ["https://docs.letta.com/guides/agents/memory-blocks/", "https://langchain-ai.github.io/langmem/concepts/conceptual_guide/"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "LangMem cross-session persistence is built on LangGraph's BaseStore interface with hierarchical namespaces using template variables like '{user_id}', supporting semantic search and metadata filtering via AsyncPostgresStore with pgvector.",
+            "source_urls": ["https://langchain-ai.github.io/langmem/concepts/conceptual_guide/", "https://github.com/langchain-ai/langgraph"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          }
+        ],
+        "key_insight": "Both Letta and LangMem use structured, typed memory — not flat key-value stores. LLM-driven promotion (agent decides what to store/promote) is the dominant pattern, not rule-based thresholds. Our system's count-based auto-promotion (count >= 3) is actually more structured than what these frameworks offer."
+      },
+      {
+        "theme": "Background Consolidation and Sleep-Time Compute",
+        "claims": [
+          {
+            "claim": "Letta's 'Sleep-time Compute' (April 2025) uses background agents to consolidate raw interaction logs into learned behavioral memories, reducing per-query token overhead by up to 3,000 tokens. This is a hot-path/background-path separation.",
+            "source_urls": ["https://letta.com"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "LangMem's Background Memory Manager employs a 'Reflect-Reconcile-Update' cycle to asynchronously merge redundant facts and update behavioral preferences without interrupting active conversation.",
+            "source_urls": ["https://blog.langchain.com/langmem-sdk-launch/"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          }
+        ],
+        "key_insight": "Background processing of session data into structured memories is an established pattern. Our stop_processor.py (5-stage background pipeline) is architecturally aligned with industry direction — the issue is that two of our stages are broken, not that the pattern is wrong."
+      },
+      {
+        "theme": "Correction-to-Preference Synthesis",
+        "claims": [
+          {
+            "claim": "CIPHER algorithm uses an LLM to infer user preferences from user edits within context, storing inferred preferences as human-readable descriptive text tied to specific contexts. At inference time, k-closest historical contexts are fetched and their preferences aggregated.",
+            "source_urls": ["https://arxiv.org/abs/2404.15269", "https://openreview.net/forum?id=DlYNGpCuwa"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "LangMem's gradient optimizer splits correction synthesis into two separate LLM calls: one proposing improvements (critique pass) and one applying them (update pass), with max_reflection_steps controlling iteration count.",
+            "source_urls": ["https://langchain-ai.github.io/langmem/guides/optimize_memory_prompt/"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Real systems use a separate LLM pass to reason about corrections, but frame it as 'preference inference from context' — the original output and correction are passed together as joint context, not compared as a structured diff.",
+            "source_urls": ["https://langchain-ai.github.io/langmem/guides/optimize_memory_prompt/", "https://arxiv.org/abs/2404.15269"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Zep's temporal knowledge graph (Graphiti) enables preference synthesis with validity timestamps (valid_at, invalid_at), ensuring new corrections automatically supersede outdated preferences through temporal reasoning rather than simple deletion.",
+            "source_urls": ["https://getzep.com"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "Context-aware retrieval beats monolithic rule sets: CIPHER's k-nearest-context retrieval outperforms a single global preference model because user preferences are context-dependent.",
+            "source_urls": ["https://arxiv.org/abs/2404.15269"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Our system's correction detection + threshold promotion is a valid pattern. What we're missing is the observer pass that generalizes corrections into context-aware rules. CIPHER's approach (human-readable rules keyed to context) is most relevant to our architecture — it's essentially what rendered-prefs.md should evolve toward."
+      },
+      {
+        "theme": "Decision-Outcome Correlation",
+        "claims": [
+          {
+            "claim": "Automated failure attribution in LLM multi-agent systems was only formalized as a research task in 2025. Best current method (CHIEF) achieves 77.59% agent-level and 52% step-level accuracy — confirming this is the least mature area.",
+            "source_urls": ["https://arxiv.org/abs/2505.00212", "https://arxiv.org/html/2602.23701"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "CHIEF constructs hierarchical causal graphs from execution traces using counterfactual attribution to distinguish root causes from symptoms, modeling OTAR attributes (Observation, Thought, Action, Result) at each agent node.",
+            "source_urls": ["https://arxiv.org/html/2602.23701"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "12 of 30 deployed enterprise agents provide no usage monitoring or only rate-limit notices — the majority of production deployments lack even basic trace infrastructure, let alone decision-outcome correlation.",
+            "source_urls": ["https://arxiv.org/html/2602.17753v1"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "No production system found that actively uses decision-outcome correlation to adjust future agent behavior (closed-loop behavioral conditioning from traces) — this pattern may not exist in deployed systems yet.",
+            "source_urls": [],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "DeepEval 3.2.6 introduced 'Agentic Metrics' (PlanQualityMetric, ToolCorrectnessMetric) to correlate intermediate reasoning steps with final task success, but as evaluation — not as a feedback loop into agent behavior.",
+            "source_urls": ["https://www.deepeval.com/blog/agentic-metrics-release"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "Observability platforms (Langfuse, Arize Phoenix, LangSmith) capture traces and spans but focus on latency, tool call monitoring, and output quality — not correlating individual decisions to downstream behavioral outcomes.",
+            "source_urls": ["https://langfuse.com/blog/2024-07-ai-agent-observability-with-langfuse", "https://arize.com/blog/phoenix-v7-agent-observability/"],
+            "confidence": "medium",
+            "agent_attribution": "both"
+          }
+        ],
+        "key_insight": "Our decision_preferences concept — correlating corrections to decisions and updating signal scores — is genuinely novel relative to the field. The research world is still at ~52% accuracy on step-level failure attribution. Our simpler approach (text overlap + temporal proximity) is crude but pragmatically appropriate for a single-user system where the user explicitly tells us what went wrong."
+      },
+      {
+        "theme": "Guardrail and Hook Auto-Generation",
+        "claims": [
+          {
+            "claim": "NeMo Guardrails uses Colang, a statically-defined modeling language. Rules are declared as flows, blocks, and patterns in configuration files — there is no mechanism to generate rules from observed failures.",
+            "source_urls": ["https://docs.nvidia.com/nemo/guardrails/latest/index.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "No paper or framework found as of early 2026 fully automates the generation of new enforcement rule definitions from observed agent behavioral failures. Pro2Guard learns transition probability weights from traces but not the rules themselves.",
+            "source_urls": ["https://arxiv.org/html/2508.00500"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Policy-as-Prompt Synthesis auto-generates guardrails from design documents (PRDs, source code) using an LLM two-pass pipeline — but this is document-to-rule extraction, not failure-pattern-to-rule generation.",
+            "source_urls": ["https://arxiv.org/html/2509.23994v1"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Three paradigms exist: (1) static rule declaration (NeMo, AgentSpec, ABC, AWS Strands hooks), (2) document-to-rule extraction via LLM (Policy-as-Prompt), (3) trace-informed probabilistic enforcement (Pro2Guard). None constitute full bottom-up rule generation from behavioral failure observation.",
+            "source_urls": ["https://arxiv.org/html/2508.00500", "https://arxiv.org/html/2602.22302", "https://arxiv.org/html/2509.23994v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "AgentSpec defines a DSL for runtime enforcement hooking into the agent's decision pipeline, supporting action termination, user inspection, and self-reflection — but rules are user-defined, not auto-generated.",
+            "source_urls": ["https://www.semanticscholar.org/paper/AgentSpec:-Customizable-Runtime-Enforcement-for-and-Wang-Poskitt/a929afcf3c78db99d73a5532926ff2484514d037"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Auto-generating enforcement hooks from observed failure patterns is a genuine gap in the field — no published system does this end-to-end. Our hook_generator.py, if fixed, would be novel. But the value proposition needs scrutiny: warn-only hooks that never block may not meaningfully change behavior beyond what prompt injection already does."
+      },
+      {
+        "theme": "Coding Assistant Memory Systems",
+        "claims": [
+          {
+            "claim": "Cursor uses static rules files (.cursorrules or .cursor/rules/*.mdc) — no automatic learning from corrections. Cursor deprecated .cursorrules in favor of .cursor/rules/ directory for more granular control.",
+            "source_urls": ["https://docs.cursor.com/context/rules-for-ai", "https://docs.cursor.com/context/rules"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Windsurf Cascade has auto-generated memories (triggered during conversation) and manual Rules — but official docs recommend against relying on auto-generated memories, advising explicit Rules or AGENTS.md instead.",
+            "source_urls": ["https://docs.windsurf.com/windsurf/cascade/memories"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "GitHub Copilot launched 'Copilot Memory' (early access, Pro/Pro+ plans) that retains repository-level context across sessions — but this is codebase context retention, not behavioral preference learning from corrections.",
+            "source_urls": ["https://tessl.io/blog/github-gives-copilot-better-memory/"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "The dominant pattern across all major coding assistants (Cursor, Copilot, Windsurf, Claude Code) is static rules files manually maintained by the user. None do dynamic preference learning from corrections.",
+            "source_urls": ["https://docs.cursor.com/context/rules-for-ai", "https://docs.windsurf.com/windsurf/cascade/memories", "https://github.com/orgs/community/discussions/164857"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Our correction-to-preference pipeline is significantly ahead of every major coding assistant. Even the working subset (correction detection + threshold promotion + rendered-prefs injection) exceeds what Cursor, Copilot, or Windsurf offer. The refactor would put us further ahead."
+      },
+      {
+        "theme": "Inference-Time Behavioral Conditioning",
+        "claims": [
+          {
+            "claim": "The dominant runtime pattern is prompt injection with structural guardrails: policy-as-prompt systems translate natural language policies into prompt-based classifiers that audit agent I/O at inference time without modifying model weights.",
+            "source_urls": ["https://arxiv.org/html/2509.23994v1"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "True closed-loop feedback at inference time is largely absent in deployed systems. Policy-as-prompt synthesis explicitly defers automated feedback loops to future work.",
+            "source_urls": ["https://arxiv.org/html/2509.23994v1"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "BRT-Align treats generation as a control-theoretic dynamical system, applying latent perturbations to steer away from unsafe trajectories 7-10 tokens in advance — but is experimental, narrow in scope, and not production-deployed.",
+            "source_urls": ["https://arxiv.org/html/2509.21528"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Runtime guardrails in production operate as a one-pass filter pipeline (input check -> model -> output validation), not an iterative feedback loop.",
+            "source_urls": ["https://www.wiz.io/academy/ai-security/ai-guardrails"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Prompt injection + structural guardrails IS the state of the art for inference-time conditioning. We're not behind — we're doing what everyone does. The question is whether our additional layers (decision scoring, hook generation) add meaningful value over simpler text injection."
+      }
+    ],
+    "angle_summaries": [
+      {
+        "angle": "Memory Architecture Patterns",
+        "source": "both",
+        "finding_count": 5,
+        "key_insights": ["Structured typed memory (semantic/episodic/procedural) is the pattern", "LLM-driven promotion, not rule-based thresholds", "Profiles (in-place update) vs collections (append) is key design choice"]
+      },
+      {
+        "angle": "Background Consolidation",
+        "source": "both",
+        "finding_count": 2,
+        "key_insights": ["Sleep-time compute for post-session consolidation is established", "Hot-path/background-path separation is the right architecture"]
+      },
+      {
+        "angle": "Correction-to-Preference Pipelines",
+        "source": "both",
+        "finding_count": 5,
+        "key_insights": ["Observer LLM pass is real but frames as joint-context inference, not structured diff", "Context-aware retrieval beats monolithic rules", "Temporal supersession (Zep) handles preference evolution"]
+      },
+      {
+        "angle": "Decision-Outcome Correlation",
+        "source": "both",
+        "finding_count": 6,
+        "key_insights": ["Field is genuinely nascent — formalized only in 2025", "Best accuracy ~52% at step level", "No production system does closed-loop decision conditioning"]
+      },
+      {
+        "angle": "Guardrail/Hook Auto-Generation",
+        "source": "both",
+        "finding_count": 5,
+        "key_insights": ["No system auto-generates enforcement rules from failures end-to-end", "Three paradigms: static declaration, document-to-rule, probabilistic enforcement", "Genuine gap in the field"]
+      },
+      {
+        "angle": "Coding Assistant Memory Systems",
+        "source": "claude",
+        "finding_count": 4,
+        "key_insights": ["All major tools use static rules files", "Windsurf closest to dynamic but docs warn against relying on it", "Our pipeline already exceeds industry standard"]
+      },
+      {
+        "angle": "Inference-Time Behavioral Conditioning",
+        "source": "claude",
+        "finding_count": 4,
+        "key_insights": ["Prompt injection + guardrails IS the state of the art", "No closed-loop feedback in production", "Control-theoretic approaches exist but are experimental"]
+      }
+    ],
+    "citations": [
+      {"url": "https://docs.letta.com/guides/agents/memory/", "title": "Introduction to Stateful Agents | Letta Docs", "quality": "authoritative", "referenced_by": ["Memory Architecture Patterns"]},
+      {"url": "https://docs.letta.com/guides/agents/memory-blocks/", "title": "Memory Blocks (Core Memory) | Letta Docs", "quality": "authoritative", "referenced_by": ["Memory Architecture Patterns"]},
+      {"url": "https://arxiv.org/abs/2310.08560", "title": "MemGPT: Towards LLMs as Operating Systems", "quality": "authoritative", "referenced_by": ["Memory Architecture Patterns"]},
+      {"url": "https://langchain-ai.github.io/langmem/concepts/conceptual_guide/", "title": "LangMem Conceptual Guide", "quality": "authoritative", "referenced_by": ["Memory Architecture Patterns", "Correction-to-Preference Pipelines"]},
+      {"url": "https://github.com/langchain-ai/langmem", "title": "LangMem GitHub Repository", "quality": "authoritative", "referenced_by": ["Memory Architecture Patterns"]},
+      {"url": "https://langchain-ai.github.io/langmem/guides/optimize_memory_prompt/", "title": "How to Optimize a Prompt — LangMem", "quality": "authoritative", "referenced_by": ["Correction-to-Preference Pipelines"]},
+      {"url": "https://blog.langchain.com/langmem-sdk-launch/", "title": "LangMem SDK Launch — LangChain Blog", "quality": "informative", "referenced_by": ["Correction-to-Preference Pipelines", "Background Consolidation"]},
+      {"url": "https://arxiv.org/abs/2404.15269", "title": "CIPHER: Aligning LLM Agents by Learning Latent Preference from User Edits", "quality": "authoritative", "referenced_by": ["Correction-to-Preference Pipelines"]},
+      {"url": "https://openreview.net/forum?id=DlYNGpCuwa", "title": "CIPHER/PRELUDE — OpenReview", "quality": "authoritative", "referenced_by": ["Correction-to-Preference Pipelines"]},
+      {"url": "https://getzep.com", "title": "Zep — Temporal Knowledge Graph (Graphiti)", "quality": "authoritative", "referenced_by": ["Correction-to-Preference Pipelines"]},
+      {"url": "https://arxiv.org/abs/2505.00212", "title": "Which Agent Causes Task Failures and When? (ICML 2025)", "quality": "authoritative", "referenced_by": ["Decision-Outcome Correlation"]},
+      {"url": "https://arxiv.org/html/2602.23701", "title": "CHIEF: Causal Hierarchical Failure Attribution", "quality": "authoritative", "referenced_by": ["Decision-Outcome Correlation"]},
+      {"url": "https://arxiv.org/html/2602.17753v1", "title": "The 2025 AI Agent Index", "quality": "authoritative", "referenced_by": ["Decision-Outcome Correlation"]},
+      {"url": "https://langfuse.com/blog/2024-07-ai-agent-observability-with-langfuse", "title": "AI Agent Observability with Langfuse", "quality": "informative", "referenced_by": ["Decision-Outcome Correlation"]},
+      {"url": "https://www.deepeval.com/blog/agentic-metrics-release", "title": "DeepEval Agentic Metrics Release", "quality": "informative", "referenced_by": ["Decision-Outcome Correlation"]},
+      {"url": "https://docs.nvidia.com/nemo/guardrails/latest/index.html", "title": "NVIDIA NeMo Guardrails Developer Guide", "quality": "authoritative", "referenced_by": ["Guardrail/Hook Auto-Generation"]},
+      {"url": "https://arxiv.org/html/2508.00500", "title": "Pro2Guard: Probabilistic Runtime Enforcement", "quality": "authoritative", "referenced_by": ["Guardrail/Hook Auto-Generation"]},
+      {"url": "https://arxiv.org/html/2602.22302", "title": "Agent Behavioral Contracts (ABC)", "quality": "authoritative", "referenced_by": ["Guardrail/Hook Auto-Generation"]},
+      {"url": "https://arxiv.org/html/2509.23994v1", "title": "Policy-as-Prompt Synthesis", "quality": "authoritative", "referenced_by": ["Guardrail/Hook Auto-Generation", "Inference-Time Conditioning"]},
+      {"url": "https://docs.cursor.com/context/rules-for-ai", "title": "Rules for AI — Cursor Docs", "quality": "authoritative", "referenced_by": ["Coding Assistant Memory"]},
+      {"url": "https://docs.windsurf.com/windsurf/cascade/memories", "title": "Cascade Memories — Windsurf Docs", "quality": "authoritative", "referenced_by": ["Coding Assistant Memory"]},
+      {"url": "https://tessl.io/blog/github-gives-copilot-better-memory/", "title": "GitHub Gives Copilot Better Memory", "quality": "informative", "referenced_by": ["Coding Assistant Memory"]},
+      {"url": "https://arxiv.org/html/2509.21528", "title": "BRT-Align: Latent Reachability Steering", "quality": "authoritative", "referenced_by": ["Inference-Time Conditioning"]},
+      {"url": "https://arxiv.org/html/2507.20067", "title": "PITA: Preference-Guided Inference-Time Alignment", "quality": "authoritative", "referenced_by": ["Inference-Time Conditioning"]},
+      {"url": "https://rlhfbook.com/c/14-reasoning", "title": "RLHF Book — Reasoning & Inference-Time Scaling", "quality": "authoritative", "referenced_by": ["Inference-Time Conditioning"]}
+    ],
+    "conflicts": [
+      {
+        "topic": "Whether Letta uses automatic vs. LLM-driven memory promotion",
+        "gemini_claim": {"claim": "Letta's Memory Blocks abstraction facilitates 'precise promotion and demotion of behavioral rules'", "source_urls": ["https://letta.com"]},
+        "claude_claim": {"claim": "Letta agents move data between tiers via built-in memory tools — the agent LLM itself decides when to write. There is no rule-based automatic tier promotion.", "source_urls": ["https://docs.letta.com/guides/agents/memory-blocks/"]},
+        "credibility_assessment": "Claude's claim is more precise — sourced from official Letta documentation which specifies the tool-call mechanism. Gemini's phrasing implies automation that doesn't exist. The blocks 'facilitate' promotion but don't automate it."
+      }
+    ],
+    "gaps": [
+      "No production system found that implements closed-loop decision-outcome correlation feeding back into agent behavior",
+      "No published system auto-generates enforcement rules from observed behavioral failures end-to-end",
+      "How to prevent preference drift or contradiction when accumulated correction-derived rules conflict over time",
+      "LangMem's Memory Manager synchronous vs. async execution not documented — matters for production latency",
+      "Quantitative benchmarks comparing prompt-injection conditioning vs. structural guardrails vs. decision scoring for behavioral change",
+      "Whether Windsurf auto-generated memories specifically trigger on correction events"
+    ]
+  }
+}

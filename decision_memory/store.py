@@ -296,14 +296,22 @@ class DecisionStore:
         except ImportError:
             log.warning("sqlite-vec not installed; vector search disabled")
             self._vec_available = False
-        except sqlite3.OperationalError as e:
-            log.warning("sqlite-vec table creation failed: %s", e)
+        except (sqlite3.OperationalError, AttributeError) as e:
+            log.warning("sqlite-vec unavailable: %s", e)
             self._vec_available = False
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        if self._vec_available:
+            try:
+                import sqlite_vec
+                conn.enable_load_extension(True)
+                sqlite_vec.load(conn)
+                conn.enable_load_extension(False)
+            except (ImportError, AttributeError, sqlite3.OperationalError):
+                pass
         return conn
 
     def _read_dump(self) -> str | None:

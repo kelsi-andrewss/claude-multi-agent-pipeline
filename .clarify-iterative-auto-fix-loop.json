@@ -1,0 +1,83 @@
+{
+  "slug": "iterative-auto-fix-loop",
+  "skill": "clarify",
+  "scope": {
+    "files": 3,
+    "stories": 2,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": ["presearch/.research-iterative-auto-fix-loop.json"],
+  "data": {
+    "topic": "iterative auto-fix loop skill for Claude Code CLI",
+    "input_summary": "Build a /fix-loop skill that iteratively detects, diagnoses, fixes, and re-validates all error types (compile, test, lint, visual, runtime) in a unified loop with zero-issues termination, callable by humans and programmatically by /run-stories and /ship.",
+    "decisions": [
+      {
+        "area": "Convergence and termination strategy",
+        "choice": "Adaptive model escalation with hard cap. Start with Sonnet, escalate to Opus if error count stalls or oscillates after 3 iterations. Hard cap at 10 iterations total.",
+        "reasoning": "Research shows hard limits are the only reliable safety net (aider learned this the hard way with infinite loops). Layering adaptive model escalation on top means simple fixes resolve fast on Sonnet while complex bugs get Opus firepower without wasting the full budget on easy problems.",
+        "source": "user"
+      },
+      {
+        "area": "Checkpointing methodology",
+        "choice": "Atomic git commits after each successful validation layer pass. Compile clean → commit, lint clean → commit, tests pass → commit.",
+        "reasoning": "Granular rollback is critical when a later fix breaks an earlier layer. Git commits are the de facto state management layer per research (Cursor stashes, Aider commits, Devin VM snapshots). Atomic commits also provide a clear audit trail for debugging failed loops.",
+        "source": "user"
+      },
+      {
+        "area": "Validation scope",
+        "choice": "Hybrid: targeted validation (affected files only) during the loop, one final full-suite run as the termination gate.",
+        "reasoning": "RepairAgent showed 99% of time is in test execution, not LLM inference. Targeted validation during iterations keeps the inner loop fast. The final full-suite run catches cross-file regressions before declaring victory.",
+        "source": "user"
+      },
+      {
+        "area": "Validation pyramid gating",
+        "choice": "Strictly gated: fix compile errors before running lint, fix lint before running tests. Each layer must pass before proceeding to the next.",
+        "reasoning": "Research consensus: SWE-agent's pre-save syntax check prevents wasting test runs on broken code. Strict gating is more token-efficient and prevents confusing the agent with mixed error types from different validation layers.",
+        "source": "user"
+      }
+    ],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "Claude Code orchestration project — skills are SKILL.md with YAML frontmatter, shell/python/markdown",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Existing agent types: quick-fixer, architect, reviewer, unit-tester. Coder agents run in isolated git worktrees.",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Trust-informed model selection (Haiku/Sonnet/Opus escalation) governed by ORCHESTRATION.md §2",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Existing skills to integrate with: /run-stories, /ship, /merge-worktree, /lint, /audit",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "Must handle all error types: compile, test, lint, UI visual regression, runtime",
+        "source": "user"
+      },
+      {
+        "type": "requirement",
+        "value": "Zero-issues termination — loop until all checks pass clean",
+        "source": "user"
+      },
+      {
+        "type": "requirement",
+        "value": "Dual invocation: /fix-loop slash command for humans, programmatic invocation from /run-stories and /ship",
+        "source": "user"
+      },
+      {
+        "type": "scope",
+        "value": "Anti-oscillation: implement state hashing + error count delta tracking. Counterexample injection deferred to v2.",
+        "source": "detected"
+      }
+    ]
+  }
+}

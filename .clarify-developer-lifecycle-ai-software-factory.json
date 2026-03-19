@@ -1,0 +1,33 @@
+{
+  "slug": "developer-lifecycle-ai-software-factory",
+  "skill": "clarify",
+  "scope": {
+    "files": 0,
+    "stories": 0,
+    "complexity": "small"
+  },
+  "route_hint": "standard",
+  "prev": ["presearch/.research-developer-lifecycle-ai-software-factory.json"],
+  "data": {
+    "topic": "developer lifecycle best practices with AI software factory",
+    "input_summary": "Research and analyze best practices for AI-augmented software development lifecycle, mapping to software factory patterns (codebase intelligence, orchestration, quality verification, human-AI trust) with reference to the Gauntlet SF-2026-02 challenge.",
+    "decisions": [],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "Python/Shell orchestration pipeline with MCP servers, SQLite (epics.db, run-state.db), OpenMemory, Claude Code as primary agent runtime",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Existing skill system (ship, research, presearch, draft-plans, run-stories, merge-worktree, etc.) with artifact chain contract",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "Gauntlet SF-2026-02 challenge constraints: 3 engineers, 60 days, 7 products, 3 languages, 80% CI pass on first run, nothing ships without human review",
+        "source": "user"
+      }
+    ]
+  }
+}

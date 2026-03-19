@@ -1,0 +1,46 @@
+{
+  "slug": "iterative-auto-fix-loop",
+  "skill": "scope",
+  "scope": {
+    "files": 3,
+    "stories": 2,
+    "complexity": "medium"
+  },
+  "route_hint": "research",
+  "prev": [],
+  "data": {
+    "topic": "iterative auto-fix loop skill for Claude Code CLI - patterns for building an automated issue resolution loop that handles UI visual regressions, compile errors, test failures, and lint warnings by repeatedly running checks, diagnosing issues, applying fixes, and re-validating until all problems are resolved",
+    "what": "Iterative auto-fix loop skill that detects, diagnoses, fixes, and re-validates all error types (compile errors, test failures, lint warnings, UI visual regressions, runtime errors) in a unified loop",
+    "audience": "Human users via /fix-loop slash command and other skills/pipelines (run-stories, ship) programmatically",
+    "platform": "CLI (Claude Code)",
+    "in_scope": [
+      "Compile error detection and fixing",
+      "Test failure detection and fixing",
+      "Lint warning detection and fixing",
+      "UI visual regression detection via screenshots",
+      "Runtime error detection and fixing",
+      "Detect → diagnose → fix → re-validate loop",
+      "Zero-issues termination (loop until clean)",
+      "Slash command invocation (/fix-loop)",
+      "Programmatic invocation from other skills"
+    ],
+    "out_of_scope": [
+      "Performance profiling or optimization",
+      "Security vulnerability scanning",
+      "Deployment or CI/CD integration"
+    ],
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": "Claude Code orchestration",
+        "language": "shell/python/markdown",
+        "dependencies": ["skills", "hooks", "MCP tools", "epics.db"]
+      }
+    ],
+    "problem": "No unified loop exists for iterating on fixes until all issues are resolved — coder agents run once and report, manual re-runs waste context and time",
+    "why": "Coder agents hit errors, report them, and stop. The human has to re-run or manually fix. An auto-fix loop would let agents self-heal and converge to zero issues autonomously",
+    "end_goal": "Zero issues — loop terminates only when all checks (compile, test, lint, UI) pass clean. Callable as /fix-loop by humans and programmatically by run-stories/ship pipelines",
+    "needs_research": true,
+    "complexity_reasoning": "Requires researching patterns from AI coding tools (Cursor, aider, Copilot Workspace) for automated fix loops, error categorization strategies, and screenshot-based UI validation approaches — external domain knowledge needed"
+  }
+}

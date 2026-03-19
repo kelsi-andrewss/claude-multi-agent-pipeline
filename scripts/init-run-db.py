@@ -119,15 +119,6 @@ SCHEMA_DDL = [
         PRIMARY KEY (story_id, iteration)
     )""",
     """CREATE INDEX IF NOT EXISTS idx_fix_iterations_story ON fix_iterations(story_id)""",
-    """CREATE TABLE IF NOT EXISTS decision_freshness (
-        decision_id INTEGER PRIMARY KEY,
-        staleness_score REAL NOT NULL,
-        days_since_activity INTEGER NOT NULL,
-        last_git_activity TEXT,
-        computed_at TEXT NOT NULL,
-        reinforcement_count INTEGER NOT NULL DEFAULT 0
-    )""",
-    """CREATE INDEX IF NOT EXISTS idx_freshness_score ON decision_freshness(staleness_score)""",
 ]
 
 

@@ -66,7 +66,7 @@ Commands: /prefs add "<text>" | /prefs edit N "<text>" | /prefs remove N
           /prefs export [path] | /prefs import <path>
 ```
 
-> If the query errors with "no such column: source" or "no such column: text", say: "The prefs schema hasn't been migrated yet. Run `bash ~/.claude/.claude/scripts/evolve-prefs-schema.sh` first."
+> If the query errors with "no such column: source" or "no such column: text", say: "The prefs schema hasn't been migrated yet. Run `bash ~/.claude/scripts/evolve-prefs-schema.sh` first."
 
 Stop.
 

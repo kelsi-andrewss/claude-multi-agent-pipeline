@@ -1,0 +1,95 @@
+{
+  "slug": "ai-agent-parallel-coordination",
+  "skill": "clarify",
+  "scope": {
+    "files": 12,
+    "stories": 7,
+    "complexity": "large"
+  },
+  "route_hint": "standard",
+  "prev": ["presearch/.research-ai-agent-parallel-coordination.json"],
+  "data": {
+    "topic": "Auto-detection, self-learning, and auto-memory systems for AI coding agents — conflict detection, self-learning memory, autonomous coordination, trust calibration, auto-review loops",
+    "input_summary": "Integrate parallel coordination, smart merge queue, agent health monitoring, auto-review loops, and graduated autonomy into the dotclaude orchestration pipeline, removing epic-level serialization and enabling cross-epic story parallelism",
+    "decisions": [
+      {
+        "area": "Conflict detection mechanism",
+        "choice": "Hybrid approach: git merge-tree first pass (fast, language-agnostic), escalate to semantic check on detected conflicts to filter false positives from textual proximity",
+        "reasoning": "Balances speed with precision. Git merge-tree catches real conflicts without parser maintenance. Semantic escalation only fires on flagged conflicts, keeping the common path fast. Informed by Grove's 5-layer approach but adapted to our Python/Shell stack.",
+        "source": "user"
+      },
+      {
+        "area": "Merge queue strategy",
+        "choice": "Priority queue with dependency locking: stories merge as soon as they pass tests if they don't share write-targets with stories ahead of them. Non-conflicting stories skip the queue.",
+        "reasoning": "Maximizes throughput without FIFO bottleneck. Quickfixes don't wait for refactors. Uses existing write_files tracking in epics.db. Informed by Overstory's FIFO queue but with smarter ordering.",
+        "source": "user"
+      },
+      {
+        "area": "Agent health monitoring",
+        "choice": "Dual-gate monitor: background watchdog parsing live agent logs for repetition patterns (same tool call with identical args) + soft token/time budget",
+        "reasoning": "Catches the known Haiku replace loop pattern and similar stuck states without killing valid long-running architect tasks. Combines precision of pattern detection with safety net of resource limits.",
+        "source": "user"
+      },
+      {
+        "area": "Autonomy graduation scope",
+        "choice": "Layered: global trust score as baseline + domain-scoped overrides auto-created on divergence (3+ domain-specific failures while global is green). Same pattern as correction→preference pipeline.",
+        "reasoning": "Don't preemptively track every domain. Derive domain tags from write-target paths automatically. Graduation gates check min(global, domain) so domain failures can lower trust but global can't override them. Consistent with the lazy-layer memory philosophy.",
+        "source": "user"
+      },
+      {
+        "area": "Auto-review loop pattern",
+        "choice": "Ralph Loop-style stop hook re-injection with dual-exit-gate (completion indicators + explicit EXIT_SIGNAL) and circuit breakers (no-progress threshold, same-error threshold)",
+        "reasoning": "Proven pattern across Ralph Loop, Aider --auto-test, BugBot. Overbaking mitigated by bounded iterations and progress detection. Integrates naturally with our existing stop hook infrastructure.",
+        "source": "gemini"
+      },
+      {
+        "area": "Cross-epic parallelism model",
+        "choice": "Remove epic-level serialization entirely. Conflict checking operates at story level via write-target overlap, regardless of epic membership. Epics remain grouping only.",
+        "reasoning": "Epics are organizational, not execution boundaries. The real constraint is write-target conflicts between stories, and pm_check_conflicts already checks this. Just need to extend it across all in-progress stories, not just same-epic.",
+        "source": "gemini"
+      }
+    ],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "Must stay within Claude Code primitives (skills, hooks, MCP tools, background agents)",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Must use existing epics.db (SQLite) for state — add tables, don't replace",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Must integrate with existing OpenMemory for learning persistence",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Must preserve existing correction→preference pipeline",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Must work with current worktree-based coder isolation",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "SQLite WAL mode + retry policy needed for concurrent agent writes to epics.db",
+        "source": "gemini"
+      },
+      {
+        "type": "requirement",
+        "value": "Rate limit awareness: central concurrency manager or token guard for parallel agents",
+        "source": "gemini"
+      },
+      {
+        "type": "requirement",
+        "value": "State recovery protocol for watchdog-killed agents: auto-revert worktree and re-queue vs manual intervention",
+        "source": "gemini"
+      }
+    ]
+  }
+}

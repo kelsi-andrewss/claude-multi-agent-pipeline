@@ -1,0 +1,38 @@
+{
+  "slug": "audit-memory-pipeline",
+  "skill": "clarify",
+  "scope": {
+    "files": 4,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [],
+  "data": {
+    "topic": "Fix memory/correction pipeline bugs from AUDIT.md: BUG-5 (non-atomic budget enforcement in om_write.py), BUG-6 (decision shadows set feedback_score=0 causing immediate pruning), BUG-10 (wrong dirname count in signal_processor.py/stop_processor.py), BUG-11 (prune_expired kills score=0 entries immediately), R-7 (double correction detection in stop_processor), CQ-6 (duplicated signal processing logic), CQ-10 (misnamed simhash function)",
+    "input_summary": "Fix 7 bugs and code quality issues in the memory/correction pipeline identified by the code audit. All issues have exact file/line locations.",
+    "decisions": [],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "Python 3 + sqlite3 stdlib for all DB access in hooks/lib/",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "FastMCP + google-genai for MCP server (mcp-servers/gemini/)",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "om_write.py is the canonical entry point for OpenMemory writes — all writers should use it",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "signal_processor.py owns correction detection logic — stop_processor should delegate, not duplicate",
+        "source": "detected"
+      }
+    ]
+  }
+}

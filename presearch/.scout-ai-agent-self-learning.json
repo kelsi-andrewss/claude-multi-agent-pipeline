@@ -1,0 +1,480 @@
+{
+  "slug": "ai-agent-self-learning",
+  "scope": {
+    "files": 6,
+    "stories": null,
+    "complexity": "medium"
+  },
+  "route_hint": null,
+  "prev": ["presearch/.research-ai-agent-self-learning.json"],
+  "skill": "scout",
+  "data": {
+    "topic": "AI agent self-learning and behavioral conditioning — refactoring our memory pipeline to close the feedback loop",
+    "findings": [
+      {
+        "category": "architecture",
+        "summary": "Five-stage background pipeline in stop_processor.py is architecturally sound but Stage 2 and Stage 5 are non-functional",
+        "details": "stop_processor.py runs 5 stages sequentially: (1) correction detection, (2) signal processing (decision_preferences correlation), (3) session summary, (4) auto-distillation, (5) hook generation. Stage 2 always skips because decision_preferences table does not exist in epics.db — it's defined in mcp-servers/gemini/tools_pm_decisions.py via lazy CREATE TABLE IF NOT EXISTS, but no pm_predict_preference or pm_record_decision call has ever been made to trigger it. Stage 5 generates hooks but compliance/ directory only has .gitkeep — the two hooks in settings.json were generated before the directory restructuring. Stages 1, 3, 4 work correctly.",
+        "files": [
+          "hooks/lib/stop_processor.py",
+          "mcp-servers/gemini/tools_pm_decisions.py",
+          "hooks/lib/signal_processor.py",
+          "hooks/lib/hook_generator.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Memory pipeline has three working persistence surfaces: correction_groups (epics.db), rendered-prefs.md (sidecar), openmemory.sqlite",
+        "details": "The prior simplify-memory-infrastructure epic (story-711+) already shipped: killed corrections.md, correction-tallies.jsonl, om-ops.json, tool-learnings.md. Created embedding_utils.py, stop_processor.py, made Stop hook async. Schema migration for correction_groups (text/source columns) runs in load-session-context.sh at session start. rendered-prefs.md successfully renders 7 promoted preferences. 59 correction_groups rows exist (7 promoted, 4 dismissed, 48 accumulating).",
+        "files": [
+          "hooks/load-session-context.sh",
+          ".claude/rendered-prefs.md",
+          ".claude/epics.db"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Correction detection uses semantic embedding against 10 hardcoded prototypes with cosine threshold 0.55, capped at 5 embedding calls per session",
+        "details": "signal_processor.py defines CORRECTION_PROTOTYPES (10 phrases like 'stop doing that, I told you not to'), computes cosine similarity via Ollama nomic-embed-text embeddings, and classifies user turns as corrections if max similarity >= 0.55. Pre-filters exclude: system messages, positive intent, structural content (code fences, >300 chars, >3 newlines). Rate-limited to MAX_EMBEDDING_CALLS_PER_SESSION = 5. Per-session rate limiting also applies to DB upserts (one increment per theme per session). Correction grouping in DB uses exact theme text match, not embedding similarity.",
+        "files": [
+          "hooks/lib/signal_processor.py",
+          "hooks/lib/embedding_utils.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Auto-distillation promotes corrections at count >= 3, writes to both correction_groups DB and OpenMemory",
+        "details": "Stage 4 of stop_processor.py queries correction_groups WHERE status='pending_promotion', generates pref_text as 'User corrected Nx on: <theme> (<dates>)', updates status to 'promoted', and writes to OpenMemory via om_write with tag 'behavioral-pref'. Manual corrections via log-correction.sh go directly to correction_groups with source='manual'. The promotion threshold is PROMOTION_THRESHOLD = 3 in signal_processor.py.",
+        "files": [
+          "hooks/lib/stop_processor.py",
+          "scripts/log-correction.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "decision_preferences table exists in Gemini MCP code but has never been instantiated in epics.db",
+        "details": "tools_pm_decisions.py defines _ensure_decisions_table() which creates decision_preferences with columns: id, decision_type, context, chosen_path, alternatives, session_id, confidence, signal_score (default 0), signal_count (default 0), created_at, updated_at. It also defines pm_predict_preference and pm_get_signal_summary tools. But sqlite3 .tables on epics.db shows no decision_preferences table — only: correction_groups, decision_scopes, decisions, epics, id_sequences, patterns, pending_proposals, schema_version, stories, story_dependencies, tasks. The table is created lazily on first pm_record_decision or pm_predict_preference call, which has never happened.",
+        "files": [
+          "mcp-servers/gemini/tools_pm_decisions.py",
+          ".claude/epics.db"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "decision-43: Correction detection single source of truth in signal_processor.py",
+        "details": "Active decision requiring all correction detection logic to live in signal_processor.py, with shell hooks calling Python. Duplicated regex caused filter drift and junk promotions.",
+        "files": ["hooks/lib/signal_processor.py"],
+        "source": "decision"
+      },
+      {
+        "category": "constraint",
+        "summary": "decision-75: Correction pipeline unified into process_session_corrections()",
+        "details": "Shell script Section 2 was reduced to a simple call. Eliminated dual-path logic drift. process_session_corrections() is the unified entry point for correction detection + DB upsert.",
+        "files": ["hooks/lib/signal_processor.py"],
+        "source": "decision"
+      },
+      {
+        "category": "constraint",
+        "summary": "decision-79: Killed 4 of 7 memory persistence surfaces",
+        "details": "Eliminated corrections.md, correction-tallies.jsonl, om-ops.json, tool-learnings.md. Reduced to 3 surfaces: correction_groups table, rendered-prefs.md sidecar, openmemory.sqlite.",
+        "files": [
+          "hooks/lib/om_write.py",
+          "hooks/lib/stop_processor.py",
+          "scripts/log-correction.sh"
+        ],
+        "source": "decision"
+      },
+      {
+        "category": "constraint",
+        "summary": "decision-90: Graduated autonomy with layered trust — global baseline + domain overrides",
+        "details": "Trust calibration from merge_outcomes: global trust = success_count/total, domain overrides on divergence (3+ failures). 72 merge_outcomes records, all successes. Trust system is live but has never triggered a domain override (100% success rate = global 1.0).",
+        "files": [
+          "hooks/lib/signal_processor.py",
+          ".claude/run-state.db"
+        ],
+        "source": "decision"
+      },
+      {
+        "category": "pattern",
+        "summary": "OpenMemory write gate enforces tag whitelist, budget limits, embedding-based dedup at 0.85, and decay-weighted pruning",
+        "details": "om_write.py is the single write gate. 7 allowed tags with per-category budgets (behavioral-pref: 30, tool-learning: 30, decision: 50, prompt-pattern: 30, session-summary: 20, critique-learning: 30, gemini-blind-spot: 20). Dedup at cosine >= 0.85, falls back to MD5 simhash when Ollama unavailable. Pruning removes entries with decay-weighted score < 0.01 at session start. Current DB has ~230 entries across 7+ tag categories.",
+        "files": ["hooks/lib/om_write.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Hook generator classifies themes into hookable/non-hookable using regex patterns, generates warn-only bash scripts",
+        "details": "hook_generator.py classifies correction themes via: CLI_DANGER_PATTERNS (rm -rf, git push --force, etc.), TOOL_GATE_PATTERNS (never use X, always use Y), RESPONSE_PATTERNS (don't narrate). Hookable themes get bash scripts that grep tool input and emit stderr warnings — never exit 2 (blocking). Non-hookable themes (style/tone/judgment) are logged to OpenMemory as 'not hookable'. Settings.json is updated with the hook registration. Has 16 passing self-tests.",
+        "files": [
+          "hooks/lib/hook_generator.py",
+          "settings.json"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Session start renders preferences from correction_groups DB, injects trust scores, queries OpenMemory for top-5 tool learnings",
+        "details": "load-session-context.sh: (1) runs schema migration (add text/source columns), (2) renders correction_groups WHERE status IN ('promoted','pending_promotion') OR source='manual' to rendered-prefs.md, (3) queries OpenMemory for top 5 tool-learnings by decay-weighted score, (4) computes trust scores from merge_outcomes, (5) prints agenda from stories table. The rendered-prefs.md is @imported by CLAUDE.md for compaction-resilient injection.",
+        "files": [
+          "hooks/load-session-context.sh",
+          ".claude/rendered-prefs.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Correction grouping in DB uses exact text match, not embedding similarity",
+        "details": "process_session_corrections() looks up correction_groups WHERE theme = ? using exact 300-char prefix match. The _find_matching_group() function (embedding-based similarity lookup) exists but is never called in the current flow — it was part of the old corrections.md pipeline. This means semantically identical corrections with different wording create separate groups instead of merging.",
+        "files": ["hooks/lib/signal_processor.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Trust calibration system is live but uninformative — 72 merge_outcomes, 100% success rate, no domain overrides",
+        "details": "compute_trust_scores() reads merge_outcomes from run-state.db. Currently 72 records, all success=1. Global trust = 1.0 (high). No domain overrides because no failures exist to create divergence. The trust system is architecturally complete but has no signal to act on. recommend_model() is implemented but never called outside of the main signal_processor module.",
+        "files": [
+          "hooks/lib/signal_processor.py",
+          ".claude/run-state.db"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "dependency",
+        "summary": "Ollama nomic-embed-text is required for correction detection, dedup, and OpenMemory embeddings",
+        "details": "embedding_utils.py uses OLLAMA_URL (default http://localhost:11434/api/embeddings) with nomic-embed-text model. Health checks at both session start (curl) and stop hook (test embedding). Graceful degradation: correction detection returns empty list, dedup falls back to MD5 simhash, OpenMemory queries return empty. Session start warns user if Ollama unreachable.",
+        "files": ["hooks/lib/embedding_utils.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "completeness",
+        "summary": "correction_groups data quality issue: inflated counts from single-session duplication",
+        "details": "48 accumulating entries, many with inflated counts from a single date (e.g., count=78 all from 2026-03-08, count=51 all from 2026-03-13). Per-session rate limiting was added (one increment per theme per session) but the damage is from before that fix. The top entry has count=78 but was dismissed. Several promoted entries show all dates as the same day, indicating the correction detector over-fires on conversational exchanges.",
+        "files": [
+          "hooks/lib/signal_processor.py",
+          ".claude/epics.db"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "test",
+        "summary": "No test directory exists; hook_generator.py has 16 inline self-tests, no other pipeline components have tests",
+        "details": "No tests/ directory. hook_generator.py has _run_tests() with 16 assertions covering hookability classification, script generation, settings.json updates, idempotency, and sanitization. signal_processor.py, om_write.py, stop_processor.py, and embedding_utils.py have zero tests. The pipeline is tested only by running in production.",
+        "files": ["hooks/lib/hook_generator.py"],
+        "source": "codebase"
+      }
+    ],
+    "decisions_relevant": [
+      {
+        "id": "decision-43",
+        "summary": "Correction detection single source of truth in signal_processor.py",
+        "impact": "All correction detection logic must stay in signal_processor.py. No duplicating detection logic into hooks or other scripts."
+      },
+      {
+        "id": "decision-75",
+        "summary": "Correction pipeline unified into process_session_corrections()",
+        "impact": "process_session_corrections() is the single entry point. Any refactoring must preserve this interface."
+      },
+      {
+        "id": "decision-79",
+        "summary": "Kill 4 of 7 memory persistence surfaces, reduce to 3",
+        "impact": "Already shipped. Any new work must not re-introduce eliminated surfaces."
+      },
+      {
+        "id": "decision-90",
+        "summary": "Graduated autonomy with layered trust — global baseline + domain overrides",
+        "impact": "Trust calibration is the intended consumer of merge_outcomes data. Changes to signal_processor trust functions affect model selection policy."
+      }
+    ],
+    "testable_assertions": [
+      {
+        "assertion": "decision_preferences table does not exist in epics.db, causing Stage 2 of stop_processor to always skip",
+        "category": "architecture_boundary",
+        "verification": "sqlite3 ~/.claude/.claude/epics.db '.tables' | grep decision_preferences (should return empty). Stage 2 log in /tmp/stop-processor-*.log should show 'skipped (no decision_preferences table)'.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "decision_preferences CREATE TABLE is in tools_pm_decisions.py and triggered lazily by pm_record_decision",
+        "category": "architecture_boundary",
+        "verification": "Read mcp-servers/gemini/tools_pm_decisions.py:14-36 to confirm _ensure_decisions_table() and its schema.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "hooks/compliance/ directory exists but contains only .gitkeep — no generated compliance hooks",
+        "category": "architecture_boundary",
+        "verification": "ls ~/.claude/hooks/compliance/ should show only .gitkeep.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Two compliance hooks referenced in settings.json exist at hooks/compliance/ paths that DON'T match the .gitkeep-only state",
+        "category": "pattern_conformance",
+        "verification": "The settings.json references compliance-kelsi-andrews-9-52-pm-... and compliance-2026-03-04-why-... but ls ~/.claude/hooks/compliance/ shows only .gitkeep. These hooks may be dead references.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "rendered-prefs.md successfully renders 7 promoted entries from correction_groups",
+        "category": "pattern_conformance",
+        "verification": "cat ~/.claude/.claude/rendered-prefs.md should show 7 '- User corrected ...' lines.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "_find_matching_group() (embedding-based correction grouping) exists in signal_processor.py but is never called",
+        "category": "architecture_boundary",
+        "verification": "Grep for _find_matching_group calls in signal_processor.py — it's defined but not invoked by process_session_corrections().",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Correction grouping uses exact text match (theme=?), not semantic similarity",
+        "category": "pattern_conformance",
+        "verification": "signal_processor.py process_session_corrections() line 421-425: 'SELECT ... WHERE theme = ?' with theme_key = theme_text[:300].",
+        "source": "codebase"
+      },
+      {
+        "assertion": "All 72 merge_outcomes records show success=1, making trust calibration uninformative",
+        "category": "architecture_boundary",
+        "verification": "sqlite3 ~/.claude/.claude/run-state.db 'SELECT count(*), success FROM merge_outcomes GROUP BY success' should show 72|1.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "MAX_EMBEDDING_CALLS_PER_SESSION = 5 limits correction detection to 5 user turns per session",
+        "category": "pattern_conformance",
+        "verification": "signal_processor.py line 273: MAX_EMBEDDING_CALLS_PER_SESSION = 5.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "om_write ALLOWED_TAGS whitelist has 7 entries and rejects writes with non-whitelisted tags",
+        "category": "dependency_constraint",
+        "verification": "om_write.py line 12-20: ALLOWED_TAGS set. Any new tag type requires updating this set, BUDGETS dict, CLAUDE.md, and refs/orch-memory.md.",
+        "source": "codebase"
+      }
+    ],
+    "write_targets": [
+      "hooks/lib/stop_processor.py",
+      "hooks/lib/signal_processor.py",
+      "hooks/load-session-context.sh",
+      "hooks/lib/hook_generator.py",
+      "hooks/lib/om_write.py",
+      "CLAUDE.md"
+    ],
+    "read_targets": [
+      "mcp-servers/gemini/tools_pm_decisions.py",
+      "hooks/lib/embedding_utils.py",
+      "hooks/session-learning-check.sh",
+      "scripts/log-correction.sh",
+      ".claude/rendered-prefs.md",
+      ".claude/epics.db",
+      ".claude/run-state.db",
+      ".claude/openmemory.sqlite",
+      "settings.json",
+      "ORCHESTRATION.md",
+      "refs/orch-memory.md",
+      "refs/orch-friction.md",
+      "presearch/simplify-memory-infrastructure.md",
+      ".clarify-simplify-memory-infrastructure.json",
+      ".clarify-ai-agent-self-learning.json"
+    ],
+    "conflicts": [
+      {
+        "subject": "LLM-driven vs. rule-based memory promotion",
+        "codebase_says": "Count-based threshold (>= 3 occurrences) for auto-promotion. No LLM reasoning about whether a correction is significant.",
+        "research_says": "LangMem and Letta use LLM-driven promotion — the agent LLM decides what to store/promote. CIPHER uses an LLM to infer preferences from corrections as human-readable context-specific rules.",
+        "resolution": "Codebase approach wins for now. Our count-based threshold is actually more structured than what Letta/LangMem offer. The missing piece is the observer pass that generalizes corrections into context-aware rules (CIPHER pattern), but that's additive — it doesn't replace the existing threshold mechanism."
+      },
+      {
+        "subject": "Monolithic rules vs. context-aware retrieval",
+        "codebase_says": "rendered-prefs.md is a flat list of all promoted preferences injected into every session. No context filtering — everything is shown every time.",
+        "research_says": "CIPHER's k-nearest-context retrieval outperforms global preference models because preferences are context-dependent. Research consistently shows context-aware retrieval beats monolithic rule sets.",
+        "resolution": "Research is right in principle but the codebase scale doesn't justify it yet. With 7 promoted preferences, injecting all of them costs ~200 tokens. When the list reaches 20-30 entries, context-aware filtering (e.g., project-scoped or prompt-keyword-matched) should be considered."
+      },
+      {
+        "subject": "Correction grouping: exact match vs. semantic similarity",
+        "codebase_says": "process_session_corrections() uses exact theme text match (WHERE theme = ?). _find_matching_group() with embedding similarity exists but is dead code.",
+        "research_says": "Both LangMem and CIPHER use semantic similarity for deduplication and grouping of related memories. Exact match misses semantically identical corrections phrased differently.",
+        "resolution": "Research approach is better. _find_matching_group() should be wired into process_session_corrections() to merge semantically similar corrections. This would reduce the 48 accumulating entries significantly (many are duplicates with different wording). However, this requires Ollama to be running for every correction detection pass."
+      },
+      {
+        "subject": "Temporal supersession for evolving preferences",
+        "codebase_says": "No temporal validity for preferences. A promoted preference stays forever unless manually dismissed. No mechanism for new corrections to supersede old preferences.",
+        "research_says": "Zep's Graphiti uses valid_at/invalid_at timestamps. Temporal reasoning automatically supersedes outdated preferences without explicit deletion.",
+        "resolution": "Research points to a real gap but it's low priority. With 7 promoted preferences and an active user who can dismiss, manual management suffices. If preference count grows past 15-20, temporal supersession becomes valuable."
+      },
+      {
+        "subject": "Decision-outcome correlation maturity",
+        "codebase_says": "decision_preferences table and signal processing (Stage 2) were designed but never activated. The infrastructure exists to correlate corrections to decisions via text overlap + temporal proximity.",
+        "research_says": "No production system does closed-loop decision-outcome correlation. Best academic accuracy is 52% at step level (CHIEF). The field formalized this as a research task only in 2025.",
+        "resolution": "The codebase design is pragmatically appropriate — text overlap + temporal proximity in a single-user system is simpler than hierarchical causal graphs. The issue isn't the approach, it's that the table was never created. Creating it via init-run-db.py or a migration script would activate the entire feedback channel."
+      }
+    ],
+    "completeness": {
+      "confidence": "exhaustive",
+      "occurrences": [
+        {
+          "target": "correction_groups table access",
+          "locations": [
+            "hooks/lib/signal_processor.py:_ensure_correction_groups_table()",
+            "hooks/lib/signal_processor.py:process_session_corrections()",
+            "hooks/lib/signal_processor.py:_check_promoted()",
+            "hooks/lib/stop_processor.py:stage_auto_distillation()",
+            "hooks/lib/stop_processor.py:stage_hook_generation()",
+            "hooks/load-session-context.sh:schema migration block",
+            "hooks/load-session-context.sh:rendered-prefs rendering block",
+            "hooks/load-session-context.sh:correction patterns display block",
+            "scripts/log-correction.sh:main insert/update",
+            "hooks/inject-tier2-context.sh:infra_corrections category"
+          ],
+          "search_strategies": ["grep correction_groups across all files"],
+          "blind_spots": ["Dynamic SQL in Gemini MCP tools (but those don't touch correction_groups)"]
+        },
+        {
+          "target": "decision_preferences table access",
+          "locations": [
+            "mcp-servers/gemini/tools_pm_decisions.py:_ensure_decisions_table()",
+            "mcp-servers/gemini/tools_pm_decisions.py:pm_record_decision()",
+            "mcp-servers/gemini/tools_pm_decisions.py:pm_predict_preference()",
+            "mcp-servers/gemini/tools_pm_decisions.py:pm_get_signal_summary()",
+            "hooks/lib/signal_processor.py:stage_signal_processing() (via stop_processor.py Stage 2)",
+            "hooks/lib/signal_processor.py:main()",
+            "CLAUDE.md:behavioral learning section"
+          ],
+          "search_strategies": ["grep decision_preferences across all files"],
+          "blind_spots": []
+        },
+        {
+          "target": "om_write() callers",
+          "locations": [
+            "hooks/lib/stop_processor.py:stage_session_summary()",
+            "hooks/lib/stop_processor.py:stage_auto_distillation()",
+            "hooks/lib/hook_generator.py:_log_hookability()",
+            "hooks/lib/hook_generator.py:_log_generation()"
+          ],
+          "search_strategies": ["grep 'om_write(' across all .py files"],
+          "blind_spots": ["MCP openmemory_store tool calls from main session (go through MCP, not om_write.py)"]
+        },
+        {
+          "target": "merge_outcomes table access",
+          "locations": [
+            ".claude/scripts/init-run-db.py:SCHEMA_DDL",
+            ".claude/scripts/outcomes-parser.py:populate_merge_outcomes()",
+            "hooks/lib/signal_processor.py:get_domain_success_rates()",
+            "hooks/lib/signal_processor.py:get_model_success_rates()",
+            "hooks/lib/signal_processor.py:feed_outcomes_to_scoring()",
+            "hooks/lib/signal_processor.py:compute_trust_scores()",
+            "hooks/load-session-context.sh:trust calibration block",
+            "hooks/session-learning-check.sh:outcomes check block",
+            "skills/merge-worktree/SKILL.md:outcome logging step"
+          ],
+          "search_strategies": ["grep merge_outcomes across all files"],
+          "blind_spots": []
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "hooks/lib/stop_processor.py",
+        "dependents": [
+          "hooks/session-learning-check.sh (spawns it as background process)"
+        ],
+        "test_coverage": ["none"],
+        "runtime_contracts": [
+          "Reads transcript JSONL, writes to epics.db correction_groups and openmemory.sqlite",
+          "PID lockfile protocol at /tmp/stop-processor-{session}.pid",
+          "5-stage sequential execution: correction → signal → summary → distill → hooks"
+        ],
+        "failure_symptoms": "Silent failure — runs as nohup background process. Logs to /tmp/stop-processor-{session}.log. If it crashes, corrections aren't detected, preferences aren't promoted, session summaries aren't written. Next session sees no correction patterns in agenda. Only visible symptom: rendered-prefs.md stops updating."
+      },
+      {
+        "write_target": "hooks/lib/signal_processor.py",
+        "dependents": [
+          "hooks/lib/stop_processor.py (Stage 1, Stage 2 import multiple functions)",
+          "hooks/load-session-context.sh (imports compute_trust_scores, get_trust_level)",
+          "hooks/lib/signal_processor.py __main__ (standalone CLI mode)"
+        ],
+        "test_coverage": ["none"],
+        "runtime_contracts": [
+          "process_session_corrections() is the single entry point for correction detection",
+          "compute_trust_scores() returns {global: float, domains: dict, sample_count: int}",
+          "get_trust_level() returns 'high'|'medium'|'low'",
+          "extract_corrections() returns [{turn_idx, content, weight}]"
+        ],
+        "failure_symptoms": "Import error crashes stop_processor.py Stage 1 (correction detection silently fails). Trust score computation failure at session start produces fallback 'Trust: medium (default — <error>)' message. Correction detection failure means corrections accumulate but are never detected or grouped."
+      },
+      {
+        "write_target": "hooks/load-session-context.sh",
+        "dependents": [
+          "settings.json SessionStart hook registration"
+        ],
+        "test_coverage": ["none"],
+        "runtime_contracts": [
+          "Runs synchronously at session start (10s timeout)",
+          "Must output CLAUDE.md and ORCHESTRATION.md content",
+          "Renders rendered-prefs.md from correction_groups DB",
+          "Computes and displays trust scores",
+          "Shows session agenda from stories table",
+          "Shows correction patterns"
+        ],
+        "failure_symptoms": "Session starts without context injection — Claude operates without CLAUDE.md rules, preferences, agenda. The 10s timeout means a slow DB query or hanging Python subprocess kills the entire session start context. User would notice immediately: no agenda, no preferences, no trust level displayed."
+      },
+      {
+        "write_target": "hooks/lib/hook_generator.py",
+        "dependents": [
+          "hooks/lib/stop_processor.py (Stage 5 imports generate_hook)"
+        ],
+        "test_coverage": ["16 inline self-tests via --test flag"],
+        "runtime_contracts": [
+          "classify_hookability() returns {hookable: bool, hook_type, reason, ...}",
+          "generate_hook() returns {path, hook_type, skipped} or None",
+          "Updates settings.json with new hook registrations",
+          "Creates executable .sh files in hooks/compliance/"
+        ],
+        "failure_symptoms": "Stage 5 of stop_processor fails silently. No compliance hooks are generated. Low impact because existing hooks are already registered and this feature is aspirational. settings.json corruption would be the worst case — but _update_settings uses atomic write (tmp + rename)."
+      },
+      {
+        "write_target": "hooks/lib/om_write.py",
+        "dependents": [
+          "hooks/lib/stop_processor.py (Stage 3 session summary, Stage 4 distillation)",
+          "hooks/lib/hook_generator.py (_log_hookability, _log_generation)"
+        ],
+        "test_coverage": ["none"],
+        "runtime_contracts": [
+          "om_write() returns id string or None",
+          "Tag whitelist enforcement (ALLOWED_TAGS)",
+          "Embedding-based dedup at 0.85 threshold",
+          "Budget enforcement with decay-weighted pruning",
+          "prune_expired() called at session start"
+        ],
+        "failure_symptoms": "OpenMemory writes fail silently (returns None). Session summaries and behavioral preferences don't persist to OpenMemory. Dedup failure could cause budget overflow and excessive pruning. Memory snapshot at session start would show stale entries."
+      },
+      {
+        "write_target": "CLAUDE.md",
+        "dependents": [
+          "hooks/load-session-context.sh (cats it at session start)",
+          "Every Claude Code session (loaded as behavioral instructions)",
+          ".claude/CLAUDE.md (@imports rendered-prefs.md)"
+        ],
+        "test_coverage": ["none"],
+        "runtime_contracts": [
+          "Defines correction logging instructions",
+          "Defines behavioral learning surfaces",
+          "References decision_preferences table"
+        ],
+        "failure_symptoms": "Incorrect instructions affect every session. If correction logging instructions are wrong, manual corrections stop flowing to the right destination. If behavioral learning surfaces list is inaccurate, Claude references non-existent infrastructure."
+      }
+    ],
+    "gaps": [
+      "No observer/generalizer pass exists — corrections are stored as raw user text, not generalized into context-aware behavioral rules (CIPHER pattern)",
+      "decision_preferences table has never been created despite being designed and coded — the entire decision-correction correlation loop is inert",
+      "Correction grouping uses exact text match, not the existing _find_matching_group() embedding similarity — semantically identical corrections create separate groups",
+      "No preference evolution mechanism — promoted preferences persist forever with no temporal supersession or confidence decay",
+      "No feedback from merge_outcomes into preference refinement — trust calibration reads outcomes but doesn't inform the correction→preference pipeline",
+      "rendered-prefs.md is a flat list with no context filtering — all preferences injected regardless of relevance to current task",
+      "Hook generation (Stage 5) produces warn-only hooks that log to stderr — no measurement of whether these warnings actually change behavior",
+      "MAX_EMBEDDING_CALLS_PER_SESSION = 5 may be too low for long sessions with many corrections, causing under-detection",
+      "No test infrastructure for any pipeline component except hook_generator.py inline tests",
+      "CLAUDE.md references decision_preferences table as active infrastructure, but it doesn't exist — documentation is misleading"
+    ]
+  }
+}

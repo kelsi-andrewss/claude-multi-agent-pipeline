@@ -1,0 +1,60 @@
+{
+  "slug": "audit-gemini-fixes",
+  "skill": "scope",
+  "scope": {
+    "files": 6,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [],
+  "data": {
+    "topic": "Fix PM tool bugs and Gemini-reported issues from AUDIT.md: BUG-7 (unbounded DFS recursion + dep wipe on cycle detection), BUG-8 (pm_triage WHERE contradiction), BUG-9 (pm_create_story hardcoded task IDs), CQ-1 (duplicated embedding utils), CQ-4 (three near-identical _ensure_*_column functions), CQ-5 (stale CHECK constraint in _ensure_knowledge_tables), CQ-7 (globals().update obscures MCP tools), CQ-11 (format_response.py approaching 1000-line threshold), Gemini-High (silent embedding failures return null), Gemini-Medium-1 (cost calc defaults to Opus pricing for non-matching models), Gemini-Medium-2 (unvalidated JSON input in hooks)",
+    "what": "Fix 3 PM tool correctness bugs, 4 code quality issues, and 3 resilience gaps identified across two audit reports",
+    "audience": "Kelsi (sole developer/operator of the orchestration framework)",
+    "platform": "CLI (Claude Code orchestration layer)",
+    "in_scope": [
+      "BUG-7: Convert _detect_cycles to iterative DFS, only reject cyclic dep (not all deps) in _set_story_deps",
+      "BUG-8: Fix pm_triage to skip backlog query when epic_id is given",
+      "BUG-9: Use _add_task_to_story in pm_create_story instead of hardcoded t1/t2 IDs",
+      "CQ-1: Deduplicate embedding utilities between tools_knowledge.py and hooks/lib/embedding_utils.py",
+      "CQ-4: Consolidate three _ensure_*_column functions into single _ensure_column helper",
+      "CQ-5: Remove stale CHECK constraint from _ensure_knowledge_tables patterns CREATE TABLE",
+      "CQ-7: Remove globals().update from server.py — FastMCP decoration handles registration",
+      "CQ-11: Flag format_response.py for future split (no action now, 853 lines)",
+      "Gemini-High: Return structured error from embedding failures instead of null",
+      "Gemini-Medium-1: Fix cost calc in tracking/cost.py to recognize Haiku and all model families",
+      "Gemini-Medium-2: Add JSON input validation helper for hooks"
+    ],
+    "out_of_scope": [
+      "Memory pipeline bugs (BUG-4, BUG-5, BUG-6, BUG-10, BUG-11, BUG-12 — separate presearch)",
+      "Hook infrastructure bugs (BUG-1, BUG-2, BUG-3, BUG-13, CQ-2, CQ-3, CQ-6 — separate presearch)",
+      "AUDIT-GEMINI.md findings already fixed or environmental (syntax error, directory traversal, POSIX process kill)"
+    ],
+    "stack_detected": [
+      {
+        "marker": "mcp-servers/gemini/server.py",
+        "framework": "FastMCP",
+        "language": "python",
+        "dependencies": ["google-genai", "mcp"]
+      },
+      {
+        "marker": "hooks/lib/embedding_utils.py",
+        "framework": null,
+        "language": "python",
+        "dependencies": ["ollama"]
+      },
+      {
+        "marker": "tracking/cost.py",
+        "framework": null,
+        "language": "python",
+        "dependencies": []
+      }
+    ],
+    "problem": "Three PM tools have correctness bugs (cycle detection blows stack, triage returns empty results, task ID collisions). Four code quality issues create maintenance burden and potential runtime errors. Three resilience gaps cause silent data loss or inaccurate reporting.",
+    "why": "BUG-7 can crash the MCP server with RecursionError during normal dep management. BUG-8 makes pm_triage useless when scoped to an epic. BUG-9 silently drops tasks due to UNIQUE constraint violations. Embedding failures returning null cascade to corrupted OpenMemory entries.",
+    "end_goal": "All 11 items resolved. PM tools produce correct results. Embedding failures surface as structured errors. Cost calc correctly handles all model families.",
+    "needs_research": false,
+    "complexity_reasoning": "6 write-target files across MCP server, hooks, and tracking — all standard engineering fixes on owned code with clear patterns to follow"
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "angle": "Feedback loop orchestration and state management",
+  "findings": [
+    {
+      "claim": "The Drafter-Auditor (Generator-Validator) pattern decouples repair logic into two roles: the Drafter proposes a fix based on context, while the Auditor executes a verification suite (tests, linters, static analysis). If the Auditor finds a failure, it returns raw logs and error traces back to the Drafter for the next iteration.",
+      "source_url": "https://aclanthology.org/2024.findings-acl.486/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Process-based feedback (feeding intermediate build/test logs back into the model) is more effective than outcome-based feedback (simple pass/fail signals). Process feedback allows the system to fix last-mile errors like syntax issues or missing imports that were not part of the original bug.",
+      "source_url": "https://www.cs.cmu.edu/~ckaestne/pdf/icse24b.pdf",
+      "confidence": "high"
+    },
+    {
+      "claim": "The Keep-or-Reset (State Rollback) pattern maintains a known-good state. If an iterative fix introduces a new regression or breaks the build, the system automatically rolls back the codebase to the previous state before trying a new strategy, preventing regression accumulation.",
+      "source_url": "https://swe-agent.com/docs/concepts/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Circuit breakers (hard limits on iterations, token usage, or execution time) are essential to prevent infinite loops or spiraling where an agent repeatedly makes the same mistake. SWE-agent typically uses 100-step limits in benchmark configurations.",
+      "source_url": "https://arxiv.org/abs/2405.15793",
+      "confidence": "high"
+    },
+    {
+      "claim": "Dual-signal termination requires both a technical pass (all tests green) AND a semantic signal (the agent explicitly confirming the goal is met) before finalizing a repair, preventing premature termination on coincidentally passing tests.",
+      "source_url": "https://swe-agent.com/docs/concepts/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "SWE-agent models state as: START -> ISSUE_ANALYSIS -> EXPLORATION -> LOCALIZATION -> EDITING -> VERIFICATION -> REFINEMENT (loop back to EDITING or EXPLORATION) -> SUBMISSION. Every edit automatically triggers a background linter that rejects edits with syntax errors before they are saved, forcing a transition back to refinement.",
+      "source_url": "https://arxiv.org/abs/2405.15793",
+      "confidence": "high"
+    },
+    {
+      "claim": "AutoCodeRover uses a stratified two-stage pipeline: Stage 1 is iterative context retrieval (symbol extraction -> stratified search -> fault localization via SBFL), Stage 2 is a patch generation retry loop (snippet retrieval -> patch drafting -> validation). The separation of discovery from repair creates a pipeline-style state machine.",
+      "source_url": "https://arxiv.org/abs/2404.05427",
+      "confidence": "high"
+    },
+    {
+      "claim": "SWE-agent uses granular state transitions where the agent chooses its next state (search vs edit) at every turn, making it adaptable to complex multi-file bugs. AutoCodeRover uses a rigid pipeline that separates discovery from repair -- more efficient for localized bugs but less flexible when initial search misses context.",
+      "source_url": "https://github.com/nus-apr/auto-code-rover",
+      "confidence": "high"
+    },
+    {
+      "claim": "Greedy repair strategy fixes one error at a time and re-validates after each change. This is ideal when testing is nearly instantaneous but becomes highly inefficient when compilation/test overhead is high, since the system pays full validation cost per attempt.",
+      "source_url": "https://aider.chat/docs/usage/watch.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "Batch repair strategy groups multiple potential fixes into a single repair action, amortizing overhead cost across multiple fixes. It is more effective at finding complex multi-point bugs that require coordinated changes, but introduces combinatorial complexity in determining which fixes to group.",
+      "source_url": "https://arxiv.org/abs/2103.04149",
+      "confidence": "high"
+    },
+    {
+      "claim": "Systems detect cycling (going in circles) by maintaining a history of codebase state using cryptographic hashes after each repair pass. If a new pass produces a state identical to a previous one (e.g., Rule A adds a semicolon and Rule B removes it), the system detects circular dependency and terminates.",
+      "source_url": "https://eslint.org/docs/latest/use/command-line-interface#--fix",
+      "confidence": "high"
+    },
+    {
+      "claim": "Conflict detection via textual ranges prevents conflicting changes within a single pass: proposed fixes are sorted by starting position in the file, and if two fixes overlap in character ranges, only the first is applied and the second is discarded for that pass.",
+      "source_url": "https://eslint.org/docs/latest/use/command-line-interface#--fix",
+      "confidence": "high"
+    },
+    {
+      "claim": "AST Node Locking is used by sophisticated repair tools to prevent conflicting changes: if a rule modifies a specific AST node, that branch of the tree is locked to prevent other rules from making conflicting changes to the same logic in the same iteration.",
+      "source_url": "https://www.semanticscholar.org/paper/A-Survey-of-Automated-Program-Repair-Monperrus/0c897f74817a3a30a80773915000049af",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Progress metrics track the delta in validation failures across iterations. Progress is defined as a reduction in total error count. If the error count remains stagnant or flaps between the same numbers for several turns, the system identifies lack of progress and can change strategy or terminate.",
+      "source_url": "https://aider.chat/docs/usage/watch.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "Hierarchical validation ordering follows a fast-to-slow gatekeeping pattern: (1) Syntax/parse checks, (2) Linting/static analysis, (3) Type checking, (4) Unit tests on modified files, (5) Full test suite/integration tests. Each level acts as a gatekeeper -- failure at any level prevents running more expensive downstream checks.",
+      "source_url": "https://arxiv.org/abs/2103.04149",
+      "confidence": "high"
+    },
+    {
+      "claim": "Cost-aware test prioritization runs high-yield tests first: tests that exercise modified lines of code (modification-point awareness) or tests that have historically failed for similar changes. This avoids running the full test suite when targeted tests can provide faster signal.",
+      "source_url": "https://arxiv.org/abs/2103.04149",
+      "confidence": "high"
+    },
+    {
+      "claim": "Self-correction loops triggered by gatekeeper failures allow surgical fixes on syntax or style before ever attempting slow unit tests. When a linter fails, the error output is immediately fed back to the repair agent, creating a tight inner loop that is much cheaper than the full validation outer loop.",
+      "source_url": "https://swe-agent.com/docs/concepts/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Speculative execution in sandboxes allows repairs to be applied in a temporary environment. If the code fails to compile or pass basic linting, the speculative fix is discarded immediately without affecting the main worktree.",
+      "source_url": "https://arxiv.org/abs/2405.15793",
+      "confidence": "medium"
+    }
+  ],
+  "key_insights": [
+    "Robust auto-fix loops require a formal state machine with explicit transitions between exploration, editing, and verification phases. SWE-agent's granular state model (where the agent chooses its next state at each step) handles complex multi-file bugs better than AutoCodeRover's rigid pipeline, but the pipeline approach is more efficient for localized single-point fixes. The right choice depends on expected bug complexity.",
+    "Cycling detection is the critical safety mechanism that most naive implementations miss. Three complementary approaches prevent infinite loops: state hashing (detecting repeated codebase states), progress metrics (monitoring error count deltas across iterations), and circuit breakers (hard iteration limits). Systems without all three will eventually spiral on adversarial inputs.",
+    "Hierarchical validation ordering (syntax -> lint -> type check -> unit tests -> integration tests) is not just an optimization but a structural requirement. Each layer acts as a gatekeeper that creates a tight, cheap inner correction loop before the expensive outer validation loop. SWE-agent's inline linter that rejects broken edits before they are saved exemplifies this -- it prevents the system from ever wasting a full test run on syntactically invalid code."
+  ],
+  "gaps": [
+    "No published research found on formal verification of repair loop termination guarantees -- all systems rely on empirical limits rather than provable convergence properties",
+    "Concrete data on greedy vs batch repair effectiveness across different codebase sizes and error densities -- the tradeoffs are theoretically understood but not empirically benchmarked in published work",
+    "How repair systems handle non-deterministic failures (flaky tests, timing-dependent bugs) in their progress tracking -- most systems assume deterministic validation outcomes",
+    "Multi-agent coordination in repair loops where multiple agents work on different parts of a fix simultaneously -- most systems are single-threaded with sequential state transitions",
+    "Optimal circuit breaker thresholds (iteration limits, token budgets) for different repair task complexities -- current systems use fixed limits rather than adaptive ones"
+  ]
+}

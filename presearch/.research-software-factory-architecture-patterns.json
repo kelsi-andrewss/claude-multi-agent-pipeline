@@ -1,0 +1,157 @@
+{
+  "angle": "Software Factory Architecture Patterns",
+  "findings": [
+    {
+      "claim": "Microsoft AutoDev (March 2024) implements an autonomous AI-driven development framework using Docker-based evaluation environments and multi-agent orchestration (Conversation Manager, Rules & Actions Config in YAML, Agent Scheduler). Achieved 91.5% Pass@1 on HumanEval for code generation and 87.8% for test generation.",
+      "source_url": "https://arxiv.org/abs/2403.08299",
+      "confidence": "high"
+    },
+    {
+      "claim": "Cognition's Devin (March 2024) operates as a persistent autonomous software engineer with a secure sandbox (CLI, code editor, web browser), using a Research-Plan-Execute-Verify loop. Resolved 13.86% of real-world GitHub issues unassisted on SWE-bench at launch.",
+      "source_url": "https://www.cognition.ai/blog/introducing-devin",
+      "confidence": "high"
+    },
+    {
+      "claim": "GitHub Copilot Workspace (April 2024) implements a four-stage agentic pipeline: Spec Phase (current vs desired state), Plan Phase (file-level execution list), Implementation Phase (in GitHub-hosted codespace), and Validation Phase (GitHub Actions with auto-fix attempts). Uses a Plan-First approach requiring structural strategy commitment before code generation.",
+      "source_url": "https://github.blog/news-insights/product-news/introducing-github-copilot-workspace/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Factory.ai implements the software factory pattern through specialized autonomous agents called 'Droids' - Planning Droid (requirements analysis), Coding Droid (implementation), Review Droid (automated PR review and testing). Droids operate within an event-driven framework, automatically picking up tasks from project management tools and integrating directly with CI/CD pipelines.",
+      "source_url": "https://www.factory.ai/",
+      "confidence": "high"
+    },
+    {
+      "claim": "StrongDM's Dark Factory architecture represents 'Level 5' autonomous coding where no code is written or reviewed by humans. Key components: The Attractor (non-interactive coding agent), Scenarios (holdout BDD/Gherkin behavioral specs invisible to the coding agent), Digital Twin Universe (behavioral clones of third-party services for integration testing), CXDB (immutable DAG storing all agent state), and The Evaluator (separate validation agent). Success measured by 'Token Velocity' (~$1000/day target spend).",
+      "source_url": "https://simonwillison.net/2025/Feb/15/strongdm/",
+      "confidence": "high"
+    },
+    {
+      "claim": "OpenHands (formerly OpenDevin, rebranded July 2024) uses an event-driven pub/sub architecture with a central Event Stream. Components publish Actions (requests to change environment) and receive Observations (feedback). The sandboxed Docker runtime executes in isolation. Architecture evolved from local-first Python to stateless multi-tenant cloud supporting parallel agent orchestration.",
+      "source_url": "https://github.com/All-Hands-AI/OpenHands",
+      "confidence": "high"
+    },
+    {
+      "claim": "SWE-agent (Princeton, April 2024) introduced the Agent-Computer Interface (ACI) concept - simplified commands (search_dir, edit_file) designed for AI models rather than humans. Uses a Search-and-Edit loop with localized test verification. Demonstrated that optimizing the AI-terminal interface is as important as model reasoning capabilities.",
+      "source_url": "https://swe-agent.com/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Replit Agent (September 2024) implements a Multi-Agent Cognitive Architecture for full-stack tasks including database provisioning and environment configuration. Uses a Checkpointing system (automated git commits) enabling 'Time Travel' debugging of agent actions.",
+      "source_url": "https://blog.replit.com/replit-agent",
+      "confidence": "high"
+    },
+    {
+      "claim": "The Agentless framework (mid-2024) provides a non-agentic three-phase static pipeline: Localization (top-down search for relevant files/functions/lines), Repair (multiple candidate patches in diff format), Validation (regression tests + reproduction test generation). Costs approximately $0.34 per issue solved vs tens of dollars for agentic systems.",
+      "source_url": "https://arxiv.org/abs/2407.01489",
+      "confidence": "high"
+    },
+    {
+      "claim": "Amazon Q Developer uses the Kira Architecture: a Supervisor Agent decomposes tasks and delegates to specialized workers. Includes Taxy and Logos engines (tool-use logic and iterative execution), Textcode (token-efficient IDE workspace representation), and isolated Docker sandbox. The Logos-driven loop autonomously iterates through candidate solutions until tests pass.",
+      "source_url": "https://aws.amazon.com/q/developer/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Google Jules is an asynchronous multi-agent system powered by Gemini 2.5/3.1 Pro with 2M+ token context. Architecture uses four specialized agents: Planning Agent (repository analysis and roadmap), Execution Agent (file operations in Google Cloud VM), Critique Agent (security/style/architecture review), and Testing Agent (automated tests + visual UI verification).",
+      "source_url": "https://blog.google/technology/developers/google-jules-ai-agent/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Anthropic Claude Code uses a 'radically simple' single-threaded master loop architecture. Internal components: nO (master Think-Act-Observe loop), h2A (dual-buffer async steering bus for human interrupts), wU2 (context compressor triggering at 92% context threshold). Spawns sub-agents (identity I2A) with fresh context windows to prevent context pollution.",
+      "source_url": "https://promptlayer.com/blog/claude-code-architecture-reverse-engineered",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Anthropic's Model Context Protocol (MCP), released late 2024/early 2025, acts as a universal standard for agents to discover tools and data sources across platforms - described as 'TCP/IP for Agents.' GitHub and Microsoft sunsetted traditional App-based extensions on November 10, 2025, in favor of MCP.",
+      "source_url": "https://www.anthropic.com/news/model-context-protocol",
+      "confidence": "high"
+    },
+    {
+      "claim": "Microsoft Foundry (GA March 2026) serves as an enterprise 'Agent Factory' with managed Agent Service for hosting/scaling autonomous agents. Uses MCP for contextual extensibility and standardized Memory Banks (MEMORY.md, AGENTS.md) within repositories for persistent architectural decision state.",
+      "source_url": "https://github.blog/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Microsoft Agent Framework (MAF) standardized agent communication via IChatClient abstraction in Microsoft.Extensions.AI (v1.0 RC January 2026). Middleware pipeline: Authentication -> Logging -> Context (RAG) -> Tool Calling -> LLM Execution. Supports Sequential, Concurrent (Fan-out), and Evaluator-Optimizer orchestration patterns.",
+      "source_url": "https://devblogs.microsoft.com/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Cosine Genie (August 2024) was trained on 'information lineage' - the step-by-step discovery and decision-making process of human engineers, not just final commits. Operates asynchronously connecting to GitHub, GitLab, Jira, Slack to deliver PRs independently of user sessions.",
+      "source_url": "https://cosine.sh/blog/genie-technical-report",
+      "confidence": "high"
+    },
+    {
+      "claim": "Windsurf/Codeium Cascade introduced a 'World Model' - a live, constantly updated representation of the codebase including symbols, types, and logic flows. Enables headless actions (file creation, directory refactoring, shell script execution) without step-by-step user guidance.",
+      "source_url": "https://codeium.com/blog/windsurf-the-first-agentic-ide",
+      "confidence": "high"
+    },
+    {
+      "claim": "Magic.dev's LTM-2-mini architecture supports context windows up to 100 million tokens, enabling repository-wide reasoning without RAG fragmentation. Enables massive refactors by holding entire large repositories in active reasoning memory.",
+      "source_url": "https://magic.dev/blog/ltm-2-mini",
+      "confidence": "high"
+    },
+    {
+      "claim": "AlphaCodium (early 2024) introduced 'Flow Engineering' which prioritizes structured iterative process over prompt engineering. Pre-processing flow generates problem description, edge cases, and 2-3 algorithmic strategies before coding. Uses YAML for all structured outputs to reduce token overhead.",
+      "source_url": "https://arxiv.org/abs/2401.08500",
+      "confidence": "high"
+    },
+    {
+      "claim": "EvoMAC introduces 'Textual Backpropagation' where test failure reports serve as 'textual gradients' feeding a meta-optimizer agent that rewrites prompts or interaction graphs of multi-agent systems, effectively enabling autonomous evolution of the software factory architecture.",
+      "source_url": "https://arxiv.org/abs/2410.03824",
+      "confidence": "high"
+    },
+    {
+      "claim": "Poolside AI takes a vertical approach building both foundation models and developer tools, using RLHF specifically optimized for code execution success (compile + test pass = reward). Aims to integrate models directly into CI/CD pipelines for autonomous PR submission with verification reports.",
+      "source_url": "https://poolside.ai/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Four dominant architectural patterns have emerged for AI software factories: (1) Hierarchical Delegation/Supervisor-Worker with task decomposition, (2) Agentic Mesh/Micro-Agents communicating via event bus like Kafka, (3) Blackboard Pattern with shared partitioned state and controller agent, (4) Reflection/Self-Correction Loops with Verifier/Critic agents.",
+      "source_url": "https://arxiv.org/abs/2403.08299",
+      "confidence": "high"
+    },
+    {
+      "claim": "The six identifiable core components of modern AI software factories are: Orchestrator/Conversation Manager (state tracking), Planner/Reasoning Engine (goal decomposition), Sandbox Executor (isolated Docker/Firecracker MicroVM environments), Agent-Computer Interface/ACI (structured tool set), Episodic & Long-term Memory (vector DBs + RAG), and Verification Pipeline (compiler/test-in-the-loop feedback).",
+      "source_url": "https://swe-agent.com/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Gartner defines the enterprise AI-augmented software engineering maturity model as three phases: Assisted (code completion), Augmented (multi-file generation with human oversight), Autonomous (lights-out factory operation). They emphasize an 'AI-Native SDLC' redesigned around AI capabilities rather than bolting AI onto existing processes.",
+      "source_url": "https://www.gartner.com/en/articles/how-to-harness-ai-augmented-software-engineering",
+      "confidence": "high"
+    },
+    {
+      "claim": "LangGraph (v0.1+, 2024) by LangChain enables stateful multi-agent applications using graph-based orchestration with cyclic workflows (loops), essential for autonomous debugging. Llama Stack (v1.0, late 2024) by Meta provides standardized APIs for agentic applications including tool-use and safety guardrails.",
+      "source_url": "https://python.langchain.com/docs/langgraph",
+      "confidence": "high"
+    },
+    {
+      "claim": "Emerging 'Lesson Loop' pattern: after completing a task, a Critic agent analyzes the trajectory and writes generalized rules to persistent memory files read at the start of every future task. Agents are also being designed to write and register their own tools at runtime - if an agent needs a specialized parser it doesn't have, it writes the code, registers it, and uses it.",
+      "source_url": "https://arxiv.org/abs/2410.03824",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Plandex (2024) manages its own state outside the LLM context, using a Terminal-based UI with a background Execution Engine that breaks large tasks into sub-task trees. All changes are made in a protected sandbox with directory-wide diff review before committing, enabling work on projects with tens of thousands of files.",
+      "source_url": "https://plandex.ai/",
+      "confidence": "high"
+    },
+    {
+      "claim": "The StrongDM Dark Factory introduced the concept of 'holdout scenarios' - behavioral test specifications written in BDD/Gherkin format that are deliberately kept invisible to the coding agent to prevent test gaming. The Digital Twin Universe provides behavioral clones of third-party services enabling thousands of integration tests per hour without rate limits.",
+      "source_url": "https://thepragmaticcto.com/posts/the-dark-factory-of-software",
+      "confidence": "high"
+    }
+  ],
+  "key_insights": [
+    "The industry is converging on a canonical six-component factory architecture: Spec Parser/Orchestrator, Codebase Indexer (via embeddings/AST/World Models), Plan Generator, Code Generator agents (in sandboxed Docker/MicroVM environments), Verification Pipeline (compiler/test-in-the-loop), and Review Interface (human curator or autonomous Evaluator). StrongDM's Dark Factory, GitHub Copilot Workspace, and Factory.ai Droids all independently arrived at nearly identical component decompositions.",
+    "Three competing architectural philosophies have emerged: (1) Multi-agent symphony (Google Jules, Amazon Kira, Factory.ai) with specialized agents per SDLC phase, (2) Single-threaded master loop (Anthropic Claude Code) optimizing for simplicity and steerability, and (3) Static pipeline/Agentless approaches (Agentless framework) trading autonomy for cost efficiency ($0.34/issue vs $10+). The winning pattern likely depends on task complexity - simple fixes favor pipelines, complex features favor multi-agent.",
+    "The shift from chat-based to event-driven architectures is concrete and measurable: OpenHands' pub/sub Event Stream, Factory.ai's CI/CD-triggered Droids, and StrongDM's CXDB (immutable DAG) all demonstrate that the shared state backbone - not the LLM itself - is the critical architectural differentiator. MCP (Model Context Protocol) is emerging as the interoperability standard, with GitHub/Microsoft already deprecating older extension models in its favor."
+  ],
+  "gaps": [
+    "Detailed benchmarks comparing multi-agent vs single-agent vs agentless architectures on identical tasks at scale (SWE-bench results exist but methodology varies significantly across systems)",
+    "Production failure modes and recovery patterns for autonomous software factories - what happens when the convergence loop doesn't converge, and how do teams handle cascading agent failures",
+    "Specific event schema and message format standards for inter-agent communication beyond MCP (which focuses on tool/context discovery, not agent-to-agent coordination)",
+    "Economic analysis of token velocity vs output quality tradeoffs - StrongDM mentions $1000/day target but no public data on ROI or cost-per-feature-delivered metrics across implementations",
+    "How codebase indexers specifically work at the component level - AST parsing vs embedding-based vs knowledge graph approaches and their tradeoffs for different language ecosystems (search timed out on this query)"
+  ]
+}

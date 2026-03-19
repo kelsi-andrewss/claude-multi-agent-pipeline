@@ -1,0 +1,44 @@
+{
+  "slug": "ai-agent-self-learning",
+  "skill": "scope",
+  "scope": {
+    "files": null,
+    "stories": null,
+    "complexity": null
+  },
+  "route_hint": "research",
+  "prev": [],
+  "data": {
+    "topic": "AI agent self-learning and behavioral conditioning — persistent memory architectures, correction-to-preference pipelines, decision-outcome correlation, hook/guardrail generation from patterns, inference-time RLHF alternatives",
+    "what": null,
+    "audience": null,
+    "platform": null,
+    "in_scope": [
+      "Memory architectures for LLM agents (MemGPT, Letta, LangMem)",
+      "Correction-to-preference learning pipelines",
+      "Decision-outcome correlation and scoring",
+      "Hook/guardrail auto-generation from behavioral patterns",
+      "Inference-time RLHF alternatives (not training-time)",
+      "Preference persistence across sessions"
+    ],
+    "out_of_scope": [
+      "Training-time RLHF (PPO, DPO, reward model training)",
+      "Fine-tuning or weight updates",
+      "RAG for document retrieval (not behavioral)",
+      "General chatbot memory (conversation history only)"
+    ],
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": "Claude Code orchestration",
+        "language": "Python/Bash/SQL",
+        "dependencies": ["SQLite", "Ollama", "OpenMemory MCP", "nomic-embed-text"]
+      }
+    ],
+    "problem": "Current memory pipeline records corrections and displays them but doesn't close the feedback loop — no decision correlation, no enforcement hooks, no behavioral conditioning beyond text injection",
+    "why": "Without a closed loop, corrections don't actually change behavior, and the same mistakes repeat across sessions",
+    "end_goal": "Understand how mature systems solve this problem to inform our refactor",
+    "needs_research": true,
+    "complexity_reasoning": "External domain research needed — MemGPT, Letta, LangMem, and inference-time feedback systems are outside this codebase's knowledge"
+  }
+}

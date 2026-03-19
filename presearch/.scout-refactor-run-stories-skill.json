@@ -1,0 +1,211 @@
+{
+  "slug": "refactor-run-stories-skill",
+  "skill": "scout",
+  "prev": [".scope-refactor-run-stories-skill.json"],
+  "data": {
+    "findings": [
+      {
+        "id": "F1",
+        "title": "SKILL.md is 640 lines of mixed orchestration and procedure",
+        "detail": "The run-stories SKILL.md contains 6 distinct procedural blocks (worktree setup, conflict detection, build verification, merge gate, batch verification, diff gate) interleaved with orchestration logic (dependency ordering, agent prompt composition, report generation). This violates the policy-mechanism separation principle: deterministic git operations and build commands compete for LLM attention with judgment-requiring decisions like failure attribution and story prioritization.",
+        "source": "file_analysis + gemini"
+      },
+      {
+        "id": "F2",
+        "title": "Existing codebase conventions support script extraction",
+        "detail": "The codebase already has established patterns: epics-cli.sh (208 lines, bash+python hybrid, JSON stdout), archive-closed-stories.sh (23 lines, pure bash), signal_processor.py (python with JSON/SQLite). Scripts use set -e, emit JSON on stdout, and accept positional args. The .claude/scripts/ and .claude/.claude/scripts/ directories are the canonical locations.",
+        "source": "file_analysis"
+      },
+      {
+        "id": "F3",
+        "title": "Claude Code skill best practices favor progressive disclosure",
+        "detail": "Anthropic's official skill authoring docs recommend: (1) keep SKILL.md concise and well-structured, (2) split content into separate files and reference them when unwieldy, (3) use sub-folders for helper scripts/templates/data, (4) progressive disclosure reduces token usage. The skill-creator plugin exemplifies this with scripts/ containing run_eval.py, run_loop.py, utils.py etc. alongside SKILL.md.",
+        "source": "web_search:anthropic_docs"
+      },
+      {
+        "id": "F4",
+        "title": "Worktree setup is the highest-value extraction target",
+        "detail": "~30 lines of bash per story (git fetch, branch creation, worktree add, branch verification) repeated in both coder and test agent prompts. This is 100% deterministic, zero LLM judgment needed. A standalone script eliminates hallucination risk on git commands and removes duplicated instructions. The coderabbitai/git-worktree-runner project validates this pattern at scale.",
+        "source": "gemini + web_search:coderabbitai"
+      },
+      {
+        "id": "F5",
+        "title": "Merge gate has a mixed profile: mechanics extractable, attribution requires LLM",
+        "detail": "The merge gate (~80 lines) has two distinct parts: (1) cherry-pick mechanics, test execution, cleanup — pure procedure, extractable to Python script that emits JSON test results + error classification hints; (2) failure attribution heuristic (compile vs logic error detection, retry decision) — requires LLM judgment to interpret ambiguous cases. Script should do the detection, SKILL.md should make the retry/block decision.",
+        "source": "gemini"
+      },
+      {
+        "id": "F6",
+        "title": "Build verification is a pure lookup table",
+        "detail": "Project-type detection (package.json -> npm, pubspec.yaml -> flutter, etc.) and build command dispatch is a static mapping. Zero LLM judgment. Python script with JSON output is the right fit — it can detect project type, return the commands, and the LLM just executes or delegates. ~20 lines of SKILL.md becomes a 3-line script invocation.",
+        "source": "gemini + file_analysis"
+      },
+      {
+        "id": "F7",
+        "title": "Symbol-level conflict reclassification should stay inline",
+        "detail": "The symbol granularity logic (file:symbolA vs file:symbolB -> SAFE) is semantic — it requires understanding what the story's write targets mean in context. pm_check_conflicts already handles the heavy lifting via MCP. The ~20 lines of reclassification rules in SKILL.md guide the LLM's interpretation of results, not procedural execution.",
+        "source": "gemini"
+      },
+      {
+        "id": "F8",
+        "title": "merge-worktree SKILL.md is a downstream consumer that shares patterns",
+        "detail": "merge-worktree (436 lines) shares: worktree cleanup, dev branch verification, smoke test/build verification, story state updates. Some extracted scripts (build-verify, worktree-cleanup) would be reusable across both skills, reducing total prompt size by ~100 lines across the two files.",
+        "source": "file_analysis"
+      },
+      {
+        "id": "F9",
+        "title": "Git worktree automation pitfalls require defensive scripting",
+        "detail": "Key pitfalls from research: (1) Branch locking — git prevents same branch in multiple worktrees, scripts must verify before add; (2) index.lock contention from parallel operations — need retry-with-backoff; (3) Orphaned worktrees from interrupted processes — need a reaper/prune routine; (4) Stale refs after force-push — scripts must git fetch before branch operations. The existing SKILL.md handles some of these inline but not systematically.",
+        "source": "web_search:git_worktree + gemini"
+      },
+      {
+        "id": "F10",
+        "title": "Estimated context reduction: ~160 lines from SKILL.md",
+        "detail": "Extracting blocks 1 (worktree setup, 30 lines), 3 (build verify, 20 lines), 4 partial (merge gate mechanics, 50 lines), 5 (batch verify, 15 lines), and 6 (diff gate, 5 lines) would remove ~120-160 lines of procedural instructions. Each replaced by a 3-5 line 'run script, parse JSON output' instruction. Net SKILL.md reduction: ~25-30%.",
+        "source": "analysis"
+      }
+    ],
+    "apis_and_packages": [
+      {
+        "name": "subprocess (Python stdlib)",
+        "usage": "Execute git commands from Python merge-gate script with structured error capture",
+        "relevance": "high"
+      },
+      {
+        "name": "sqlite3 (Python stdlib)",
+        "usage": "Already used in epics-cli.sh pattern for story/epic state queries",
+        "relevance": "medium"
+      },
+      {
+        "name": "json (Python stdlib)",
+        "usage": "All scripts emit JSON on stdout per codebase convention",
+        "relevance": "high"
+      },
+      {
+        "name": "git worktree (CLI)",
+        "usage": "Core worktree lifecycle: add, list --porcelain, remove --force, prune",
+        "relevance": "high"
+      },
+      {
+        "name": "git cherry-pick (CLI)",
+        "usage": "Merge gate test commit integration into merge-candidate branch",
+        "relevance": "high"
+      }
+    ],
+    "architecture_patterns": [
+      {
+        "name": "Policy-Mechanism Split",
+        "description": "SKILL.md retains policy (what to do when tests fail, how to attribute failures, when to skip verification). Scripts handle mechanism (execute git commands, run build tools, compare file lists). Scripts emit structured JSON; SKILL.md interprets results and makes decisions.",
+        "applicability": "Primary architecture principle for the refactor"
+      },
+      {
+        "name": "JSON-on-stdout Script Interface",
+        "description": "Existing codebase convention from epics-cli.sh. Every extracted script emits a JSON object on stdout with status, data, and optional warnings/errors. The LLM parses this to decide next steps. Stderr reserved for debugging/logging that the LLM ignores.",
+        "applicability": "Communication protocol between SKILL.md orchestrator and scripts"
+      },
+      {
+        "name": "Shared Script Library",
+        "description": "Scripts like build-verify.sh and worktree-cleanup.sh serve both run-stories and merge-worktree skills. Place in .claude/scripts/ (the shared location) rather than skill-specific directories. Reference by absolute path from SKILL.md.",
+        "applicability": "Cross-skill reuse for build verification and worktree lifecycle"
+      },
+      {
+        "name": "Decomposed Prompting (DecomP)",
+        "description": "Academic pattern from ICLR 2023: break complex tasks into sub-tasks, delegate each to specialized handlers (LLM or function). The SKILL.md becomes the decomposer/orchestrator; scripts are the specialized solver modules. This is exactly the policy-mechanism split applied to LLM prompt architecture.",
+        "applicability": "Theoretical foundation for the refactor approach"
+      },
+      {
+        "name": "Subagent Delegation for MCP-Heavy Steps",
+        "description": "Already implemented in the SKILL.md: Steps 1-3 are delegated to a foreground subagent to keep MCP JSON responses out of main context. This pattern should be preserved — the scripts supplement subagent delegation, they don't replace it.",
+        "applicability": "Existing pattern to preserve during refactor"
+      }
+    ],
+    "testable_assertions": [
+      {
+        "id": "TA1",
+        "assertion": "worktree-setup.sh creates a worktree on the correct branch and exits 0, or exits non-zero with JSON error on stdout",
+        "test_approach": "Unit test: create temp git repo, run script, verify worktree list shows correct branch + path"
+      },
+      {
+        "id": "TA2",
+        "assertion": "build-verify.sh detects project type from filesystem markers and returns correct build/lint commands in JSON",
+        "test_approach": "Unit test: create temp dirs with package.json / pyproject.toml / Cargo.toml, verify JSON output contains correct commands"
+      },
+      {
+        "id": "TA3",
+        "assertion": "merge-gate.py cherry-picks test commits, runs test command, and returns JSON with pass/fail + error classification",
+        "test_approach": "Integration test: set up repo with coder + test branches, run script, verify JSON output structure and exit codes"
+      },
+      {
+        "id": "TA4",
+        "assertion": "diff-gate.sh compares changed files against expected write_files and returns JSON with unexpected_files list",
+        "test_approach": "Unit test: create worktree with known changes, pass write_files list, verify JSON output"
+      },
+      {
+        "id": "TA5",
+        "assertion": "Refactored SKILL.md produces identical execution plans for the same story inputs as the current version",
+        "test_approach": "End-to-end: run both versions against a test epic with 3 stories (parallel + sequential + bootstrap), compare execution plans"
+      },
+      {
+        "id": "TA6",
+        "assertion": "worktree-cleanup.sh handles orphaned worktrees, missing branches, and already-removed worktrees without erroring",
+        "test_approach": "Unit test: create various broken states (missing .git, deleted branch, locked worktree), verify graceful handling"
+      }
+    ],
+    "conflicts": [
+      {
+        "id": "C1",
+        "description": "merge-worktree SKILL.md duplicates build verification and worktree cleanup logic. Extracting shared scripts requires updating both skills simultaneously to avoid divergence.",
+        "severity": "medium",
+        "mitigation": "Update both SKILL.md files in the same story. The shared scripts become the single source of truth."
+      },
+      {
+        "id": "C2",
+        "description": "The coder agent prompt template in Step 4 embeds worktree setup bash inline. Extracting to a script means the coder agent needs script access in its worktree, but the script lives in .claude/scripts/ which may not exist in the worktree.",
+        "severity": "high",
+        "mitigation": "Two options: (1) Coder agents reference scripts via absolute path to the main repo's .claude/scripts/. (2) Worktree setup script runs BEFORE the coder agent launches (in the main session or resolution subagent), and the coder agent just verifies the branch. Option 2 is cleaner — it moves worktree creation out of the coder entirely."
+      },
+      {
+        "id": "C3",
+        "description": "The merge gate's failure attribution heuristic uses regex-like pattern matching (Cannot find module, AssertionError, etc.) that is currently described in natural language for the LLM. Moving detection to a script means encoding these patterns, but new patterns may emerge that the LLM could catch but a regex wouldn't.",
+        "severity": "low",
+        "mitigation": "Script does first-pass classification using known patterns and emits 'compile_error', 'logic_failure', or 'ambiguous'. SKILL.md only handles the 'ambiguous' case, reducing LLM work to the genuinely ambiguous scenarios."
+      },
+      {
+        "id": "C4",
+        "description": "ORCHESTRATION.md §1 states 'Main session worktree prohibition: MUST NOT use git worktree add'. If worktree setup is extracted to a script called by the main session, this technically violates the prohibition. But the prohibition's intent is to prevent main-session context pollution from worktree operations.",
+        "severity": "low",
+        "mitigation": "The prohibition applies to interactive git worktree commands in the main session. A script that wraps worktree creation and is called by a subagent or background agent is consistent with the intent. Clarify in ORCHESTRATION.md if needed."
+      }
+    ],
+    "search_queries": [
+      "claude code skill file best practices SKILL.md prompt decomposition 2025 2026",
+      "git worktree automation scripts parallel development branches",
+      "LLM prompt decomposition patterns extracting procedural logic into scripts",
+      "coderabbitai git-worktree-runner bash script worktree management automation",
+      "cherry-pick validation CI merge gate pattern git testing"
+    ],
+    "agent_attribution": {
+      "gemini": [
+        "F1: Policy-mechanism separation principle applied to SKILL.md decomposition",
+        "F4: Worktree setup as highest-value extraction target with hallucination risk rationale",
+        "F5: Merge gate mixed profile analysis (mechanics vs attribution split)",
+        "F6: Build verification as pure lookup table recommendation",
+        "F7: Symbol-level conflict reclassification should stay inline (semantic reasoning needed)",
+        "F9: Git worktree pitfalls (branch locking, index.lock, orphaned worktrees, stale refs)",
+        "F10: Context reduction estimate (~160 lines, 25-30%)",
+        "Per-block decomposition recommendations (standalone script vs inline vs function)",
+        "Architecture pattern: JSON-on-stdout script interface recommendation"
+      ],
+      "claude": [
+        "F2: Codebase convention analysis from reading epics-cli.sh, archive-closed-stories.sh, signal_processor.py",
+        "F3: Claude Code skill best practices synthesis from Anthropic docs + skill-creator plugin analysis",
+        "F8: merge-worktree cross-skill reuse opportunity from reading both SKILL.md files",
+        "C2: Coder agent script access conflict identification and mitigation options",
+        "C4: ORCHESTRATION.md prohibition conflict identification",
+        "TA1-TA6: Testable assertion design based on script interface patterns",
+        "Architecture patterns: Subagent delegation preservation, shared script library, DecomP mapping",
+        "All file reads, pattern matching, and codebase structural analysis"
+      ]
+    }
+  }
+}

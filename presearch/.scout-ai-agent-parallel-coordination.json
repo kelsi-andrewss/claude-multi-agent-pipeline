@@ -1,0 +1,494 @@
+{
+  "slug": "ai-agent-parallel-coordination",
+  "scope": {
+    "files": 12,
+    "stories": 7,
+    "complexity": "large"
+  },
+  "route_hint": null,
+  "prev": ["presearch/.research-ai-agent-parallel-coordination.json", ".scope-ai-agent-parallel-coordination.json"],
+  "skill": "scout",
+  "data": {
+    "topic": "Auto-detection, self-learning, and auto-memory systems for AI coding agents — conflict detection, self-learning memory, autonomous coordination, trust calibration, auto-review loops",
+    "findings": [
+      {
+        "category": "architecture",
+        "summary": "Orchestration is hierarchical planner-worker-judge: main session (Claude) plans, coders execute in worktrees, merge-worktree handles integration",
+        "details": "ORCHESTRATION.md defines roles: Claude (main session) calls Gemini for research, writes plan files, launches coders, merges. Coders (quick-fixer, architect) execute plans in isolated git worktrees. Main session is prohibited from using EnterWorktree. All merges go through dev branch first, then dev merges to main. This matches the hierarchical non-overlapping assignment pattern that CooperBench and Cursor found to be most effective.",
+        "files": [
+          "/Users/kelsiandrews/.claude/ORCHESTRATION.md",
+          "/Users/kelsiandrews/.claude/skills/run-stories/SKILL.md",
+          "/Users/kelsiandrews/.claude/skills/merge-worktree/SKILL.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Conflict detection is file-level with optional symbol-level granularity via pm_check_conflicts, but no AST parsing",
+        "details": "run-stories Step 2b calls pm_check_conflicts(story_ids=[...]) which returns write-write and write-read overlaps at file level. Symbol annotations (file.ts:functionName) allow coexistence when different functions in the same file are targeted. Conflict rules: bare file vs bare file = CONFLICT, bare vs symbol = CONFLICT, symbolA vs symbolB = SAFE. This is analogous to Grove's Tier 1-2 but without AST parsing. No dependency-level or schema-level conflict detection exists.",
+        "files": [
+          "/Users/kelsiandrews/.claude/skills/run-stories/SKILL.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Merge is sequential within dev branch — no merge queue, stories merge one at a time via merge-worktree batch mode",
+        "details": "merge-worktree SKILL.md Step 3 uses git merge --no-ff into dev, with pull --rebase before each merge to prevent stale-push. Batch mode (2+ stories) delegates to a single foreground subagent that merges sequentially by story ID. No priority queue, no conflict prediction pre-merge, no automated rebase-on-conflict. README.md references a merge-queue.sh concept but the actual implementation is the batch subagent pattern.",
+        "files": [
+          "/Users/kelsiandrews/.claude/skills/merge-worktree/SKILL.md",
+          "/Users/kelsiandrews/.claude/README.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Self-learning memory uses a 3-surface architecture: correction_groups (epics.db), rendered-prefs.md (sidecar), OpenMemory (semantic store)",
+        "details": "decision-79 killed 4 of 7 surfaces. Remaining: correction_groups table in epics.db (single source of truth for corrections), rendered-prefs.md (generated from DB at session start, survives compaction via @import), OpenMemory (queryable semantic store with per-category budgets and decay). Auto-distillation: stop hook detects corrections via semantic embedding against 10 prototype phrases (threshold 0.55), upserts to correction_groups, promotes at count >= 3. Signal processor correlates corrections with decision_preferences to adjust scores. This is a two-tier system similar to Windsurf's auto-memories + user rules, but with the RL-like signal scoring on decisions.",
+        "files": [
+          "/Users/kelsiandrews/.claude/hooks/lib/signal_processor.py",
+          "/Users/kelsiandrews/.claude/hooks/lib/stop_processor.py",
+          "/Users/kelsiandrews/.claude/hooks/lib/om_write.py",
+          "/Users/kelsiandrews/.claude/hooks/load-session-context.sh",
+          "/Users/kelsiandrews/.claude/refs/orch-memory.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Correction detection is semantic (embedding-based) with structural pre-filters, but limited to 5 embedding calls per session and 10 static prototypes",
+        "details": "signal_processor.py uses CORRECTION_PROTOTYPES (10 phrases like 'stop doing that', 'why did you ignore my instruction') with cosine similarity >= 0.55 against Ollama nomic-embed-text. Pre-filters: SYSTEM_MSG regex, POSITIVE_INTENT regex, is_structural_content (>300 chars, code fences, etc.). MAX_EMBEDDING_CALLS_PER_SESSION = 5. No adaptive prototype generation — prototypes are static. decision-74 chose this over regex. The 5-call limit and static prototypes are the main bottleneck for scaling correction detection.",
+        "files": [
+          "/Users/kelsiandrews/.claude/hooks/lib/signal_processor.py",
+          "/Users/kelsiandrews/.claude/hooks/lib/embedding_utils.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "No agent health monitoring or stuck detection exists — coders run as background agents with no timeout or progress tracking",
+        "details": "run-stories launches coders as background agents (run_in_background: true) and waits for completion. No heartbeat, no progress check, no stuck detection. The only timeout is Claude Code's internal agent timeout. If a coder enters an infinite loop or stalls, the main session blocks indefinitely waiting for it. run-state.db tracks story_executions (pending/launched/done/blocked) but has no watchdog process checking for stalled agents. This is the gap OpenHands SDK V1 addresses with stuck detection.",
+        "files": [
+          "/Users/kelsiandrews/.claude/skills/run-stories/SKILL.md",
+          "/Users/kelsiandrews/.claude/.claude/scripts/init-run-db.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "No cross-epic parallelism — stories within an epic run in parallel, but the system assumes a single dev branch",
+        "details": "ORCHESTRATION.md says dev branch is always 'dev'. run-stories Step 3 ensures dev exists and all epics share it. There's no mechanism to run stories from different epics simultaneously with separate integration branches. The scope doc explicitly calls this out: 'Epic-level serialization limits throughput. Stories run in parallel but epics never do.'",
+        "files": [
+          "/Users/kelsiandrews/.claude/ORCHESTRATION.md",
+          "/Users/kelsiandrews/.claude/skills/run-stories/SKILL.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "No auto-review loop (Ralph Loop) exists — ralph-loop plugin is installed but not integrated with the orchestration pipeline",
+        "details": "settings.json shows 'ralph-loop@claude-plugins-official': true in enabledPlugins. The plugin exists at plugins/cache/claude-plugins-official/ralph-loop/ with stop-hook.sh and setup-ralph-loop.sh. But there's no integration with run-stories or merge-worktree. No bounded iteration loops, no circuit breakers, no progress detection for autonomous code review. The overbaking phenomenon from research is a real risk if this were enabled naively.",
+        "files": [
+          "/Users/kelsiandrews/.claude/settings.json",
+          "/Users/kelsiandrews/.claude/plugins/cache/claude-plugins-official/ralph-loop/b36fd4b75301/hooks/stop-hook.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "All code changes must go through coder agents in worktrees — direct edits blocked by guard-direct-edit.sh",
+        "details": "guard-direct-edit.sh (PreToolUse hook on Edit|Write) blocks all direct edits to project source files from the main session. Coders pass because their paths resolve under .claude/worktrees/. Exceptions: ~/.claude/ behavioral files (outcomes.md, session-handoff.md, etc.), plan files, settings.json, memory files. This enforces the hierarchical architecture pattern.",
+        "files": [
+          "/Users/kelsiandrews/.claude/hooks/guard-direct-edit.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "Main session prohibited from using EnterWorktree — blocked by hook",
+        "details": "block-enter-worktree.sh blocks EnterWorktree tool use from the main session. Only coder subagents create/use worktrees. This is reinforced in ORCHESTRATION.md Section 1: 'MUST NOT use EnterWorktree or git worktree add'.",
+        "files": [
+          "/Users/kelsiandrews/.claude/hooks/block-enter-worktree.sh",
+          "/Users/kelsiandrews/.claude/ORCHESTRATION.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "dependency",
+        "summary": "Ollama nomic-embed-text is required for all embedding operations — correction detection, OpenMemory dedup, memory queries",
+        "details": "embedding_utils.py calls http://localhost:11434/api/embeddings with model nomic-embed-text. All correction detection, OpenMemory writes (dedup check), and memory queries depend on it. Graceful degradation: if Ollama is down, correction detection returns empty, dedup falls back to MD5 simhash, queries return empty. load-session-context.sh checks Ollama health at session start and warns.",
+        "files": [
+          "/Users/kelsiandrews/.claude/hooks/lib/embedding_utils.py",
+          "/Users/kelsiandrews/.claude/hooks/lib/om_write.py",
+          "/Users/kelsiandrews/.claude/hooks/load-session-context.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "dependency",
+        "summary": "epics.db (SQLite) is the central state store — stories, epics, correction_groups, decision_preferences tables",
+        "details": "Located at ~/.claude/.claude/epics.db. Gemini MCP tools (pm_*) read/write stories and epics. correction_groups table stores corrections with status lifecycle (accumulating -> pending_promotion -> promoted -> dismissed). decision_preferences table stores signal scores for decision learning. run-state.db is separate for transient execution state (decision-76).",
+        "files": [
+          "/Users/kelsiandrews/.claude/.claude/epics.db",
+          "/Users/kelsiandrews/.claude/.claude/scripts/init-run-db.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "dependency",
+        "summary": "OpenMemory MCP provides semantic memory — openmemory.sqlite with HSG (Hierarchical Sector Graph) queries",
+        "details": "Registered via claude mcp add openmemory --scope user. Tools: openmemory_store, openmemory_query, openmemory_list, openmemory_get, openmemory_reinforce, openmemory_delete. Storage at ~/.claude/.claude/openmemory.sqlite. Tag taxonomy enforced by om_write.py: behavioral-pref (30), tool-learning (30), decision (50), prompt-pattern (30), session-summary (20), critique-learning (30), gemini-blind-spot (20). Anti-bloat: per-category budgets, embedding dedup (0.85), decay-weighted pruning.",
+        "files": [
+          "/Users/kelsiandrews/.claude/hooks/lib/om_write.py",
+          "/Users/kelsiandrews/.claude/refs/orch-memory.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "test",
+        "summary": "Test infrastructure uses pytest for the Gemini MCP server — no tests for hooks, skills, or orchestration logic",
+        "details": "Gemini MCP server at mcp-servers/gemini/ has a .venv and pytest-based tests. The hooks (signal_processor.py, om_write.py, stop_processor.py, embedding_utils.py) have no test files. Skills are markdown-based (SKILL.md) and not unit-testable in the traditional sense. Shell scripts (worktree-setup.sh, build-verify.sh, etc.) have no test coverage. run-stories testing relies on build-verify.sh and merge-gate.py running against the actual codebase.",
+        "files": [
+          "/Users/kelsiandrews/.claude/mcp-servers/gemini"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Model selection follows a tiered escalation pattern: Haiku -> Sonnet -> Opus based on failure count and complexity",
+        "details": "ORCHESTRATION.md Section 2: Haiku for unit-tester (never escalated), Sonnet default for coders, Opus after 2 BLOCKING round-trips (architect only). Haiku threshold requires: single write-target, exact code, no regex, no complex logic, not a pipeline file. OpenMemory queried for model+file-type failure history to pre-escalate. This is a manual trust calibration system — no automatic graduation based on success rate.",
+        "files": [
+          "/Users/kelsiandrews/.claude/ORCHESTRATION.md"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Stop hook runs a 5-stage background processor: corrections -> signals -> summary -> distillation -> hook generation",
+        "details": "session-learning-check.sh (sync fast path: mtime check) spawns stop_processor.py (nohup background). Stages: (1) correction detection via process_session_corrections, (2) signal processing correlating corrections to decisions, (3) session summary to OpenMemory, (4) auto-distillation promoting pending_promotion to promoted + om_write, (5) hook generation from newly promoted patterns. Lockfile prevents duplicate processors.",
+        "files": [
+          "/Users/kelsiandrews/.claude/hooks/session-learning-check.sh",
+          "/Users/kelsiandrews/.claude/hooks/lib/stop_processor.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Outcomes logging captures story metadata for post-hoc analysis but is not used for automated decision-making",
+        "details": "merge-worktree Step 5.5 appends to outcomes.md: agent, model, cycle time, coder effort, skills used, friction events, tests, file count, complexity, memory attribution, what worked/failed. This is a write-only log — no code reads outcomes.md to adjust behavior automatically. The scope doc wants this to feed graduated autonomy.",
+        "files": [
+          "/Users/kelsiandrews/.claude/skills/merge-worktree/SKILL.md"
+        ],
+        "source": "codebase"
+      }
+    ],
+    "decisions_relevant": [
+      {
+        "id": "decision-74",
+        "summary": "Correction detection uses semantic embeddings (cosine similarity 0.55 against prototypes) over regex, with Ollama nomic-embed-text",
+        "impact": "Any enhancement to correction detection must stay within the embedding approach — no regex fallback. The 5-call-per-session limit and 10 static prototypes are the extension points."
+      },
+      {
+        "id": "decision-75",
+        "summary": "Correction pipeline unified into signal_processor.py process_session_corrections() — shell hooks call Python",
+        "impact": "All correction detection logic must live in signal_processor.py. New detection capabilities (e.g., stuck detection, progress tracking) should extend this module, not add new detection paths."
+      },
+      {
+        "id": "decision-76",
+        "summary": "run-stories transient state in separate run-state.db — scripts own their state",
+        "impact": "Agent health monitoring and progress tracking should extend run-state.db tables, not add new state stores. The schema already has story_executions and batch_verifications tables."
+      },
+      {
+        "id": "decision-77",
+        "summary": "Worktree creation moves to pre-launch via worktree-setup.sh in resolution subagent",
+        "impact": "Worktree lifecycle is separated from coder logic. Any watchdog or health check must operate at the run-stories level, not inside coders."
+      },
+      {
+        "id": "decision-78",
+        "summary": "Policy-mechanism split: extract procedural blocks to scripts, keep orchestration in SKILL.md",
+        "impact": "New mechanisms (merge queue, health monitor, progress tracker) should be scripts called by skills, not embedded in SKILL.md. Orchestration logic (when to invoke, how to react) stays in skills."
+      },
+      {
+        "id": "decision-79",
+        "summary": "Memory reduced to 3 persistence surfaces: correction_groups, rendered-prefs.md, OpenMemory",
+        "impact": "New memory capabilities must use these 3 surfaces. Do not add new files (tool-learnings.md was killed). Extend correction_groups schema or add OpenMemory tags."
+      },
+      {
+        "id": "decision-80",
+        "summary": "Async Stop hook via nohup background subprocess — fast sync path + slow background path",
+        "impact": "Post-session processing (correction detection, distillation, summary) runs asynchronously. New learning capabilities should add stages to stop_processor.py, not new hooks."
+      },
+      {
+        "id": "decision-43",
+        "summary": "Correction detection single source of truth — all detection logic in signal_processor.py",
+        "impact": "No duplicating correction logic. If adding new detection methods (e.g., progress stall detection), they go in signal_processor.py."
+      },
+      {
+        "id": "decision-66",
+        "summary": "Three-tier context injection: SessionStart (always), UserPromptSubmit (on-demand), skill-specific (lazy)",
+        "impact": "New context sources (e.g., agent health dashboards, trust scores) must fit the tier system. Don't load heavy context at SessionStart."
+      }
+    ],
+    "testable_assertions": [
+      {
+        "assertion": "run-stories launches coders as background agents with no health monitoring or timeout mechanism",
+        "category": "architecture_boundary",
+        "verification": "Read run-stories SKILL.md Step 4 — no watchdog, heartbeat, or timeout mentioned. init-run-db.py has a 1-hour stale session cleanup but no active monitoring.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "All stories merge into a single 'dev' branch regardless of epic, preventing cross-epic parallelism",
+        "category": "architecture_boundary",
+        "verification": "ORCHESTRATION.md Section 1: 'dev' is the only integration branch. run-stories Step 3: pm_dev_branch returns 'dev' for all epics.",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Correction detection is capped at 5 embedding calls per session with 10 static prototypes",
+        "category": "pattern_conformance",
+        "verification": "signal_processor.py: MAX_EMBEDDING_CALLS_PER_SESSION = 5, CORRECTION_PROTOTYPES has 10 entries",
+        "source": "codebase"
+      },
+      {
+        "assertion": "outcomes.md is a write-only log — nothing reads it for automated decision-making",
+        "category": "architecture_boundary",
+        "verification": "Grep for 'outcomes.md' reads across hooks/skills — only writes found in merge-worktree and session-learning-check mtime check",
+        "source": "codebase"
+      },
+      {
+        "assertion": "OpenMemory writes are gated by om_write.py with tag whitelist, dedup, and per-category budgets",
+        "category": "dependency_constraint",
+        "verification": "om_write.py ALLOWED_TAGS set and BUDGETS dict; dedup_check uses cosine similarity >= 0.85",
+        "source": "codebase"
+      },
+      {
+        "assertion": "The ralph-loop plugin is installed but not wired into any orchestration skill",
+        "category": "architecture_boundary",
+        "verification": "settings.json enables ralph-loop plugin; no skill references it; no hook integration beyond the plugin's own stop-hook.sh",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Signal processor updates decision_preferences scores based on correction correlation — a primitive form of RL on decisions",
+        "category": "pattern_conformance",
+        "verification": "signal_processor.py main(): corrections decrement score (-weight), uncorrected decisions increment (+0.5 implicit approval)",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Model escalation is rule-based (2 BLOCKING -> Opus) not performance-history-based",
+        "category": "pattern_conformance",
+        "verification": "ORCHESTRATION.md Section 2: escalation triggered by BLOCKING count, not success rate or historical performance",
+        "source": "codebase"
+      },
+      {
+        "assertion": "No automated rule deprecation or contradiction resolution exists for accumulated memories",
+        "category": "architecture_boundary",
+        "verification": "om_write.py only prunes by decay-weighted score (lowest first). No semantic contradiction detection between stored memories.",
+        "source": "codebase"
+      }
+    ],
+    "write_targets": [
+      "/Users/kelsiandrews/.claude/ORCHESTRATION.md",
+      "/Users/kelsiandrews/.claude/skills/run-stories/SKILL.md",
+      "/Users/kelsiandrews/.claude/skills/merge-worktree/SKILL.md",
+      "/Users/kelsiandrews/.claude/hooks/lib/signal_processor.py",
+      "/Users/kelsiandrews/.claude/hooks/lib/stop_processor.py",
+      "/Users/kelsiandrews/.claude/hooks/lib/om_write.py",
+      "/Users/kelsiandrews/.claude/.claude/scripts/init-run-db.py",
+      "/Users/kelsiandrews/.claude/hooks/session-learning-check.sh",
+      "/Users/kelsiandrews/.claude/hooks/load-session-context.sh",
+      "/Users/kelsiandrews/.claude/settings.json",
+      "/Users/kelsiandrews/.claude/refs/orch-memory.md",
+      "/Users/kelsiandrews/.claude/refs/orch-friction.md"
+    ],
+    "read_targets": [
+      "/Users/kelsiandrews/.claude/ORCHESTRATION.md",
+      "/Users/kelsiandrews/.claude/skills/ship/SKILL.md",
+      "/Users/kelsiandrews/.claude/skills/run-stories/SKILL.md",
+      "/Users/kelsiandrews/.claude/skills/merge-worktree/SKILL.md",
+      "/Users/kelsiandrews/.claude/hooks/lib/signal_processor.py",
+      "/Users/kelsiandrews/.claude/hooks/lib/stop_processor.py",
+      "/Users/kelsiandrews/.claude/hooks/lib/om_write.py",
+      "/Users/kelsiandrews/.claude/hooks/lib/embedding_utils.py",
+      "/Users/kelsiandrews/.claude/hooks/guard-direct-edit.sh",
+      "/Users/kelsiandrews/.claude/hooks/load-session-context.sh",
+      "/Users/kelsiandrews/.claude/hooks/session-learning-check.sh",
+      "/Users/kelsiandrews/.claude/.claude/scripts/init-run-db.py",
+      "/Users/kelsiandrews/.claude/.claude/scripts/worktree-setup.sh",
+      "/Users/kelsiandrews/.claude/.claude/scripts/build-verify.sh",
+      "/Users/kelsiandrews/.claude/settings.json",
+      "/Users/kelsiandrews/.claude/refs/orch-memory.md",
+      "/Users/kelsiandrews/.claude/refs/orch-friction.md",
+      "/Users/kelsiandrews/.claude/README.md"
+    ],
+    "conflicts": [
+      {
+        "subject": "Merge queue architecture",
+        "codebase_says": "Sequential merge via batch subagent with no priority queue or conflict prediction — stories merge by ID order. README.md references merge-queue.sh but actual implementation is the merge-worktree batch mode.",
+        "research_says": "Overstory implements a 4-tier FIFO merge queue with SQLite-backed state and tiered conflict resolution. Auto Claude uses three-tier conflict resolution (auto-merge, AI-powered, full-file AI merge).",
+        "resolution": "Codebase wins for initial scope. The current sequential approach is correct for single-user operation. A smart merge queue only pays off with cross-epic parallelism, which is a prerequisite change."
+      },
+      {
+        "subject": "Conflict detection granularity",
+        "codebase_says": "File-level + optional symbol annotations via pm_check_conflicts. No AST parsing, no dependency-level analysis.",
+        "research_says": "Grove implements 5-layer detection (file, hunk, symbol, dependency, schema) with AST parsing and LRU cache. Academic work suggests semantic conflicts (clean merges with incompatible assumptions) remain unsolved.",
+        "resolution": "Codebase approach is sufficient for current scale. Adding AST parsing requires a Go/Rust binary which is out of scope. Symbol annotations already provide function-level granularity without external tooling. Dependency-level detection via pm_check_conflicts' read_conflicts is a lighter path."
+      },
+      {
+        "subject": "Self-learning memory architecture",
+        "codebase_says": "Two-tier: auto-detected corrections (embedding-based) + manual corrections. Signal processor adjusts decision_preferences scores. 10 static prototypes, 5 calls/session.",
+        "research_says": "MemRL uses Intent-Experience-Utility triplets with RL-updated Q-values. Windsurf/Cursor auto-generate memories from interactions. MACLA learns hierarchical procedural memory via Bayesian extraction.",
+        "resolution": "Codebase already has the skeleton of MemRL's approach — signal_processor.py does score adjustment on decisions based on correction correlation (implicit RL). The gap is: (1) prototypes are static (should learn from accumulated corrections), (2) no outcome-based learning (outcomes.md is write-only), (3) no procedural memory auto-generation from successful patterns."
+      },
+      {
+        "subject": "Agent health monitoring",
+        "codebase_says": "No active health monitoring. run-state.db cleans stale sessions >1 hour at init time. No heartbeat or stuck detection during execution.",
+        "research_says": "OpenHands SDK V1 has stuck detection (same action repeated, redundant tool calls). Overstory has tiered watchdog (mechanical daemon, AI-assisted triage, full monitor agent). Ralph-loop has circuit breakers (CB_NO_PROGRESS_THRESHOLD, CB_SAME_ERROR_THRESHOLD).",
+        "resolution": "Research wins. This is the largest gap. A lightweight progress tracker using run-state.db timestamps + a PostToolUse hook to track coder heartbeats would be a minimal viable approach. No need for Overstory's full tiered watchdog."
+      },
+      {
+        "subject": "Trust calibration and graduated autonomy",
+        "codebase_says": "Model escalation is rule-based (2 BLOCKING -> Opus). No performance tracking, no automatic trust graduation, no success-rate-based autonomy changes.",
+        "research_says": "Anthropic data shows users organically shift to autonomous-with-intervention over ~750 sessions. No production system implements automatic performance-based graduation. Five-level framework treats autonomy as design choice.",
+        "resolution": "Opportunity to be novel. outcomes.md has the data needed for performance-based decisions (agent, model, cycle time, friction, what worked/failed). Building a simple success-rate tracker that feeds into model selection and autonomy gates would put this system ahead of any production tool."
+      }
+    ],
+    "completeness": {
+      "confidence": "exhaustive",
+      "occurrences": [
+        {
+          "target": "Conflict detection logic",
+          "locations": [
+            "skills/run-stories/SKILL.md:Step 2b",
+            "mcp-servers/gemini/tools_pm_organize.py (pm_check_conflicts implementation)",
+            "mcp-servers/gemini/tools_pm_read.py (read_conflicts)"
+          ],
+          "search_strategies": ["grep for pm_check_conflicts, conflict detection, write-write, read_conflicts"],
+          "blind_spots": ["Gemini MCP server internals — pm_check_conflicts implementation is server-side, not fully inspectable from skill definitions"]
+        },
+        {
+          "target": "Merge/integration logic",
+          "locations": [
+            "skills/merge-worktree/SKILL.md (complete merge procedure)",
+            "skills/run-stories/SKILL.md:Step 5c (merge invocation)",
+            ".claude/scripts/diff-gate.sh",
+            ".claude/scripts/worktree-cleanup.sh",
+            ".claude/scripts/build-verify.sh",
+            ".claude/scripts/merge-gate.py"
+          ],
+          "search_strategies": ["grep for merge, git merge, dev-branch, merge-worktree"],
+          "blind_spots": []
+        },
+        {
+          "target": "Memory/learning infrastructure",
+          "locations": [
+            "hooks/lib/signal_processor.py (correction detection + decision correlation)",
+            "hooks/lib/stop_processor.py (5-stage background processor)",
+            "hooks/lib/om_write.py (OpenMemory write gate)",
+            "hooks/lib/embedding_utils.py (Ollama interface)",
+            "hooks/load-session-context.sh (session start context + memory snapshot)",
+            "hooks/session-learning-check.sh (stop hook entry point)",
+            "refs/orch-memory.md (architecture reference)",
+            "refs/orch-friction.md (friction reference)"
+          ],
+          "search_strategies": ["grep for correction, memory, learning, distillation, om_write, signal_processor"],
+          "blind_spots": []
+        },
+        {
+          "target": "Agent lifecycle management",
+          "locations": [
+            "skills/run-stories/SKILL.md:Step 4 (agent launch)",
+            "skills/run-stories/SKILL.md:Step 5 (result collection + NEED_DECISION handling)",
+            ".claude/scripts/init-run-db.py (run state schema)",
+            "ORCHESTRATION.md:Section 8 (escalation rules)",
+            "ORCHESTRATION.md:Section 15 (delegation)"
+          ],
+          "search_strategies": ["grep for background, agent, run_in_background, BLOCKED, NEED_DECISION, escalation"],
+          "blind_spots": ["Claude Code internal agent timeout behavior — not configurable from skill definitions"]
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "ORCHESTRATION.md",
+        "dependents": [
+          "Every skill loads this at session start via load-session-context.sh",
+          "run-stories/SKILL.md references sections by number",
+          "merge-worktree/SKILL.md references Section 8 decision rules",
+          "ship/SKILL.md references Section 3 workflow",
+          "draft-plan/SKILL.md references Section 5 critique rules",
+          ".claude/CLAUDE.md references ORCHESTRATION.md"
+        ],
+        "test_coverage": ["None — no automated tests for orchestration rules"],
+        "runtime_contracts": ["Section numbers are referenced by other skills (e.g., 'ORCHESTRATION Section 15'). Renumbering breaks references."],
+        "failure_symptoms": "Skills misinterpret orchestration rules, coders get wrong constraints, merge procedures break"
+      },
+      {
+        "write_target": "skills/run-stories/SKILL.md",
+        "dependents": [
+          "ship/SKILL.md Step 5 invokes run-stories",
+          "ORCHESTRATION.md Section 3 references run-stories",
+          "merge-worktree/SKILL.md batch mode is called by run-stories Step 5c",
+          "Scripts: init-run-db.py, build-verify.sh, diff-gate.sh, merge-gate.py, worktree-setup.sh, worktree-cleanup.sh"
+        ],
+        "test_coverage": ["None — integration testing is manual"],
+        "runtime_contracts": ["EXECUTION_PLAN return format expected by main session", "story agent prompt template", "DONE/NEED_DECISION/BLOCKED return contract"],
+        "failure_symptoms": "Stories fail to launch, merge incorrectly, or produce garbled execution plans"
+      },
+      {
+        "write_target": "hooks/lib/signal_processor.py",
+        "dependents": [
+          "hooks/lib/stop_processor.py (stages 1 and 2 import from it)",
+          "hooks/session-learning-check.sh (entry point that spawns stop_processor)"
+        ],
+        "test_coverage": ["None — no tests for signal_processor"],
+        "runtime_contracts": ["process_session_corrections() return format", "correction dict schema: {turn_idx, content, weight}", "PROMOTION_THRESHOLD = 3"],
+        "failure_symptoms": "Corrections silently stop being detected, decision_preferences scores drift, auto-distillation breaks"
+      },
+      {
+        "write_target": "hooks/lib/stop_processor.py",
+        "dependents": [
+          "hooks/session-learning-check.sh spawns it",
+          "hooks/lib/om_write.py (stage 3 and 4)",
+          "hooks/lib/signal_processor.py (stages 1 and 2)",
+          "hooks/lib/hook_generator.py (stage 5)"
+        ],
+        "test_coverage": ["None"],
+        "runtime_contracts": ["5-stage sequential pipeline", "lockfile at /tmp/stop-processor-{session}.pid", "nohup background execution contract"],
+        "failure_symptoms": "Post-session learning silently fails, corrections stop accumulating, session summaries stop being written"
+      },
+      {
+        "write_target": "hooks/lib/om_write.py",
+        "dependents": [
+          "hooks/lib/stop_processor.py (stages 3 and 4)",
+          "All OpenMemory writes from hooks go through this module",
+          "refs/orch-memory.md documents the API"
+        ],
+        "test_coverage": ["None"],
+        "runtime_contracts": ["ALLOWED_TAGS whitelist", "BUDGETS dict", "dedup threshold 0.85", "prune threshold 0.01"],
+        "failure_symptoms": "OpenMemory fills with duplicates, budget enforcement breaks, tags get rejected"
+      },
+      {
+        "write_target": ".claude/scripts/init-run-db.py",
+        "dependents": [
+          "skills/run-stories/SKILL.md Step 0 (run state management)",
+          "run-state.db schema defines story_executions, batch_verifications, merge_results tables"
+        ],
+        "test_coverage": ["None"],
+        "runtime_contracts": ["JSON output format: {status, session_id, stale_cleaned}", "Schema DDL for 4 tables", "1-hour stale cleanup threshold"],
+        "failure_symptoms": "run-stories fails to initialize, stale sessions accumulate, schema changes break story tracking"
+      }
+    ],
+    "gaps": [
+      "No agent health monitoring, stuck detection, or progress tracking during story execution",
+      "No cross-epic parallelism — all stories merge into a single 'dev' branch",
+      "No smart merge queue — sequential by ID, no priority, no conflict prediction",
+      "Correction prototypes are static (10 phrases) — no adaptive prototype generation from accumulated corrections",
+      "outcomes.md is write-only — no automated analysis feeds back into model selection or autonomy gates",
+      "No automated rule deprecation or contradiction resolution for OpenMemory entries",
+      "Ralph-loop plugin installed but not integrated with orchestration pipeline",
+      "No test coverage for any hook, script, or orchestration logic",
+      "No progress velocity calculation for detecting stuck or slow agents",
+      "No semantic conflict detection (clean merges with incompatible assumptions)",
+      "Signal processor's decision_preferences correlation is a primitive RL analog — no generalization to new decision types without manual prototype addition"
+    ]
+  }
+}
