@@ -11,17 +11,22 @@ log = logging.getLogger(__name__)
 
 _MINIMAL_CONTENT = "# Project Decisions\n\nNo decisions recorded yet.\n"
 
+_TIER_FRESH = 0.3
+_TIER_AGING = 0.7
+
 
 def generate_rules(
     project_root: str,
     decisions_db_path: str | None = None,
     decisions_sql_path: str | None = None,
     output_path: str | None = None,
+    run_state_db_path: str | None = None,
 ) -> str:
     root = Path(project_root)
     db_path = Path(decisions_db_path) if decisions_db_path else root / ".claude" / "decisions.db"
     sql_path = Path(decisions_sql_path) if decisions_sql_path else root / ".claude" / "decisions.sql"
     out_path = Path(output_path) if output_path else root / ".claude" / "rules" / "decisions.md"
+    rs_path = Path(run_state_db_path) if run_state_db_path else Path(os.path.expanduser("~/.claude/.claude/run-state.db"))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -56,7 +61,8 @@ def generate_rules(
         out_path.write_text(_MINIMAL_CONTENT, encoding="utf-8")
         return str(out_path)
 
-    md = _render_markdown(rows, project_root)
+    freshness = _load_freshness_scores(rs_path)
+    md = _render_markdown(rows, project_root, freshness)
     out_path.write_text(md, encoding="utf-8")
     return str(out_path)
 
@@ -78,18 +84,44 @@ def _open_db(db_path: Path, sql_path: Path) -> sqlite3.Connection | None:
     return None
 
 
-def _render_markdown(rows: list[tuple], project_root: str) -> str:
-    global_decisions: list[tuple[int, str]] = []
-    scoped: dict[str, list[tuple[int, str]]] = defaultdict(list)
+def _load_freshness_scores(run_state_db_path: Path) -> dict[int, float]:
+    if not run_state_db_path.exists():
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{run_state_db_path}?mode=ro", uri=True)
+        rows = conn.execute("SELECT decision_id, staleness_score FROM decision_freshness").fetchall()
+        conn.close()
+        return {int(row[0]): float(row[1]) for row in rows}
+    except sqlite3.OperationalError:
+        return {}
+
+
+def _format_decision(did: int, content: str, reasoning: str | None, score: float) -> str:
+    if score < _TIER_FRESH:
+        line = f"- [decision-{did}] {content}"
+        if reasoning:
+            line += f"\n  Reasoning: {reasoning}"
+        return line
+    if score > _TIER_AGING:
+        return (
+            f"- [STALE] [decision-{did}] {content}\n"
+            f"  > Warning: this decision has not been validated against recent code changes"
+        )
+    return f"- [decision-{did}] {content}"
+
+
+def _render_markdown(rows: list[tuple], project_root: str, freshness: dict[int, float]) -> str:
+    global_decisions: list[tuple[int, str, str | None]] = []
+    scoped: dict[str, list[tuple[int, str, str | None]]] = defaultdict(list)
     seen_global: set[int] = set()
 
-    for did, content, _reasoning, scope_type, scope_value in rows:
+    for did, content, reasoning, scope_type, scope_value in rows:
         if scope_type is None and scope_value is None:
             if did not in seen_global:
-                global_decisions.append((did, content))
+                global_decisions.append((did, content, reasoning))
                 seen_global.add(did)
         else:
-            scoped[scope_value].append((did, content))
+            scoped[scope_value].append((did, content, reasoning))
 
     lines = [
         "# Project Decisions",
@@ -102,8 +134,8 @@ def _render_markdown(rows: list[tuple], project_root: str) -> str:
     if global_decisions:
         lines.append("## Global decisions")
         lines.append("")
-        for did, content in global_decisions:
-            lines.append(f"- [decision-{did}] {content}")
+        for did, content, reasoning in global_decisions:
+            lines.append(_format_decision(did, content, reasoning, freshness.get(did, 0.5)))
         lines.append("")
 
     if scoped:
@@ -111,20 +143,30 @@ def _render_markdown(rows: list[tuple], project_root: str) -> str:
         lines.append("")
         for scope_value in sorted(scoped):
             lines.append(f"### `{scope_value}`")
-            for did, content in scoped[scope_value]:
-                lines.append(f"- [decision-{did}] {content}")
+            for did, content, reasoning in scoped[scope_value]:
+                lines.append(_format_decision(did, content, reasoning, freshness.get(did, 0.5)))
             lines.append("")
 
     if not global_decisions and not scoped:
         lines.append("No decisions recorded yet.")
         lines.append("")
 
+    # Phase 3 placeholder -- story-924 will replace with real domain summary
+
     return "\n".join(lines)
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(f"Usage: python3 -m decision_memory.rules_generator <project_root>", file=sys.stderr)
+        print(f"Usage: python3 -m decision_memory.rules_generator <project_root> [--run-state-db PATH]", file=sys.stderr)
         sys.exit(1)
-    result = generate_rules(sys.argv[1])
+
+    rs_db = None
+    args = sys.argv[1:]
+    project = args[0]
+    if "--run-state-db" in args:
+        idx = args.index("--run-state-db")
+        rs_db = args[idx + 1]
+
+    result = generate_rules(project, run_state_db_path=rs_db)
     print(result)
