@@ -1,0 +1,314 @@
+{
+  "slug": "portable-project-ai-decision-memory",
+  "skill": "research",
+  "scope": {
+    "files": null,
+    "stories": null,
+    "complexity": null
+  },
+  "route_hint": null,
+  "prev": [".scope-portable-project-ai-decision-memory.json"],
+  "data": {
+    "topic": "portable per-project AI decision memory: vector-backed decision tracking for legacy codebases that auto-discovers implicit architectural decisions, stores them with file-level associations in a portable embedded database, and dynamically injects relevant context at edit time",
+    "angles_generated": 5,
+    "partial_research": false,
+    "synthesized_findings": [
+      {
+        "theme": "Portable vector storage: sqlite-vec + embedded embeddings",
+        "claims": [
+          {
+            "claim": "sqlite-vec is the modern zero-dependency C successor to sqlite-vss, replacing Faiss/C++ with pure C. Works on macOS, Linux, Windows, WASM, Android, iOS. Installs via pip install sqlite-vec.",
+            "source_urls": ["https://alexgarcia.xyz/sqlite-vec/sqlite-vec.html", "https://alexgarcia.xyz/blog/2024/sqlite-vec-stable-release/index.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "sqlite-vec queries 100k float vectors at 768d in <75ms on disk. At 256d, well under 50ms. Binary quantization drops 100k queries to ~11ms with ~95% accuracy retention. Practical float ceiling is ~300-500k vectors before breaching 100ms.",
+            "source_urls": ["https://alexgarcia.xyz/blog/2024/sqlite-vec-stable-release/index.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "A pre-built SQLite .db file with embeddings stored as BLOBs in sqlite-vec shadow tables is fully portable across machines — the embedding data travels with the file. Querying requires either re-running an embedding model on the query string or using keyword fallback via FTS5.",
+            "source_urls": ["https://alexgarcia.xyz/blog/2024/sqlite-vec-stable-release/index.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "FastEmbed (by Qdrant) uses ONNX Runtime for local embedding without Ollama — no GPU, no CUDA, no server. pip install fastembed. ~15ms/chunk on CPU. Models download on first use, then fully offline.",
+            "source_urls": ["https://qdrant.github.io/fastembed/Getting%20Started/", "https://github.com/qdrant/fastembed"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "nomic-embed-text-v1.5 supports ONNX export for serverless inference via onnxruntime (Python) and Transformers.js (Node). Supports Matryoshka embeddings with 8192-token context window.",
+            "source_urls": ["https://huggingface.co/nomic-ai/nomic-embed-text-v1.5", "https://blog.nomic.ai/posts/nomic-embed-matryoshka"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Hybrid BM25 + vector search via SQLite FTS5 + sqlite-vec with Reciprocal Rank Fusion (RRF) is a documented working pattern. If embedding model is unavailable, keyword search still works from the same SQLite file.",
+            "source_urls": ["https://alexgarcia.xyz/blog/2024/sqlite-vec-hybrid-search/index.html", "https://github.com/asg017/sqlite-vec/issues/56"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          }
+        ],
+        "key_insight": "The full portability stack exists: sqlite-vec (zero-dep vector store) + FastEmbed/ONNX (serverless embedding) + FTS5 BM25 fallback (no-model keyword search). A single .db file is portable; querying is portable via ONNX or degrades gracefully to keyword search."
+      },
+      {
+        "theme": "Matryoshka embeddings and dimension optimization",
+        "claims": [
+          {
+            "claim": "nomic-embed-text-v1.5 MTEB scores by dimension: 768→62.28, 512→61.96, 256→61.04, 128→59.34, 64→56.10. Truncating from 768 to 256 costs only ~1.2% retrieval quality while halving storage and improving query speed.",
+            "source_urls": ["https://huggingface.co/nomic-ai/nomic-embed-text-v1.5"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "To truncate Matryoshka embeddings: apply layer normalization, slice to target dimension, then L2 normalize. Requires task prefixes for code: 'search_document: <code>' for indexing, 'search_query: <query>' for retrieval.",
+            "source_urls": ["https://huggingface.co/nomic-ai/nomic-embed-text-v1.5"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "For a 100k-function codebase at 256d float32, total embedding storage is ~100MB. At 768d, ~300MB. Both within sqlite-vec's operational range.",
+            "source_urls": ["https://huggingface.co/nomic-ai/nomic-embed-text-v1.5"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "256-dimensional nomic-embed-text-v1.5 is the pragmatic sweet spot for decision memory: 98.8% of full-dimension quality, ~100MB for 100k functions, sub-50ms sqlite-vec queries. No reason to use 768d unless top-1 precision is critical."
+      },
+      {
+        "theme": "Auto-discovery of implicit architectural decisions — research gap",
+        "claims": [
+          {
+            "claim": "A 2025 systematic literature review of 18 papers confirms LLMs are applied to design decision classification and pattern detection, but current approaches mostly use simple prompting. No published system extracts implicit/unannotated decisions from code behavior.",
+            "source_urls": ["https://arxiv.org/abs/2505.16697"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Self-Admitted Technical Debt (SATD) detection using transformer models achieves F1 ~0.76 on explicitly annotated debt in comments/commits. It does NOT address implicit workarounds or load-bearing hacks without developer annotations.",
+            "source_urls": ["https://arxiv.org/html/2312.15020v3"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "GPT-4 achieves 0.849 BERTScore F1 generating architectural design decisions from provided contexts in zero-shot mode — but this generates decisions FROM contexts, not extracting/recovering implicit decisions from code.",
+            "source_urls": ["https://arxiv.org/html/2403.01709v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "NLP-based SATD detection pipelines produce 44% false positives or context-insufficient instances, requiring human validation to separate signal from noise.",
+            "source_urls": ["https://arxiv.org/html/2601.06266v1"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "LLMs struggle specifically with complex abstractions and class relationships in architecture recovery — precisely where implicit load-bearing decisions tend to live.",
+            "source_urls": ["https://link.springer.com/chapter/10.1007/978-3-032-02138-0_5"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Auto-discovery of implicit decisions is genuinely novel — no published system does it. The closest path is a multi-stage pipeline: SATD comment detection + commit classification + LLM-based rationale synthesis. But this pipeline has NOT been evaluated as a unified system. Expect 44% false positive rate requiring human-in-the-loop validation."
+      },
+      {
+        "theme": "Per-project AI memory: state of the art",
+        "claims": [
+          {
+            "claim": "Cursor uses remote Turbopuffer vector DB with Merkle tree per-project isolation. Indexing reuse cut 99th percentile from 4.03 hours to 21 seconds by caching embeddings per chunk content hash.",
+            "source_urls": ["https://cursor.com/blog/secure-codebase-indexing"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Continue.dev uses locally embedded LanceDB with SQL-filtered retrieval. ~10-line code chunks, ~1M vectors for 10M-line codebase, sub-10ms query latency, SQL-like filtering by language/project/tags. 40% relevance improvement reported.",
+            "source_urls": ["https://lancedb.com/blog/the-future-of-ai-native-development-is-local-inside-continues-lancedb-powered-evolution/"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Windsurf Cascade separates auto-generated 'Memories' (dynamic facts/decisions) from '.windsurf/rules' (static standards). Storage format undocumented.",
+            "source_urls": ["https://codeium.com/windsurf", "https://docs.windsurf.com/windsurf/cascade/cascade"],
+            "confidence": "medium",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Mem0 open source uses three-tier storage: Qdrant (vector), Neo4j/Memgraph (graph relationships), SQLite (history). Research reports 26% LLM-as-Judge improvement, 91% lower p95 latency, 90% token cost reduction vs full-context.",
+            "source_urls": ["https://docs.mem0.ai/open-source/overview", "https://arxiv.org/abs/2504.19413"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "No cross-tool portability standard exists — no way to move learned project memories from Cursor to Windsurf or vice versa. Per-project AI memory stores as standalone libraries are nascent outside IDE-embedded solutions.",
+            "source_urls": ["https://lancedb.com/blog/the-future-of-ai-native-development-is-local-inside-continues-lancedb-powered-evolution/"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          }
+        ],
+        "key_insight": "All major tools have vector-backed per-project indexes, but they're proprietary and non-portable. Continue.dev + LanceDB is the most transparent architecture. A tool-agnostic portable decision store that works across Claude Code, Cursor, and others would fill a real gap."
+      },
+      {
+        "theme": "Edit-time context injection: no one does it automatically",
+        "claims": [
+          {
+            "claim": "No major AI coding tool (Cursor, Continue, Copilot) natively auto-injects context on file open or modification. All mechanisms are query-triggered (@Codebase), user-triggered (@ dropdown), or rule/glob-scoped (Claude Code Rules).",
+            "source_urls": ["https://martinfowler.com/articles/exploring-gen-ai/context-engineering-coding-agents.html", "https://docs.continue.dev/customize/deep-dives/custom-providers"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Claude Code path-glob Rules are the closest existing primitive: they load context when a file matching a glob pattern becomes active. Combined with Hooks (lifecycle callbacks on file edits), this is the most composable foundation for building edit-time injection.",
+            "source_urls": ["https://martinfowler.com/articles/exploring-gen-ai/context-engineering-coding-agents.html"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "MCP dynamic-context-mcp injects rules based on file-path glob patterns. MCP supports dynamic tool registration at runtime — file-open events could trigger context server updates.",
+            "source_urls": ["https://github.com/nathan-barrett/dynamic-context-mcp", "https://spring.io/blog/2025/05/04/spring-ai-dynamic-tool-updates-with-mcp/"],
+            "confidence": "medium",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "GitHub Copilot uses Jaccard similarity on open tabs and recent history for fast-path context. Cursor uses Merkle tree + Tree-sitter syntactic chunking for semantic completeness.",
+            "source_urls": ["https://github.blog/2023-05-17-how-github-copilot-is-getting-better-at-understanding-your-codebase/", "https://www.cursor.com/blog/instant-grep"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Continue.dev has an open GitHub issue requesting automatic local/IDE context injection, confirming this is not yet a native feature anywhere.",
+            "source_urls": ["https://github.com/continuedev/continue/issues/5457"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Edit-time auto-injection of decisions is novel. The implementation path is an MCP server that accepts file paths, queries the project decision DB, and returns relevant decisions — triggered by Claude Code hooks or glob-matched rules. No existing tool does this."
+      },
+      {
+        "theme": "Chunking and incremental indexing strategies",
+        "claims": [
+          {
+            "claim": "AST-based function-level chunking (tree-sitter, depth-first traversal, merge siblings under token limit) outperforms fixed-size chunking: +4.3 Recall@5 on RepoEval, +2.67 Pass@1 on SWE-bench.",
+            "source_urls": ["https://arxiv.org/html/2506.15655v1"],
+            "confidence": "medium",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Class-aware semantic chunking (prepending class signatures to method bodies) significantly reduces hallucination vs naive per-function or fixed-size chunking.",
+            "source_urls": ["https://arxiv.org/abs/2401.07532"],
+            "confidence": "medium",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "Content-hash incremental indexing (SHA-256 per chunk, Merkle tree change detection) prevents redundant embedding. Cursor runs this every 10 minutes, re-indexing only changed files.",
+            "source_urls": ["https://read.engineerscodex.com/p/how-cursor-indexes-codebases-fast", "https://python.langchain.com/docs/modules/data_connection/indexing/"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Binary quantization of embeddings (float32 to 1-bit) retains ~95% accuracy while reducing storage 32x and query time ~10x in sqlite-vec.",
+            "source_urls": ["https://alexgarcia.xyz/blog/2024/sqlite-vec-stable-release/index.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          }
+        ],
+        "key_insight": "Function-level AST chunking + content-hash incremental re-indexing is the proven approach. For decisions specifically (not code chunks), the unit of embedding is the decision text + associated file paths — much simpler than code chunking."
+      }
+    ],
+    "angle_summaries": [
+      {
+        "angle": "Portable vector stores without runtime dependencies",
+        "source": "both",
+        "finding_count": 11,
+        "key_insights": [
+          "sqlite-vec + FastEmbed/ONNX = fully portable vector search without Ollama",
+          "Hybrid FTS5 + sqlite-vec with RRF provides graceful degradation",
+          "Single .db file is self-contained and cross-platform"
+        ]
+      },
+      {
+        "angle": "Auto-discovery of implicit architectural decisions",
+        "source": "both",
+        "finding_count": 10,
+        "key_insights": [
+          "Confirmed research gap — no system extracts implicit decisions from code",
+          "SATD detection handles explicit debt only, 44% false positive rate",
+          "Multi-stage pipeline (SATD + commits + LLM synthesis) is untested as unified system"
+        ]
+      },
+      {
+        "angle": "Per-project AI memory systems beyond flat files",
+        "source": "both",
+        "finding_count": 13,
+        "key_insights": [
+          "All major tools have vector indexes but proprietary and non-portable",
+          "Continue.dev + LanceDB is most transparent open-source reference",
+          "No cross-tool portability standard exists"
+        ]
+      },
+      {
+        "angle": "Edit-time context injection for AI coding tools",
+        "source": "both",
+        "finding_count": 11,
+        "key_insights": [
+          "No tool auto-injects context at edit time — all are query/user-triggered",
+          "Claude Code glob rules + hooks are the closest foundation",
+          "MCP servers are the right extension point for custom injection"
+        ]
+      },
+      {
+        "angle": "Embedding strategies and scaling for 100k+ LOC",
+        "source": "both",
+        "finding_count": 10,
+        "key_insights": [
+          "100k LOC maps to ~3-10k function chunks, sqlite-vec handles in <20ms",
+          "256d Matryoshka is the sweet spot — 98.8% quality, half the storage",
+          "Content-hash incremental indexing skips 99% of work on typical commits"
+        ]
+      }
+    ],
+    "citations": [
+      {"url": "https://alexgarcia.xyz/blog/2024/sqlite-vec-stable-release/index.html", "title": "Introducing sqlite-vec v0.1.0", "quality": "authoritative", "referenced_by": ["Portable vector stores", "Embedding scaling"]},
+      {"url": "https://alexgarcia.xyz/blog/2024/sqlite-vec-hybrid-search/index.html", "title": "Hybrid full-text search and vector search with SQLite", "quality": "authoritative", "referenced_by": ["Portable vector stores"]},
+      {"url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5", "title": "nomic-embed-text-v1.5 Model Card", "quality": "authoritative", "referenced_by": ["Portable vector stores", "Embedding scaling"]},
+      {"url": "https://qdrant.github.io/fastembed/Getting%20Started/", "title": "FastEmbed Getting Started", "quality": "authoritative", "referenced_by": ["Portable vector stores"]},
+      {"url": "https://cursor.com/blog/secure-codebase-indexing", "title": "Cursor — Secure Codebase Indexing", "quality": "authoritative", "referenced_by": ["Per-project AI memory", "Embedding scaling"]},
+      {"url": "https://lancedb.com/blog/the-future-of-ai-native-development-is-local-inside-continues-lancedb-powered-evolution/", "title": "Inside Continue's LanceDB-Powered Evolution", "quality": "authoritative", "referenced_by": ["Per-project AI memory"]},
+      {"url": "https://martinfowler.com/articles/exploring-gen-ai/context-engineering-coding-agents.html", "title": "Context Engineering for Coding Agents — Martin Fowler", "quality": "authoritative", "referenced_by": ["Edit-time injection"]},
+      {"url": "https://docs.continue.dev/customize/deep-dives/custom-providers", "title": "Continue.dev Context Providers", "quality": "authoritative", "referenced_by": ["Edit-time injection"]},
+      {"url": "https://arxiv.org/abs/2505.16697", "title": "Software Architecture Meets LLMs: Systematic Literature Review (2025)", "quality": "authoritative", "referenced_by": ["Auto-discovery"]},
+      {"url": "https://arxiv.org/html/2312.15020v3", "title": "SATD Detection: A Decade Systematic Review", "quality": "authoritative", "referenced_by": ["Auto-discovery"]},
+      {"url": "https://arxiv.org/html/2403.01709v1", "title": "Can LLMs Generate Architectural Design Decisions?", "quality": "authoritative", "referenced_by": ["Auto-discovery"]},
+      {"url": "https://arxiv.org/html/2601.06266v1", "title": "SATD in LLM Software: Empirical Comparison", "quality": "authoritative", "referenced_by": ["Auto-discovery"]},
+      {"url": "https://arxiv.org/html/2506.15655v1", "title": "cAST: Enhancing Code RAG with Structural Chunking", "quality": "authoritative", "referenced_by": ["Embedding scaling"]},
+      {"url": "https://docs.mem0.ai/open-source/overview", "title": "Mem0 Open Source Overview", "quality": "authoritative", "referenced_by": ["Per-project AI memory"]},
+      {"url": "https://arxiv.org/abs/2504.19413", "title": "Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory", "quality": "authoritative", "referenced_by": ["Per-project AI memory"]},
+      {"url": "https://github.com/nathan-barrett/dynamic-context-mcp", "title": "dynamic-context-mcp", "quality": "informative", "referenced_by": ["Edit-time injection"]},
+      {"url": "https://blog.nomic.ai/posts/nomic-embed-matryoshka", "title": "Nomic Embed Matryoshka", "quality": "authoritative", "referenced_by": ["Portable vector stores", "Embedding scaling"]},
+      {"url": "https://read.engineerscodex.com/p/how-cursor-indexes-codebases-fast", "title": "How Cursor Indexes Codebases Fast", "quality": "informative", "referenced_by": ["Per-project AI memory", "Embedding scaling"]},
+      {"url": "https://github.com/continuedev/continue/issues/5457", "title": "Continue.dev: Add automatic local/IDE context injection", "quality": "informative", "referenced_by": ["Edit-time injection"]},
+      {"url": "https://docs.windsurf.com/windsurf/cascade/cascade", "title": "Windsurf Cascade Documentation", "quality": "authoritative", "referenced_by": ["Per-project AI memory"]}
+    ],
+    "conflicts": [
+      {
+        "topic": "Refactor Simulation as an emerging technique for detecting load-bearing code",
+        "gemini_claim": {"claim": "Refactor Simulation is an emerging technique where an LLM is prompted to simulate a fix for suspected hacks to identify hidden dependencies and regressions", "source_urls": ["https://arxiv.org/abs/2502.05678"]},
+        "claude_claim": {"claim": "No published technique was found specifically targeting refactor simulation or code smell inversion to detect intentional workarounds. The arxiv ID may be synthetic.", "source_urls": []},
+        "credibility_assessment": "Gemini's arxiv URLs for this specific claim look synthetic (round numbers, no matching paper found by Claude's web search). The concept is plausible but unverified. Treat as speculative — do not build on this without confirming the source."
+      }
+    ],
+    "gaps": [
+      "No published end-to-end system for extracting implicit architectural decisions from code behavior (confirmed research gap)",
+      "Nomic-embed-text ONNX weights availability — unclear if Nomic publishes official ONNX exports or if conversion is DIY",
+      "Matryoshka dimension impact specifically on code retrieval (vs general MTEB) — not benchmarked separately",
+      "sqlite-lembed (in-process GGUF embedding extension) production stability unclear — may be demo-quality only",
+      "Cross-platform binary management for sqlite-vec on exotic architectures beyond standard pip/npm",
+      "Windsurf Cascade internal storage format for Memories undocumented",
+      "Specific internal context weighting algorithms (recently-edited vs semantically-similar) remain proprietary across all tools",
+      "No public benchmark combining nomic-embed-text-v1.5 + sqlite-vec end-to-end on a real 100k+ LOC codebase"
+    ]
+  }
+}

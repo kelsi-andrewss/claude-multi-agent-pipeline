@@ -1,0 +1,117 @@
+{
+  "angle": "Multimodal diagnostic normalization",
+  "findings": [
+    {
+      "claim": "Semantic Scene Graphs convert visual diffs into structured JSON of UI components, attributes, and hierarchy, enabling LLMs to reason about visual changes without raw pixel data",
+      "source_url": "https://arxiv.org",
+      "confidence": "medium"
+    },
+    {
+      "claim": "SVRepair uses iterative visual segmentation to capture global UI state, identify bug regions, then zoom in for high-resolution structured data, reducing noise and token cost for LLM repair agents",
+      "source_url": "https://arxiv.org",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Applitools Autonomous uses Visual AI to detect regressions and provides an autonomous agent for auto-healing UI tests with structured visual diff output",
+      "source_url": "https://applitools.com",
+      "confidence": "high"
+    },
+    {
+      "claim": "TestMu AI (SmartUI) offers an MCP server that lets coding agents like Cursor or Claude trigger visual tests and receive context-aware fix suggestions directly in their reasoning loop",
+      "source_url": "https://testmuai.com",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Playwright includes built-in agentic features (Healer Agent) to analyze test failures and suggest locator or code fixes based on DOM and visual state changes",
+      "source_url": "https://playwright.dev",
+      "confidence": "high"
+    },
+    {
+      "claim": "Rust compiler (rustc) natively supports --error-format=json emitting NDJSON diagnostics with message, error code, and detailed spans (file, line, column)",
+      "source_url": "https://doc.rust-lang.org/rustc/",
+      "confidence": "high"
+    },
+    {
+      "claim": "GCC 9+ supports -fdiagnostics-format=json outputting a JSON array of diagnostic objects with severity levels and source locations",
+      "source_url": "https://gcc.gnu.org/",
+      "confidence": "high"
+    },
+    {
+      "claim": "TypeScript (tsc) has no native JSON output; the standard approach is --pretty false with regex parsing or wrapper tools like tsc-json",
+      "source_url": "https://www.typescriptlang.org/",
+      "confidence": "high"
+    },
+    {
+      "claim": "SARIF (Static Analysis Results Interchange Format) is the industry standard for structured analysis results, but is too verbose for LLM context windows; tools like sarif-to-md-rs and Docling flatten it into LLM-ready formats",
+      "source_url": "https://sarifweb.azurewebsites.net/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Enriching structured error JSON by fetching 5-10 lines of source code context around reported error lines significantly improves LLM repair performance",
+      "source_url": "https://arxiv.org",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Loki (oblador/loki) supports native --json flag for visual regression output, optimized for Storybook environments",
+      "source_url": "https://github.com/oblador/loki",
+      "confidence": "high"
+    },
+    {
+      "claim": "reg-suit/reg-cli provides -J/--json flag for detailed image comparison breakdown including pixel diff counts and file paths",
+      "source_url": "https://github.com/reg-viz/reg-suit",
+      "confidence": "high"
+    },
+    {
+      "claim": "BackstopJS generates compare.json in backstop_data directory after test runs with visual diff results",
+      "source_url": "https://github.com/garris/BackstopJS",
+      "confidence": "high"
+    },
+    {
+      "claim": "Pixelmatch (mapbox/pixelmatch) is the standard low-level pixel comparison library returning mismatch counts, typically wrapped in custom scripts for JSON output",
+      "source_url": "https://github.com/mapbox/pixelmatch",
+      "confidence": "high"
+    },
+    {
+      "claim": "Model Context Protocol (MCP) is the primary standard for connecting coding agents to external visual tools, allowing agents to request screenshots and DOM snapshots within their reasoning loop",
+      "source_url": "https://modelcontextprotocol.io",
+      "confidence": "high"
+    },
+    {
+      "claim": "GUIRepair uses screenshots from bug reports to reproduce visual failures and validates patches by comparing GUI renderings in an image-to-code-to-image cycle",
+      "source_url": "https://arxiv.org",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Sentry structures errors with GenAI spans (OpenTelemetry conventions), event contexts (stack traces + breadcrumbs), and Seer metadata (root cause analysis + suggested fix) for AI consumption",
+      "source_url": "https://sentry.io",
+      "confidence": "high"
+    },
+    {
+      "claim": "Sentry recommends passing event IDs over full JSON payloads to AI agents, allowing targeted fetching of specific stack frames or breadcrumbs to conserve context tokens",
+      "source_url": "https://sentry.io",
+      "confidence": "high"
+    },
+    {
+      "claim": "Multimodal tracing tools like Langfuse and Opik store screenshots, diffs, and console/network logs together in a single trace for full temporal and visual failure context",
+      "source_url": "https://langfuse.com",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Advanced agents use Visual-to-Code Maps where each visual change is tagged with the corresponding CSS class or React component name from the source tree, rather than sending raw base64 images",
+      "source_url": "https://arxiv.org",
+      "confidence": "medium"
+    }
+  ],
+  "key_insights": [
+    "The critical conversion layer is visual-to-semantic: raw pixel diffs must become structured scene graphs or component-level change descriptions (e.g., 'button shifted 20px left in .nav-header') before an LLM can reason about repairs. Tools like SVRepair and Applitools Autonomous demonstrate this, while pixelmatch-level tools only provide raw mismatch counts.",
+    "Compiler ecosystems are converging on native JSON diagnostic output (rustc, gcc 9+), but TypeScript lags behind. The SARIF standard is too verbose for LLM context windows, creating a need for flattening tools (sarif-to-md-rs, Docling) and source-context enrichment (5-10 surrounding lines) as a normalization step.",
+    "MCP is emerging as the integration standard for connecting repair agents to both visual regression tools and structured log sources, enabling a unified diagnostic context assembly pipeline: detect (visual tool) -> assemble (screenshots + accessibility tree + logs) -> refine (VLM to scene graph) -> repair (coding agent patches) -> validate (re-run visual test)."
+  ],
+  "gaps": [
+    "No published benchmarks comparing multimodal (visual + text) repair accuracy vs text-only repair accuracy for LLM coding agents",
+    "Limited research on optimal token budgets or context window strategies for combining visual scene graphs with stack traces in a single prompt",
+    "No standardized schema for unified diagnostic representations that combine visual diffs and textual errors -- each tool uses proprietary formats",
+    "Academic papers on SVRepair and GUIRepair lack specific arxiv IDs or author attributions in search results, making verification difficult",
+    "No established patterns for prioritizing which visual regressions warrant autonomous repair vs human review (triage heuristics)"
+  ]
+}

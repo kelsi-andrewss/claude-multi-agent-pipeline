@@ -1,0 +1,32 @@
+{
+  "slug": "developer-lifecycle-ai-software-factory",
+  "skill": "scope",
+  "scope": {
+    "files": 0,
+    "stories": 0,
+    "complexity": "small"
+  },
+  "route_hint": "research",
+  "prev": [],
+  "data": {
+    "topic": "developer lifecycle best practices with AI — software factory patterns, AI-augmented SDLC, orchestration and decomposition, codebase intelligence, quality verification, human-AI trust",
+    "what": null,
+    "audience": null,
+    "platform": null,
+    "in_scope": null,
+    "out_of_scope": null,
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": null,
+        "language": "Python/Shell",
+        "dependencies": ["MCP servers", "SQLite", "FastEmbed", "Ollama"]
+      }
+    ],
+    "problem": null,
+    "why": null,
+    "end_goal": null,
+    "needs_research": true,
+    "complexity_reasoning": "Topic requires surveying external industry practices, software factory patterns, and AI-augmented SDLC case studies — not derivable from this codebase."
+  }
+}

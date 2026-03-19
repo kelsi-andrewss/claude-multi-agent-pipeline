@@ -1,0 +1,273 @@
+{
+  "slug": "audit-infra-fixes",
+  "skill": "scout",
+  "scope": {
+    "files": 8,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "data": {
+    "topic": "Fix hook/shell infrastructure bugs: heredoc injection, JSON escaping, TOCTOU lockfile, missing WAL, PID-based SESSION_ID, subprocess sqlite3, inline Python dedup, path inconsistency, dead hooks",
+    "findings": [
+      {
+        "id": "BUG-1",
+        "category": "security",
+        "summary": "guard-direct-edit.sh interpolates $DB_FILE and $FILE_PATH into Python string literals (lines 112-113)",
+        "details": "The Python block at line 109 uses non-quoted heredoc and constructs: `db_path = '$DB_FILE'` and `file_path = '$FILE_PATH'`. If $FILE_PATH contains a single quote (e.g. `it's_config.js`), the Python string literal breaks with a SyntaxError. The `2>/dev/null` silently swallows this, causing RESULT to be empty, falling through to the generic block at line 163-170. The user gets the wrong error message but edits are still blocked (fail-safe). Also uses subprocess.run(['sqlite3', ...]) for the DB query at line 118-122, which is CQ-2 territory but in guard-direct-edit specifically.",
+        "affected_lines": "109-146",
+        "fix": "Switch to quoted heredoc `<<'PYEOF'` and pass variables as sys.argv: `python3 - \"$DB_FILE\" \"$FILE_PATH\" <<'PYEOF'` with `db_path = sys.argv[1]` and `file_path = sys.argv[2]`. Also replace subprocess.run(['sqlite3', ...]) with Python sqlite3 module. This matches the pattern already used in load-session-context.sh line 36.",
+        "files": ["hooks/guard-direct-edit.sh"],
+        "blast_radius": "Low. Fail-safe direction: if Python block fails, edit is blocked (lines 163-170). Only change is which error message the user sees, plus fixing paths with quotes."
+      },
+      {
+        "id": "BUG-2",
+        "category": "correctness",
+        "summary": "inject-tier2-context.sh manual JSON escaping misses tabs and control characters (lines 122-124)",
+        "details": "The JSON escaping only handles backslash, double-quote, and newline: `CONTEXT=\"${CONTEXT//\\\\/\\\\\\\\}\"`, `CONTEXT=\"${CONTEXT//\\\"/\\\\\\\"}\"`, `CONTEXT=\"${CONTEXT//$'\\n'/\\\\n}\"`. Tabs ($'\\t'), carriage returns ($'\\r'), and other JSON control characters (0x00-0x1F) are not escaped. When context fragments from sqlite3 queries contain these (e.g. tab-separated plan fields), the JSON output at line 126 is malformed. Claude Code silently ignores the malformed hook output.",
+        "affected_lines": "122-126",
+        "fix": "Replace the 3 bash substitutions + printf with a single Python JSON serialization: pipe CONTEXT through `python3 -c \"import json,sys; print(json.dumps(sys.stdin.read()))\"` to get a properly escaped JSON string. Then use that in the printf template. This handles all control characters correctly.",
+        "files": ["hooks/inject-tier2-context.sh"],
+        "blast_radius": "Low. If the fix breaks, context injection stops working — the user just doesn't get enrichment hints. The hook always exits 0."
+      },
+      {
+        "id": "BUG-3",
+        "category": "concurrency",
+        "summary": "stop_processor.py lockfile acquisition has TOCTOU race (lines 23-49)",
+        "details": "The _acquire_lock function does: (1) os.path.exists(path) check, (2) read old PID, (3) os.kill(old_pid, 0) check, (4) os.remove(path), (5) open(path, 'w') and write new PID. Between steps 4 and 5, another process can create the file. Two concurrent session endings can both pass the check and both write their PID. The second process silently overwrites the first's PID, and both run concurrently, causing SQLite write conflicts on epics.db. The stale-threshold check (lines 33-34) adds complexity but doesn't fix the fundamental race.",
+        "affected_lines": "23-49",
+        "fix": "Per decision-103: use fcntl.flock for advisory locking. Open the file with os.open(path, os.O_CREAT | os.O_RDWR), then fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB). If BlockingIOError, another process holds the lock — return False. Keep the fd open for process lifetime (store on a module global or pass to cleanup). The lock auto-releases on process exit/crash. Write PID to the file after acquiring lock for monitoring purposes. The _release_lock function becomes: close the fd (which releases the flock), then unlink the file.",
+        "files": ["hooks/lib/stop_processor.py"],
+        "blast_radius": "Low-Medium. If fcntl.flock breaks: concurrent stop_processors run simultaneously — same as current bug. session-learning-check.sh (the only caller) also does a PID-based check at lines 62-68 as a fast-path, which provides a secondary (but also racy) guard."
+      },
+      {
+        "id": "BUG-4",
+        "category": "concurrency",
+        "summary": "om_write.py opens openmemory.sqlite without WAL mode or busy_timeout — 6 connection sites",
+        "details": "All 6 sqlite3.connect() calls use `sqlite3.connect(OM_DB_PATH, timeout=10)` but never set PRAGMA journal_mode=WAL or PRAGMA busy_timeout. The `timeout=10` parameter in Python's sqlite3.connect() is NOT the same as SQLite's busy_timeout — it's the Python-level lock acquisition timeout. Without WAL mode, concurrent readers and writers (e.g., session-start prune_expired running while stop_processor writes via om_write) block each other. Connection sites: line 47 (dedup_check embedding path), line 68 (dedup_check simhash path), line 90 (enforce_budget), line 130 (prune_expired), line 168 (om_write dedup update), line 198 (om_write insert). Compare with stop_processor.py _connect_db() at lines 60-64 which correctly sets both pragmas.",
+        "affected_lines": "47, 68, 90, 130, 168, 198",
+        "fix": "Create a module-level _connect_om() helper (mirroring stop_processor.py's _connect_db pattern): `def _connect_om(): conn = sqlite3.connect(OM_DB_PATH, timeout=10); conn.execute('PRAGMA journal_mode=WAL'); conn.execute('PRAGMA busy_timeout=5000'); return conn`. Replace all 6 bare sqlite3.connect() calls with _connect_om(). This also sets up for future connection pooling (R-2) by having a single connection factory.",
+        "files": ["hooks/lib/om_write.py"],
+        "blast_radius": "Low. Adding WAL pragmas is strictly additive — it can only improve concurrent access. If somehow WAL mode fails to set, behavior is unchanged from current (journal mode stays DELETE, which is the default). No callers are affected since this is an internal implementation detail."
+      },
+      {
+        "id": "BUG-13",
+        "category": "correctness",
+        "summary": "guard-protected-files.sh uses SESSION_ID from profile.sh which falls back to PPID (line 55)",
+        "details": "Line 55: `PERMISSION_FILE=\"$CLAUDE_TEMP_DIR/konva-permission-${SESSION_ID}-${PROTECTED_NAME}\"`. SESSION_ID comes from profile.sh line 10: `export SESSION_ID=$(echo \"$_raw_session\" | tr -dc 'a-zA-Z0-9')` where `_raw_session=\"${CLAUDE_SESSION_ID:-${PPID:-$$}}\"`. When CLAUDE_SESSION_ID is set (normal case), this works correctly — the session ID is stable. When it's NOT set (older Claude Code versions, or edge cases), SESSION_ID becomes PPID, which differs per hook subprocess. The permission sentinel written with one PPID won't be found by the next hook invocation's different PPID. Result: protected files are perpetually blocked.",
+        "affected_lines": "55",
+        "fix": "Use $CLAUDE_TEMP_DIR/konva-permission-${PROTECTED_NAME} (drop session scoping). The temp dir itself is session-scoped (created fresh per session), so the session-level scoping is redundant. This also fixes the PPID instability since the filename no longer depends on SESSION_ID. Alternative: use CLAUDE_SESSION_ID directly with an empty-string guard, but the temp-dir approach is simpler and more robust.",
+        "files": ["hooks/guard-protected-files.sh"],
+        "blast_radius": "Low. Current behavior when CLAUDE_SESSION_ID is unset: permission never matches (always blocked). Fix: permission matches within the temp dir's lifetime (one session). No regression possible — the fix can only make permissions work in more cases."
+      },
+      {
+        "id": "CQ-2",
+        "category": "quality",
+        "summary": "load-session-context.sh uses subprocess.run(['sqlite3', ...]) for DB queries in 4 Python blocks",
+        "details": "Lines 66-99 (render prefs): defines query_db() that shells out to sqlite3 CLI via subprocess.run. Lines 141-146 (OM query): om_query() also shells out to sqlite3 CLI. Lines 222-229 (agenda): query_db() again with subprocess. Lines 321-326 (correction patterns): query_db() again. Each subprocess.run call adds ~50ms overhead (fork + exec sqlite3 binary). Total: ~200ms per session start just from subprocess overhead. Ironically, line 36-53 in the same file correctly uses Python sqlite3 module directly. The subprocess pattern also depends on sqlite3 being in PATH.",
+        "affected_lines": "66-99, 141-146, 222-229, 321-326",
+        "fix": "Replace all query_db() implementations that use subprocess.run(['sqlite3', ...]) with Python sqlite3.connect() + cursor.execute(). The pattern is already established at lines 36-53 of the same file. Each Python block can open the connection once, run all its queries, and close. This eliminates the subprocess overhead and the PATH dependency. Since these blocks all run within 10s SessionStart timeout, the simpler Python approach is preferable.",
+        "files": ["hooks/load-session-context.sh"],
+        "blast_radius": "Medium. load-session-context.sh runs on every session start. If any refactored query_db() breaks, that section's output is missing from session context. Impact varies: missing rendered prefs (bad), missing OM snapshot (minor), missing agenda (noticeable), missing correction patterns (minor). All blocks are independent and can be fixed individually."
+      },
+      {
+        "id": "CQ-3",
+        "category": "quality",
+        "summary": "Inline Python for extracting tool_input.file_path repeated verbatim across 4+ hooks",
+        "details": "The exact pattern appears in: guard-direct-edit.sh (lines 26-33), guard-protected-files.sh (lines 27-34), track-skill-changes.sh (lines 11-18), block-env-read.sh (line 14). Each hook independently pipes stdin JSON through a python3 -c block that does `d.get('tool_input', {}).get('file_path', '')`. inject-tier2-context.sh (lines 23-27) has a similar but different pattern for extracting `prompt`. cost-alert.sh (lines 15-26) has another variant for extracting config values.",
+        "affected_lines": "guard-direct-edit.sh:26-33, guard-protected-files.sh:27-34, track-skill-changes.sh:11-18, block-env-read.sh:14",
+        "fix": "Create hooks/lib/parse_hook_input.py that accepts a field path as argument: `python3 ~/.claude/hooks/lib/parse_hook_input.py file_path` reads JSON from stdin, navigates tool_input.file_path, and prints the value. Usage: `FILE_PATH=$(echo \"$INPUT\" | python3 \"$HOME/.claude/hooks/lib/parse_hook_input.py\" file_path)`. For the prompt extraction case: `PROMPT=$(echo \"$INPUT\" | python3 \"$HOME/.claude/hooks/lib/parse_hook_input.py\" prompt)`. This centralizes the JSON parsing and reduces each hook by 5-7 lines.",
+        "files": ["hooks/guard-direct-edit.sh", "hooks/guard-protected-files.sh", "hooks/track-skill-changes.sh", "hooks/block-env-read.sh", "hooks/lib/parse_hook_input.py (new)"],
+        "blast_radius": "Low. Each hook's behavior is unchanged — just the extraction mechanism is centralized. If parse_hook_input.py fails, the variable is empty, and each hook handles empty paths gracefully (guard-direct-edit exits 0 for empty FILE_DIR, guard-protected-files exits 0 for non-protected basenames, etc.)."
+      },
+      {
+        "id": "CQ-8",
+        "category": "quality",
+        "summary": "settings.json mixes tilde paths (~/.claude/hooks/...) and absolute paths (/Users/kelsiandrews/.claude/tracking/...)",
+        "details": "Tilde-based paths: lines 4-18 (permissions allow list) and lines 29-88 (most hook commands). Absolute paths: line 14 (`/Users/kelsiandrews/.claude/tracking/stop-hook.sh`), line 15 (`/Users/kelsiandrews/.claude/tracking/subagent-stop-hook.sh`), line 162 (`/Users/kelsiandrews/.claude/tracking/stop-hook.sh --backfill-only`), line 163 (same pattern for subagent). Both formats work at runtime, but the inconsistency makes grep/search harder and the absolute paths are non-portable across machines.",
+        "affected_lines": "14, 15, 162, 163",
+        "fix": "Standardize all paths to tilde-based: replace `/Users/kelsiandrews/.claude/` with `~/.claude/` in the 4 affected lines. Verify that Claude Code's hook system expands tildes in all positions (it does — confirmed by the existing tilde paths working). hook_generator.py line 239 already normalizes to tilde when generating new entries.",
+        "files": ["settings.json"],
+        "blast_radius": "Low. Claude Code expands ~ in hook command paths. If somehow tilde expansion fails for these paths, the hooks (tracking/stop-hook.sh, tracking/subagent-stop-hook.sh) would silently not run — they're async and advisory-only."
+      },
+      {
+        "id": "CQ-9",
+        "category": "quality",
+        "summary": "Dead compliance hooks in settings.json: 2 hook commands + 2 permission entries reference scripts that don't exist",
+        "details": "settings.json lines 81-89: Skill matcher with hooks pointing to `~/.claude/hooks/compliance/compliance-kelsi-andrews-9-52-pm-hey-reuben-i-have-a-really-interesting.sh` and `~/.claude/hooks/compliance/compliance-2026-03-04-why-didn-t-u-use-ship-skill-omfg.sh`. These files don't exist — hooks/compliance/ contains only .gitkeep. Lines 16-17 in the permissions block also reference these same dead paths. Each non-existent hook causes a timeout when the Skill matcher fires. With 5s timeout per hook, that's 10s wasted per Skill invocation.",
+        "affected_lines": "16-17, 79-89",
+        "fix": "Remove the entire Skill matcher block (lines 78-89) and the two corresponding permission entries (lines 16-17). The Skill matcher block only exists for these dead hooks — removing it entirely is cleaner than leaving an empty hooks array. Verify the resulting JSON is valid.",
+        "files": ["settings.json"],
+        "blast_radius": "Low. The hooks don't exist, so removing their references changes nothing functionally. The only effect is eliminating the 10s timeout waste on Skill invocations. The compliance/ directory and .gitkeep remain untouched."
+      }
+    ],
+    "testable_assertions": [
+      {
+        "id": "TA-1",
+        "story": 1,
+        "assertion": "guard-direct-edit.sh uses quoted heredoc (<<'PYEOF') and sys.argv for $DB_FILE and $FILE_PATH",
+        "verification": "grep -c \"sys.argv\" hooks/guard-direct-edit.sh should return >= 2; grep -c \"'\\$DB_FILE'\" hooks/guard-direct-edit.sh should return 0"
+      },
+      {
+        "id": "TA-2",
+        "story": 1,
+        "assertion": "inject-tier2-context.sh JSON escaping uses python3 json.dumps instead of manual bash substitution",
+        "verification": "grep -c 'json.dumps' hooks/inject-tier2-context.sh should return >= 1; the 3 CONTEXT substitution lines (//\\\\/\\\\\\\\, //\\\"/\\\\\\\", //$'\\n') should not exist"
+      },
+      {
+        "id": "TA-3",
+        "story": 2,
+        "assertion": "stop_processor.py uses fcntl.flock for lockfile instead of check-then-write",
+        "verification": "grep -c 'fcntl.flock' hooks/lib/stop_processor.py should return >= 1; grep -c 'os.path.exists(path)' in _acquire_lock should return 0"
+      },
+      {
+        "id": "TA-4",
+        "story": 2,
+        "assertion": "om_write.py has a _connect_om() helper that sets WAL and busy_timeout, called by all connection sites",
+        "verification": "grep -c '_connect_om()' hooks/lib/om_write.py should return >= 6 (1 def + 5+ calls); grep -c 'sqlite3.connect(OM_DB_PATH' should return 0 or 1 (only inside _connect_om)"
+      },
+      {
+        "id": "TA-5",
+        "story": 2,
+        "assertion": "load-session-context.sh Python blocks use sqlite3 module instead of subprocess sqlite3 CLI",
+        "verification": "grep -c 'subprocess.run.*sqlite3' hooks/load-session-context.sh should return 0; grep -c 'sqlite3.connect' hooks/load-session-context.sh should return >= 3"
+      },
+      {
+        "id": "TA-6",
+        "story": 3,
+        "assertion": "guard-protected-files.sh permission file path does not include SESSION_ID",
+        "verification": "grep 'PERMISSION_FILE.*SESSION_ID' hooks/guard-protected-files.sh should return 0"
+      },
+      {
+        "id": "TA-7",
+        "story": 3,
+        "assertion": "hooks/lib/parse_hook_input.py exists and is used by guard-direct-edit.sh and guard-protected-files.sh",
+        "verification": "test -f hooks/lib/parse_hook_input.py; grep -c 'parse_hook_input.py' hooks/guard-direct-edit.sh should return >= 1"
+      },
+      {
+        "id": "TA-8",
+        "story": 3,
+        "assertion": "settings.json contains no absolute /Users/ paths and no compliance hook references",
+        "verification": "grep -c '/Users/' settings.json should return 0; grep -c 'compliance' settings.json should return 0"
+      }
+    ],
+    "completeness": {
+      "confidence": "exhaustive",
+      "occurrences": [
+        {
+          "target": "Shell variable interpolation into Python heredocs",
+          "locations": [
+            "hooks/guard-direct-edit.sh:112 (db_path = '$DB_FILE')",
+            "hooks/guard-direct-edit.sh:113 (file_path = '$FILE_PATH')",
+            "hooks/cost-alert.sh:18 (with open('$CONFIG_FILE'))",
+            "hooks/cost-alert.sh:43 (with open('$TOKENS_FILE'))",
+            "hooks/cost-alert.sh:56-57 (float('$COST'), float('$THRESHOLD'))",
+            "hooks/track-skill-changes.sh:48 (with open('$FILE_PATH'))"
+          ],
+          "notes": "cost-alert.sh and track-skill-changes.sh also have the pattern but are out of scope (they use non-quoted heredocs). guard-direct-edit.sh is the only in-scope file with this pattern."
+        },
+        {
+          "target": "subprocess.run(['sqlite3', ...]) in Python blocks",
+          "locations": [
+            "hooks/load-session-context.sh:67-68 (render prefs query_db)",
+            "hooks/load-session-context.sh:141-142 (OM om_query)",
+            "hooks/load-session-context.sh:224-225 (agenda query_db)",
+            "hooks/load-session-context.sh:323-324 (correction patterns query_db)",
+            "hooks/guard-direct-edit.sh:118-122 (subprocess.run(['sqlite3', ...]))",
+            "hooks/inject-tier2-context.sh:74 (sqlite3 CLI from bash, not subprocess)"
+          ],
+          "notes": "guard-direct-edit.sh subprocess.run is in the Python heredoc block. inject-tier2-context.sh calls sqlite3 directly from bash (line 74) not via subprocess."
+        },
+        {
+          "target": "Inline Python file_path extraction pattern",
+          "locations": [
+            "hooks/guard-direct-edit.sh:26-33",
+            "hooks/guard-protected-files.sh:27-34",
+            "hooks/track-skill-changes.sh:11-18",
+            "hooks/block-env-read.sh:11-17"
+          ],
+          "notes": "4 hooks use the exact same 7-line pattern. inject-tier2-context.sh and session-learning-check.sh have different extraction patterns (prompt, transcript_path) that could also use the helper with different field args."
+        },
+        {
+          "target": "Absolute paths in settings.json",
+          "locations": [
+            "settings.json:14 (/Users/kelsiandrews/.claude/tracking/stop-hook.sh)",
+            "settings.json:15 (/Users/kelsiandrews/.claude/tracking/subagent-stop-hook.sh)",
+            "settings.json:140 (same stop-hook.sh path in Stop hooks)",
+            "settings.json:162 (same stop-hook.sh --backfill-only in SessionStart)"
+          ],
+          "notes": "4 instances total. All reference tracking/ scripts."
+        },
+        {
+          "target": "Dead compliance hook references",
+          "locations": [
+            "settings.json:16 (permission for compliance-kelsi-andrews...)",
+            "settings.json:17 (permission for compliance-2026-03-04...)",
+            "settings.json:81 (command for compliance-kelsi-andrews...)",
+            "settings.json:86 (command for compliance-2026-03-04...)"
+          ],
+          "notes": "hooks/compliance/ contains only .gitkeep — both scripts confirmed missing"
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "hooks/guard-direct-edit.sh",
+        "dependents": ["settings.json PreToolUse Edit|Write matcher"],
+        "failure_mode": "If Python block fails, RESULT is empty, edit is blocked with generic message (lines 163-170). Fail-safe direction.",
+        "risk": "low"
+      },
+      {
+        "write_target": "hooks/inject-tier2-context.sh",
+        "dependents": ["settings.json UserPromptSubmit hook"],
+        "failure_mode": "If JSON escaping fails, output is malformed, Claude Code ignores it. No context enrichment for that prompt. Non-fatal.",
+        "risk": "low"
+      },
+      {
+        "write_target": "hooks/lib/stop_processor.py",
+        "dependents": ["hooks/session-learning-check.sh (spawns via nohup)"],
+        "failure_mode": "If fcntl.flock fails to acquire: process exits cleanly (existing behavior for 'already running'). If fcntl import fails: immediate error, no background processing that session.",
+        "risk": "low"
+      },
+      {
+        "write_target": "hooks/lib/om_write.py",
+        "dependents": [
+          "hooks/lib/stop_processor.py (stage_session_summary, stage_auto_distillation)",
+          "hooks/lib/hook_generator.py (om_write calls)",
+          "hooks/load-session-context.sh (prune_expired import)"
+        ],
+        "failure_mode": "If _connect_om() fails: om_write returns None with stderr log. All callers handle None return gracefully.",
+        "risk": "low"
+      },
+      {
+        "write_target": "hooks/load-session-context.sh",
+        "dependents": ["settings.json SessionStart hook — runs on every session"],
+        "failure_mode": "If a Python block errors: that section's output is missing from session context. Blocks are independent — one failure doesn't cascade. Worst case: no agenda displayed at session start.",
+        "risk": "medium"
+      },
+      {
+        "write_target": "hooks/guard-protected-files.sh",
+        "dependents": ["settings.json PreToolUse Edit|Write matcher"],
+        "failure_mode": "If permission file path change breaks lookup: edits blocked (current broken behavior when CLAUDE_SESSION_ID unset). Fix can only improve — the path no longer depends on unstable PID.",
+        "risk": "low"
+      },
+      {
+        "write_target": "hooks/lib/parse_hook_input.py (new file)",
+        "dependents": ["guard-direct-edit.sh, guard-protected-files.sh, track-skill-changes.sh, block-env-read.sh (after CQ-3 fix)"],
+        "failure_mode": "If script fails or is missing: python3 call returns empty string, each hook handles empty file_path gracefully (guard-direct-edit exits for empty FILE_DIR, etc.).",
+        "risk": "low"
+      },
+      {
+        "write_target": "settings.json",
+        "dependents": ["Claude Code runtime — all hooks, permissions, status line"],
+        "failure_mode": "If JSON is malformed: ALL hooks stop working. Must verify valid JSON after edit. If compliance entries removed correctly: 10s saved per Skill invocation.",
+        "risk": "medium (only if JSON validity not verified)"
+      }
+    ],
+    "gaps": [
+      "No test infrastructure for hook scripts — all changes verified manually",
+      "cost-alert.sh and track-skill-changes.sh also have shell interpolation into Python heredocs but are out of scope for this presearch",
+      "inject-tier2-context.sh line 74 uses raw bash `sqlite3` CLI (not subprocess) — fix should replace this with Python sqlite3 module in the story_detail block"
+    ]
+  }
+}

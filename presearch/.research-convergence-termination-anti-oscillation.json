@@ -1,0 +1,107 @@
+{
+  "angle": "Convergence, termination, and anti-oscillation",
+  "findings": [
+    {
+      "claim": "SWE-agent enforces hard step limits of 30-100 turns, with a mandatory submission command required to end work; failure to submit before hitting the limit is recorded as a failure.",
+      "source_url": "https://github.com/princeton-nlp/SWE-agent",
+      "confidence": "high"
+    },
+    {
+      "claim": "Aider defaults to 3 reflections (retry iterations) for auto-fix loops (--auto-test, --auto-lint). Configurable via --max-reflections flag since v0.85.0+.",
+      "source_url": "https://aider.chat/docs/config.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "OpenHands (formerly OpenDevin) sets a safety ceiling of 500 iterations but allows user-configurable lower limits.",
+      "source_url": "https://github.com/All-Hands-AI/OpenHands",
+      "confidence": "medium"
+    },
+    {
+      "claim": "AutoCodeRover uses a 10-iteration limit for context retrieval and 5-10 retries for patch generation, terminating when all tests pass or retry threshold is exhausted.",
+      "source_url": "https://arxiv.org/abs/2404.05427",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code's autonomous loops default to approximately 50 iterations (--max-iterations) and 30-50 turns (--max-turns) in headless/CI modes.",
+      "source_url": "https://docs.anthropic.com/en/docs/claude-code/overview",
+      "confidence": "medium"
+    },
+    {
+      "claim": "State-based oscillation detection uses cryptographic hashes (SHA-256) of modified files after each turn; if the codebase returns to a previously seen hash state, the system flags a reversion/oscillation.",
+      "source_url": "https://github.com/All-Hands-AI/OpenHands",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Agents maintain a 'Validation Matrix' mapping Patch ID to Test Results. If Patch N results in the same failing state as Patch N-2, a regression cycle is identified.",
+      "source_url": "https://arxiv.org/abs/2303.11366",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Tabu lists (borrowed from search algorithms) track previously attempted and failed code states, injecting them as negative constraints into the prompt to prevent the agent from repeating the same broken fix.",
+      "source_url": "https://arxiv.org/abs/2303.11366",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Reflexion (Shinn et al. 2023) introduces verbal reinforcement learning where agents generate natural language summaries of failures stored in episodic memory, achieving 91% pass@1 on HumanEval vs GPT-4's 80% baseline.",
+      "source_url": "https://arxiv.org/abs/2303.11366",
+      "confidence": "high"
+    },
+    {
+      "claim": "Fixed-point convergence from dynamical systems theory is applied: an agent has converged when further analysis produces no additional code changes and all constraints (linter, compiler, tests) are satisfied.",
+      "source_url": "https://arxiv.org/abs/2404.05427",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Top SWE-bench agents typically cost $1.26-$12.00 per resolved task, with budget agents (DeepSeek R1) at $0.15-$0.40. Total token usage per task is 150,000-250,000 tokens.",
+      "source_url": "https://www.swebench.com",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Context compaction triggers at ~100,000 tokens, summarizing previous turns to stay within 128k-200k context limits. Most top agents compact every ~20 turns.",
+      "source_url": "https://www.swebench.com",
+      "confidence": "medium"
+    },
+    {
+      "claim": "SWE-agent's ACI runs an automatic linter after every file edit, providing immediate structured feedback that prevents repeated syntax-error loops.",
+      "source_url": "https://github.com/princeton-nlp/SWE-agent",
+      "confidence": "high"
+    },
+    {
+      "claim": "Watchdog/validation agents use a secondary smaller model to review the primary agent's logs, detecting circular reasoning or repetitive file operations and issuing termination signals.",
+      "source_url": "https://github.com/All-Hands-AI/OpenHands",
+      "confidence": "low"
+    },
+    {
+      "claim": "Atomic action-verification pairs enforce that no change is finalized until all relevant tests pass; if a fix breaks a previously passing test, the system immediately reverts to the pre-fix state.",
+      "source_url": "https://arxiv.org/abs/2404.05427",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Advanced agents run validation suites multiple times to mitigate flaky test false-passes, sometimes varying random seeds or environments to confirm consistency.",
+      "source_url": "https://www.swebench.com",
+      "confidence": "low"
+    },
+    {
+      "claim": "Lou et al. (2021/2024) researched Regression Test Selection for APR (RTS-APR), detecting when new patches violate old invariants through selective test re-execution.",
+      "source_url": "https://scholar.google.com/scholar?q=regression+test+selection+automated+program+repair+Lou",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Mode switching is used as an oscillation breaker: when a loop is detected, the agent is forced from 'Fix' mode into 'Root Cause Analysis' mode, instructed to list all constraints before editing again.",
+      "source_url": "https://arxiv.org/abs/2303.11366",
+      "confidence": "medium"
+    }
+  ],
+  "key_insights": [
+    "The three-layer defense pattern is universal: (1) hard external limits (turn caps, token budgets, wall-clock timeouts) as the outer safety net, (2) behavioral detection (state hashing, validation matrices, tool-call frequency analysis) as the middle layer, and (3) architectural design choices (mandatory linting after edits, atomic action-verification pairs, tabu lists) as the inner prevention layer. No production system relies on just one layer.",
+    "Oscillation detection is an unsolved problem at the semantic level. Current systems detect exact-state cycles via hashing and near-cycles via test result history, but 'semantic oscillation' (different code that exhibits the same logical contradiction) requires either a secondary judge model or forced mode-switching to root cause analysis. The Reflexion paper's verbal memory approach is the most promising but adds latency and cost.",
+    "The practical sweet spot for retry budgets is remarkably low: Aider uses 3 reflections, AutoCodeRover uses 5-10, and even aggressive configurations rarely exceed 50-100 turns. This suggests that if an agent cannot converge within a small number of iterations, the problem requires a fundamentally different approach rather than more iterations -- consistent with the 'fail fast, escalate early' philosophy."
+  ],
+  "gaps": [
+    "No rigorous academic treatment of semantic oscillation detection (as opposed to exact-state cycle detection) was found -- most work focuses on syntactic or hash-based approaches",
+    "Specific implementation details of oscillation detection in Claude Code and Cursor are not publicly documented",
+    "No papers were found that formally prove convergence guarantees for LLM-based repair agents -- all current approaches use heuristic termination rather than provable convergence",
+    "Cross-file oscillation (where fixes in file A cause regressions in file B that cascade) has limited coverage beyond general regression testing strategies",
+    "Token-efficient oscillation detection methods (that don't require a secondary judge model) are underexplored in the literature"
+  ]
+}

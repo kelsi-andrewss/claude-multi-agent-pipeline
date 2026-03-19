@@ -1,0 +1,95 @@
+{
+  "slug": "portable-project-ai-decision-memory",
+  "skill": "clarify",
+  "scope": {
+    "files": 18,
+    "stories": 7,
+    "complexity": "large"
+  },
+  "route_hint": "standard",
+  "prev": ["presearch/.research-portable-project-ai-decision-memory.json"],
+  "data": {
+    "topic": "portable per-project AI decision memory",
+    "input_summary": "Core library for per-project decision tracking with vector search, plus Claude Code integration. Auto-discovers implicit decisions in legacy codebases, stores with file associations in a portable embedded DB, and dynamically injects relevant context at edit time via layered MCP + hooks + glob rules.",
+    "decisions": [
+      {
+        "area": "Storage portability strategy",
+        "choice": "Hybrid SQL dump — versioned SQL text dump (.claude/decisions.sql) committed to git, automatically applied to local SQLite + sqlite-vec index on first query or post-checkout hook",
+        "reasoning": "User chose hybrid over JSONL. SQL dump preserves relational structure (decisions, file associations, tags, confidence, status) while being text-based and git-diffable. Rebuild step creates the sqlite-vec vector index locally. Avoids binary merge conflicts of direct SQLite commit.",
+        "source": "user"
+      },
+      {
+        "area": "Embedding portability",
+        "choice": "FastEmbed ONNX + nomic-embed-text-v1.5 at 256d Matryoshka",
+        "reasoning": "Pure Python, no server, ~15ms/chunk CPU. 256d gives 98.8% of 768d quality with 3x storage reduction. Works on any machine with pip install. Replaces Ollama dependency for this specific use case (decisions are smaller than code chunks).",
+        "source": "user"
+      },
+      {
+        "area": "Auto-discovery approach",
+        "choice": "Phased: v1 comment/commit extraction (proven, low FP), v2 LLM implicit scan (novel, needs validation)",
+        "reasoning": "User chose phased approach. v1 ships the known-good (SATD-style comment/commit extraction) while v2 tackles the research gap (implicit decision detection from code behavior). This lets us ship working auto-discovery fast while building toward the novel capability.",
+        "source": "user"
+      },
+      {
+        "area": "Edit-time context injection",
+        "choice": "Three-layer injection: (1) MCP hook-triggered auto-injection as primary path, (2) generated glob rules as static fallback, (3) explicit MCP query as escape hatch",
+        "reasoning": "User wanted MCP+hooks but more robust. Three layers cover all scenarios: hook fires automatically when MCP server is running, glob rules work when it's not (new machine), explicit query handles semantic search beyond file-scoped matches. No single point of failure.",
+        "source": "user"
+      },
+      {
+        "area": "Decision lifecycle management",
+        "choice": "Decisions have status field: active, deprecated, superseded, violated. Superseded decisions link to their replacement.",
+        "reasoning": "Gemini identified this as an implied missing requirement. Decisions in software are rarely eternal — without lifecycle status, the AI provides stale context that contradicts modern project standards.",
+        "source": "gemini"
+      },
+      {
+        "area": "Decision provenance and source attribution",
+        "choice": "Every decision has a source field (human, ai-discovered, ai-proposed) and linked file paths + optional commit hashes as evidence",
+        "reasoning": "Gemini identified need to distinguish human decisions from AI-inferred patterns. Critical for trust — developers must be able to verify and override AI-proposed decisions.",
+        "source": "gemini"
+      }
+    ],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "Python/shell ecosystem — core library must be Python, installable via pip",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "SQLite3 already in use (epics.db, openmemory.sqlite) — consistent with existing patterns",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "OpenMemory MCP server exists — new MCP server for decisions must coexist, not replace",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "Must work on new machine after git clone — no Ollama or external service required for basic operation",
+        "source": "user"
+      },
+      {
+        "type": "requirement",
+        "value": "Scale to 100k+ LOC — sqlite-vec at 256d handles this in <20ms per query",
+        "source": "user"
+      },
+      {
+        "type": "requirement",
+        "value": "For developer's own projects first, then other teams — design for single-user first, team use later",
+        "source": "user"
+      },
+      {
+        "type": "scope",
+        "value": "No language-specific AST parsing in v1 — file/function level, not expression level",
+        "source": "user"
+      },
+      {
+        "type": "scope",
+        "value": "Complements OpenMemory (global), does not replace it — per-project scope only",
+        "source": "user"
+      }
+    ]
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "angle": "AI agent auto-fix implementations",
+  "findings": [
+    {
+      "claim": "Cursor AI Agent Mode uses a ReAct (Reasoning + Acting) loop that monitors the integrated terminal for non-zero exit codes, parses STDOUT/STDERR for stack traces and lint errors, and automatically reruns failing commands after applying fixes.",
+      "source_url": "https://cursor.com/features",
+      "confidence": "high"
+    },
+    {
+      "claim": "Cursor sends the last ~50 lines of terminal buffer plus relevant code snippets (identified by stack traces) and codebase embeddings (RAG) as context to the LLM for fix generation.",
+      "source_url": "https://cursor.com/features",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Cursor uses a specialized Code-Apply model to ensure semantic diffs from the reasoning model are applied surgically without breaking syntax, and creates git-like checkpoint stashes before each fix for safe rollback.",
+      "source_url": "https://cursor.com/features",
+      "confidence": "high"
+    },
+    {
+      "claim": "Aider uses an Architect-Editor pattern where the Architect (high-reasoning model) plans the fix logic and the Editor (faster model) generates Search/Replace blocks or Unified Diffs. If an edit fails to match the file, the mismatch error is fed back to the LLM for self-correction.",
+      "source_url": "https://aider.chat/docs/architect.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "Aider uses Tree-Sitter to parse the codebase and identify the exact semantic scope (function or class) where a linter error occurs, maintaining a Repository Map (structural index) to ensure cross-file dependencies are considered during fix generation.",
+      "source_url": "https://aider.chat/docs/config/adv-model-settings.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "Aider follows a Plan-Act-Verify-Retry pattern and is strictly git-native, committing every successful iteration with an AI-generated message. It validates fixes through a Verify stage using --test-cmd or --lint-cmd flags.",
+      "source_url": "https://aider.chat/docs/architect.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "SWE-agent uses an Agent-Computer Interface (ACI) with custom commands like view_file (100-line chunks) and a surgical line-based editor. Every edit command automatically triggers a background linter that rejects edits with syntax errors immediately before they are saved.",
+      "source_url": "https://swe-agent.com/",
+      "confidence": "high"
+    },
+    {
+      "claim": "SWE-agent requires the agent to first create a reproduction script (minimal failing test case). A fix is only considered successful when the reproduction script passes AND the broader test suite shows no regressions.",
+      "source_url": "https://swe-agent.com/",
+      "confidence": "high"
+    },
+    {
+      "claim": "SWE-agent is typically limited to 100 steps/actions per issue in benchmark configurations, and advanced versions explore multiple fix paths using Monte Carlo Tree Search (MCTS) to rank potential fixes by test success.",
+      "source_url": "https://www.swebench.com/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Devin operates in a sandboxed Ubuntu VM and follows a Plan-Act-Observe-Reflect loop. It treats any non-zero exit code or error log as new input for its reasoning engine, generating sub-plans to fix specific errors rather than failing outright.",
+      "source_url": "https://www.cognition.ai/blog/introducing-devin",
+      "confidence": "high"
+    },
+    {
+      "claim": "Devin maintains VM state snapshots (checkpoints). If a fix attempt leads to a rabbit hole or breaks more code, it restores a previous checkpoint and tries a different strategy. The loop terminates only when success criteria from the initial plan are verified by passing tests.",
+      "source_url": "https://devin.ai",
+      "confidence": "high"
+    },
+    {
+      "claim": "Devin includes self-healing dependency resolution: if a build fails due to a missing system library, it identifies the package from compiler output and installs it automatically via apt-get.",
+      "source_url": "https://www.zenml.io/blog/agentic-workflows-devin",
+      "confidence": "medium"
+    },
+    {
+      "claim": "GitHub Copilot Workspace uses a multi-agent architecture with specialized Plan, Act, Validate, and Repair agents. If validation fails, the Repair Agent ingests failing test logs and stack traces alongside current code state to propose surgical fixes, then re-validates in a loop.",
+      "source_url": "https://githubnext.com/projects/copilot-workspace",
+      "confidence": "high"
+    },
+    {
+      "claim": "Copilot Workspace integrates with Language Server Protocol (LSP) and the IDE Problems panel for error detection, and uses Repository Memory (via .github/copilot-instructions.md) and Session Memory to avoid repeating previously failed fix strategies.",
+      "source_url": "https://code.visualstudio.com/docs/copilot/workspace",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Claude Code uses a single-threaded Think-Act-Observe loop that continues executing tool calls as long as the model requests them, only terminating when it provides a final text response. It uses surgical diff-based Edit tool for changes and Bash tool for running tests and compilers.",
+      "source_url": "https://docs.anthropic.com/en/docs/build-with-claude/tool-use",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code has a context compressor that triggers at approximately 92% context window capacity, summarizing history and persisting essential state to files like CLAUDE.md to keep sessions responsive during long iterative fix loops.",
+      "source_url": "https://zenml.io/blog/claude-code-architecture",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Claude Code spawns sub-agents for high-volume or speculative tasks, which operate in isolated context windows and return only concise summaries to prevent main conversation bloat during multi-step repair work.",
+      "source_url": "https://promptlayer.com/blog/claude-code-internal-mechanics",
+      "confidence": "medium"
+    },
+    {
+      "claim": "On SWE-bench Verified (March 2025), top agents resolve ~79% of issues: Claude Opus 4.6 Thinking at 79.2%, Gemini 3 Pro Preview at 77.4%, GPT-5.4 at 77.2%. Performance is heavily dependent on the agentic scaffolding framework used, not just the base model.",
+      "source_url": "https://www.swebench.com/verified.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "On the harder SWE-bench Pro benchmark (multi-language, enterprise problems), top models currently score between 40-46%, indicating enterprise-level engineering remains a significant challenge despite near-saturation on the standard verified set.",
+      "source_url": "https://www.swebench.com",
+      "confidence": "high"
+    }
+  ],
+  "key_insights": [
+    "All successful auto-fix agents converge on a common pattern: detect errors from tool output (exit codes, stderr, test logs), feed error context plus relevant code back to the LLM, apply surgical edits (not full rewrites), re-validate by rerunning the failing command, and checkpoint/rollback on divergence. The key differentiator is HOW they scope context -- Aider uses Tree-Sitter structural maps, SWE-agent uses 100-line view windows, Cursor uses RAG embeddings, and Devin captures full VM state.",
+    "The most robust implementations have hard guardrails that prevent bad edits from persisting: SWE-agent's inline linter rejects syntactically broken edits before they are saved, Cursor's Code-Apply model validates diff application, and both Devin and Cursor use checkpoint/snapshot systems for multi-step rollback. These pre-validation gates are as important as the retry loop itself.",
+    "The Architect-Editor split pattern (used by Aider, and implicitly by Copilot Workspace's Plan/Repair agent separation) decouples reasoning about WHAT to fix from the mechanics of HOW to apply edits. This reduces edit-application failures, which are one of the most common failure modes -- Aider specifically feeds edit-match failures back to the LLM as a distinct error type separate from logical errors."
+  ],
+  "gaps": [
+    "Concrete retry limits and token budgets for Cursor and Devin -- both appear to have internal limits but exact numbers are not publicly documented",
+    "Claude Code's specific auto-fix behavior when tests fail -- whether it automatically reruns tests or requires user prompting is not clearly documented in public sources",
+    "Detailed comparison of fix success rates per retry iteration (e.g., what percentage of fixes succeed on attempt 1 vs 2 vs 3) -- no published data found",
+    "How these tools handle flaky tests or non-deterministic failures in their retry loops",
+    "Copilot Workspace iteration limits and whether the Repair Agent has a defined retry budget"
+  ]
+}

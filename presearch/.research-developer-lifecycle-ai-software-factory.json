@@ -1,0 +1,130 @@
+{
+  "slug": "developer-lifecycle-ai-software-factory",
+  "skill": "research",
+  "scope": {
+    "files": null,
+    "stories": null,
+    "complexity": null
+  },
+  "route_hint": null,
+  "prev": [".scope-developer-lifecycle-ai-software-factory.json"],
+  "data": {
+    "topic": "developer lifecycle best practices with AI — software factory patterns, AI-augmented SDLC, orchestration and decomposition, codebase intelligence, quality verification, human-AI trust",
+    "angles_generated": 5,
+    "partial_research": false,
+    "synthesized_findings": [
+      {
+        "theme": "Software Factory Architecture",
+        "claims": [
+          {"claim": "Industry converging on six-component factory: Orchestrator, Planner/Reasoning Engine, Sandbox Executor, Agent-Computer Interface, Memory (vector+RAG), Verification Pipeline. StrongDM, GitHub Copilot Workspace, Factory.ai independently arrived at nearly identical decompositions.", "source_urls": ["https://swe-agent.com/", "https://simonwillison.net/2026/Feb/7/software-factory/", "https://www.factory.ai/"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "StrongDM Dark Factory: Level 5 autonomous — no human code writing or review. Components: Attractor (coding agent), holdout BDD scenarios (invisible to agent), Digital Twin Universe (third-party service clones), CXDB (immutable DAG), Evaluator (separate validation agent). Train/test isolation prevents test gaming.", "source_urls": ["https://simonwillison.net/2026/Feb/7/software-factory/", "https://hackernoon.com/the-dark-factory-pattern-moving-from-ai-assisted-to-fully-autonomous-coding"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Microsoft AI-led SDLC: Spec Kit (accepts prompt + organizational constitution, outputs structured tasks) → GitHub Copilot Coding Agent → Code Quality Review → GitHub Actions → SRE Agent.", "source_urls": ["https://techcommunity.microsoft.com/blog/appsonazureblog/an-ai-led-sdlc-building-an-end-to-end-agentic-software-development-lifecycle-wit/4491896"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Three competing architectures: (1) Multi-agent symphony (Google Jules, Amazon Kira, Factory.ai), (2) Single-threaded master loop (Claude Code), (3) Static pipeline/Agentless ($0.34/issue vs $10+). Winning pattern depends on task complexity.", "source_urls": ["https://arxiv.org/abs/2407.01489", "https://promptlayer.com/blog/claude-code-architecture-reverse-engineered"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "MCP (Model Context Protocol) emerging as universal standard for agent tool/context discovery. GitHub/Microsoft deprecated older extension models Nov 2025 in favor of MCP.", "source_urls": ["https://www.anthropic.com/news/model-context-protocol"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "Shared state backbone — not the LLM itself — is the critical architectural differentiator: OpenHands pub/sub Event Stream, Factory.ai CI/CD-triggered Droids, StrongDM CXDB.", "source_urls": ["https://github.com/All-Hands-AI/OpenHands"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "JM Family deployed BAQA Genie: 5 specialized agents (requirements, story writing, coding, documentation, QA). Cut requirements+test design from weeks to days, saved 60% QA time.", "source_urls": ["https://azure.microsoft.com/en-us/blog/agent-factory-the-new-era-of-agentic-ai-common-use-cases-and-design-patterns/"], "confidence": "high", "agent_attribution": "claude"}
+        ],
+        "key_insight": "The factory pattern has identifiable, converging components across independent implementations. The critical architectural invariant is train/test isolation: the code generation subsystem must be completely isolated from the verification subsystem to prevent test gaming."
+      },
+      {
+        "theme": "Orchestration and Task Decomposition",
+        "claims": [
+          {"claim": "AgentConductor (Feb 2025): dynamic DAG topology outperforms fixed-topology baselines by up to 14.6% pass@1 on APPS (58.8% vs 44.9%) while reducing token usage 68%. Key: density-aware scaling to task difficulty.", "source_urls": ["https://arxiv.org/html/2602.17100"], "confidence": "high", "agent_attribution": "claude"},
+          {"claim": "Hierarchical validation gates improve iteration success rates from 22.6% to 41.1%. Per-step validation matters more than graph topology itself.", "source_urls": ["https://arxiv.org/abs/2406.01304"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "BMAD v6.1.0: 19+ specialized agents, 50+ workflows, spec-first sequential handoffs. 55% faster complex task completion, 90% token reduction via document sharding. Takes 5.5hrs vs 15min vibe coding but produces stable auditable code.", "source_urls": ["https://github.com/bmadcode/bmad-method"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "Ralph: stateless iterative loops with Git as memory and backpressure gates (tests, linting, type-checking). Fresh AI instance each iteration prevents context drift.", "source_urls": ["https://github.com/snarktank/ralph"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "Claude Code agent teams: dependency-ordered tasks with auto-unblock. But official docs warn that sequential tasks or highly interdependent work should use single-session subagents — DAG not universally superior to sequential.", "source_urls": ["https://code.claude.com/docs/en/agent-teams"], "confidence": "high", "agent_attribution": "claude"},
+          {"claim": "SWE-bench Verified (March 2026): Claude Sonnet 5 at 82.1%, Opus 4.5 at 80.9%. Planning-based agents score 10-20% higher on long-horizon multi-module tasks vs reactive agents.", "source_urls": ["https://www.swebench.com/"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "Minimalist agentless approaches sometimes outperform complex multi-agent on simpler benchmarks. Complexity is not always beneficial.", "source_urls": ["https://arxiv.org/abs/2407.01489"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "CodePlan (Microsoft Research) builds dependency graphs via AST and class hierarchy for Change May-Impact Analysis, orders edits using topological sorting.", "source_urls": ["https://arxiv.org/abs/2309.12499"], "confidence": "high", "agent_attribution": "gemini"}
+        ],
+        "key_insight": "The three orchestration archetypes (structured DAG, sequential handoff, stateless loop) each dominate different problem shapes. But per-step validation gates — not the topology — are the critical differentiator, nearly doubling iteration success rates."
+      },
+      {
+        "theme": "Quality Verification and Self-Healing",
+        "claims": [
+          {"claim": "ReVeal (MSRA, June 2025): iterative generation-verification loop improves pass@1 from 36.9% to 42.4% over 19 turns. 10.56% of incorrect solutions self-correct, only 0.18% degrade. Model trained on 3 turns surpasses larger models at 20+ inference turns.", "source_urls": ["https://arxiv.org/html/2506.11442v1", "https://arxiv.org/abs/2506.11442"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Foundational self-repair architecture: Generator, Executor (sandbox), Critic/Reflector, Episodic Memory. Established by Self-Debug, Reflexion, LEVER (2023). The shift is from LLM-as-Judge to Environment-as-Judge.", "source_urls": ["https://arxiv.org/abs/2306.09896", "https://arxiv.org/abs/2303.11366"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Aider: Architect/Editor pattern, auto-runs linters+tests after every edit, retries up to 6 times. 88% on Polyglot benchmark.", "source_urls": ["https://aider.chat/docs/benchmarks.html"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "Fault-tolerant sandbox: 100% interception rate for high-risk commands, 100% rollback success, only 14.5% latency overhead (~1.8s/transaction) using copy-on-write filesystem snapshots.", "source_urls": ["https://arxiv.org/html/2512.12806v1"], "confidence": "high", "agent_attribution": "claude"},
+          {"claim": "Diminishing returns beyond 3-5 repair iterations (NeurIPS 2024). Balancing initial generation quality with limited repair yields superior results vs more iterations.", "source_urls": ["https://proceedings.neurips.cc/paper_files/paper/2024/file/d5c56ec4f69c9a473089b16000d3f8cd-Paper-Conference.pdf"], "confidence": "medium", "agent_attribution": "claude"},
+          {"claim": "SWE-bench resolve rates: ~18% single-agent 2024 → 53-79% multi-agent 2025-2026 with sandboxed CI. But SWE-CI shows zero-regression rates below 0.25 on long-horizon CI maintenance — isolated tasks pass, cumulative correctness degrades.", "source_urls": ["https://arxiv.org/html/2603.03823v1", "https://vals.ai/blog/swe-bench-2025-state-of-the-art"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "25% of devs estimate 1-in-5 AI suggestions contain errors (Qodo, n=609). Teams using AI code review: 81% report quality improvement vs 55% without.", "source_urls": ["https://www.qodo.ai/reports/state-of-ai-code-quality/"], "confidence": "high", "agent_attribution": "claude"},
+          {"claim": "Spec-Driven Development (SDD): agents generate specs + acceptance tests BEFORE implementation. PR gate only opens if agent provides logs proving tests passed in sandbox.", "source_urls": ["https://devopstory.com/ai-agent-cicd-integration"], "confidence": "medium", "agent_attribution": "gemini"}
+        ],
+        "key_insight": "80% first-run CI pass rate requires high-quality initial generation plus bounded self-repair (3-5 iterations), not unbounded loops. The self-healing loop itself is the primary quality driver — iteration count matters more than model size. But cumulative correctness across commits degrades even when single-task pass rates are high."
+      },
+      {
+        "theme": "Codebase Intelligence and Convention Learning",
+        "claims": [
+          {"claim": "Industry standard is Three-Index Fusion: BM25 keyword + vector embeddings + structural graph (AST/SCIP). Removing graph component degrades cross-file F1 by 4-6%.", "source_urls": ["https://arxiv.org/html/2510.04905v1", "https://greptile.com"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "GraphCoder: Code Context Graph with control flow + data dependence + control dependence edges. +6.06% Exact Match, +6.23% Identifier EM over RepoCoder on RepoEval. Language-agnostic via tree-sitter.", "source_urls": ["https://arxiv.org/html/2406.07003v2", "https://arxiv.org/abs/2406.07003"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Sourcegraph Cody deprecated embeddings for Enterprise due to privacy/scaling. Current: BM25 via Zoekt + SCIP/LSIF semantic graph. Deep Cody adds multi-hop agentic retrieval.", "source_urls": ["https://sourcegraph.com/blog/how-cody-understands-your-codebase", "https://sourcegraph.com/blog/fall-recap-2024"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Voyage-Code-3 outperforms OpenAI text-embedding-3-large by 13.8% across 32 code retrieval datasets. Supports 32K context, Matryoshka embeddings, binary quantization for 384x storage reduction.", "source_urls": ["https://www.voyageai.com/blog/voyage-code-3"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "Aider RepoMap: tree-sitter symbols → file dependency graph → PageRank ranking → compressed skeleton maps within token budgets (~1024 tokens).", "source_urls": ["https://aider.chat/docs/repomap.html"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "Convention enforcement via hierarchical instruction: Cursor .cursorrules (MDC+glob), GitHub copilot-instructions.md (personal>repo>org priority). Automatic inference from code is unsolved in production.", "source_urls": ["https://docs.cursor.com", "https://github.com/PatrickJS/awesome-cursorrules"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "RepoCoder: generate-then-retrieve iterative loop improves repository-level style alignment by 10%+. Convention compliance treated as retrieval problem, not rule-matching.", "source_urls": ["https://arxiv.org/abs/2303.12570"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Structural collapsing: keep class structure + method signatures visible, replace irrelevant bodies with placeholders. Preserves architectural context while saving thousands of tokens.", "source_urls": ["https://about.sourcegraph.com/blog/how-cody-understands-your-codebase"], "confidence": "high", "agent_attribution": "gemini"},
+          {"claim": "Tree-sitter AST-aware chunking: up to 82% improvement in retrieval precision over fixed-size chunking (cAST research).", "source_urls": ["https://arxiv.org/abs/2412.01234"], "confidence": "high", "agent_attribution": "gemini"}
+        ],
+        "key_insight": "No single retrieval method suffices — hybrid three-index fusion is the standard. But the defining 2024-2025 shift is from single-pass retrieval to agentic multi-hop context curation (Deep Cody, Greptile v3). Convention extraction from code remains unsolved in production — current tools use explicit developer-authored rules, not learned inference."
+      },
+      {
+        "theme": "Human-AI Trust and Review UX",
+        "claims": [
+          {"claim": "Trust-adoption paradox: 84% usage, 29% trust (2025). Down 11pts from 2024. 96% don't fully trust AI code, but only 48% always verify before committing.", "source_urls": ["https://stackoverflow.blog/2026/02/18/closing-the-developer-ai-trust-gap/", "https://www.sonarsource.com/company/press-releases/sonar-data-reveals-critical-verification-gap-in-ai-coding/"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "38% say reviewing AI code requires MORE effort than human code. Reviewers miss 40% more bugs in AI code due to 'veneer of correctness' (perfect syntax, logical errors). Complex AI PRs wait 4.6x longer in review queues.", "source_urls": ["https://www.itpro.com/software/development/software-developers-not-checking-ai-generated-code-verification-debt", "https://microsoft.com/en-us/research/publication/understanding-trust-in-ai-code/", "https://softwareseni.com/blog/ai-code-generation-vs-human-review"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Reviewing the conversation/plan matters as much as the diff. The human reviewer role shifts from line-by-line inspection to understanding intent and risk.", "source_urls": ["https://addyo.substack.com/p/code-review-in-the-age-of-ai"], "confidence": "high", "agent_attribution": "claude"},
+          {"claim": "PR Contract pattern: intent, proof of functionality, risk tier, review focus areas. Qodo PR-Agent implements structured walkthrough with mandatory rationale per hunk.", "source_urls": ["https://addyo.substack.com/p/code-review-in-the-age-of-ai", "https://github.com/Codium-ai/pr-agent"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Progressive autonomy: Shadow Mode → Review-First → Sandboxed Autonomy → Permission Escalation. Situational autonomy (dynamic adjustment by context) produces best team performance (CHI 2024).", "source_urls": ["https://dl.acm.org/doi/10.1145/3613904.3642564", "https://arxiv.org/abs/2410.05231"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Adaptive verbal cues outperform continuous transparency displays for trust calibration. Override rates shift from 17% to 63% with adaptive warnings.", "source_urls": ["https://pmc.ncbi.nlm.nih.gov/articles/PMC7034851/"], "confidence": "high", "agent_attribution": "claude"},
+          {"claim": "Trust asymmetry: 3 positive recommendations to build trust, 1 bad one to lose it.", "source_urls": ["https://arxiv.org/abs/2305.11248"], "confidence": "medium", "agent_attribution": "claude"},
+          {"claim": "AI-generated code requires 2x more rework within 30-90 days despite 80-90% initial acceptance rate. GitClear: 39.9% decrease in refactoring, 8x increase in duplicated code attributed to AI.", "source_urls": ["https://propelcode.ai/blog/measuring-ai-engineering-impact", "https://devclass.com/2024/01/26/gitclear-data-shows-ai-coding-leads-to-decline-in-code-quality/"], "confidence": "high", "agent_attribution": "both"},
+          {"claim": "Three design dimensions for trust: communicating AI performance, allowing preference configuration, offering mechanism indicators to support validation.", "source_urls": ["https://arxiv.org/abs/2305.11248"], "confidence": "high", "agent_attribution": "claude"}
+        ],
+        "key_insight": "The velocity gained during AI-assisted authoring is neutralized by downstream review bottlenecks: higher cognitive load, 4.6x longer review queues, 40% more missed bugs. Sustainable trust requires structured verification contracts (plan-first, rationale, impact matrices) and progressive autonomy — not just better code."
+      }
+    ],
+    "angle_summaries": [
+      {"angle": "Software Factory Architecture", "source": "both", "finding_count": 34, "key_insights": ["Six-component canonical factory architecture converging independently across implementations", "Train/test isolation is the critical architectural invariant", "Shared state backbone matters more than LLM capability"]},
+      {"angle": "Orchestration and Task Decomposition", "source": "both", "finding_count": 32, "key_insights": ["DAG, sequential, and stateless loops each dominate different problem shapes", "Per-step validation gates nearly double iteration success", "Minimalist approaches sometimes beat complex multi-agent"]},
+      {"angle": "Quality Verification and Self-Healing", "source": "both", "finding_count": 34, "key_insights": ["Self-healing loops are the primary quality driver", "Diminishing returns beyond 3-5 repair iterations", "Cumulative correctness degrades even when single-task pass rates are high"]},
+      {"angle": "Codebase Intelligence", "source": "both", "finding_count": 41, "key_insights": ["Three-index fusion is standard (BM25+vector+graph)", "Agentic multi-hop retrieval is the 2024-2025 shift", "Convention extraction from code is unsolved in production"]},
+      {"angle": "Human-AI Trust and Review UX", "source": "both", "finding_count": 43, "key_insights": ["Trust-adoption paradox widening (84% use, 29% trust)", "Review bottleneck neutralizes authoring velocity", "Structured verification contracts and progressive autonomy are emerging solutions"]}
+    ],
+    "citations": [
+      {"url": "https://arxiv.org/html/2602.17100", "title": "AgentConductor: Topology Evolution for Multi-Agent Code Generation", "quality": "authoritative", "referenced_by": ["Orchestration"]},
+      {"url": "https://arxiv.org/html/2506.11442v1", "title": "ReVeal: Self-Evolving Code Agents via Iterative Generation-Verification", "quality": "authoritative", "referenced_by": ["Quality Verification"]},
+      {"url": "https://simonwillison.net/2026/Feb/7/software-factory/", "title": "StrongDM Dark Factory", "quality": "authoritative", "referenced_by": ["Factory Architecture"]},
+      {"url": "https://sourcegraph.com/blog/how-cody-understands-your-codebase", "title": "How Cody understands your codebase", "quality": "authoritative", "referenced_by": ["Codebase Intelligence"]},
+      {"url": "https://stackoverflow.blog/2026/02/18/closing-the-developer-ai-trust-gap/", "title": "Closing the developer AI trust gap", "quality": "authoritative", "referenced_by": ["Trust"]},
+      {"url": "https://addyo.substack.com/p/code-review-in-the-age-of-ai", "title": "Code Review in the Age of AI — Addy Osmani", "quality": "authoritative", "referenced_by": ["Trust"]},
+      {"url": "https://code.claude.com/docs/en/agent-teams", "title": "Claude Code Agent Teams", "quality": "authoritative", "referenced_by": ["Orchestration"]},
+      {"url": "https://arxiv.org/abs/2406.07003", "title": "GraphCoder: Code Context Graph Retrieval", "quality": "authoritative", "referenced_by": ["Codebase Intelligence"]},
+      {"url": "https://github.com/bmadcode/bmad-method", "title": "BMAD Method v6.1.0", "quality": "authoritative", "referenced_by": ["Orchestration"]},
+      {"url": "https://hackernoon.com/the-dark-factory-pattern-moving-from-ai-assisted-to-fully-autonomous-coding", "title": "The Dark Factory Pattern", "quality": "authoritative", "referenced_by": ["Factory Architecture", "Quality Verification"]}
+    ],
+    "conflicts": [
+      {
+        "topic": "Optimal orchestration topology",
+        "gemini_claim": {"claim": "DAG-based planning outperforms by 10-20% on long-horizon multi-module tasks", "source_urls": ["https://arxiv.org/abs/2406.01304"]},
+        "claude_claim": {"claim": "Claude Code docs explicitly warn sequential tasks should use single-session subagents, not teams. DAG not universally superior.", "source_urls": ["https://code.claude.com/docs/en/agent-teams"]},
+        "credibility_assessment": "Both are valid — they apply to different task shapes. DAG wins for parallel-decomposable work, sequential wins for highly interdependent changes. The task's dependency structure determines the right topology."
+      },
+      {
+        "topic": "Value of iteration count in self-repair",
+        "gemini_claim": {"claim": "ReVeal model continues improving over 20+ turns at inference, surpassing larger models", "source_urls": ["https://arxiv.org/abs/2506.11442"]},
+        "claude_claim": {"claim": "NeurIPS 2024 repair research shows diminishing or negative returns beyond moderate retry budgets (3-5 iterations)", "source_urls": ["https://proceedings.neurips.cc/paper_files/paper/2024/file/d5c56ec4f69c9a473089b16000d3f8cd-Paper-Conference.pdf"]},
+        "credibility_assessment": "Both peer-reviewed. ReVeal uses a specifically RL-trained verification loop; the NeurIPS paper tests general-purpose LLMs. The takeaway: trained self-repair loops sustain value at high iterations, general-purpose LLM retry does not."
+      }
+    ],
+    "gaps": [
+      "No head-to-head benchmark comparing DAG vs sequential vs unconstrained on identical codebases",
+      "Convention inference from code (without explicit rules) is unsolved in production",
+      "No cost-benefit analysis of self-healing loop iterations vs quality gains",
+      "Cross-language polyglot microservice mapping largely unexplored",
+      "No longitudinal data on AI-driven code duplication's impact on maintainability",
+      "Capturing architectural rationale from non-code sources (PRs, docs, meetings) — all current systems only extract from code"
+    ]
+  }
+}

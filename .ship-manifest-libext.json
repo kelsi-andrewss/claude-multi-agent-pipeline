@@ -1,0 +1,50 @@
+{
+  "slug": "validator-library-extension",
+  "scope": {
+    "files": 6,
+    "stories": 2,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": null,
+  "skill": "factory",
+  "factory_spec": {
+    "product": "apex-validator",
+    "pattern": "library-extension",
+    "entity": "Validator",
+    "fields": [
+      {"name": "semver", "type": "string"},
+      {"name": "cron", "type": "string"},
+      {"name": "jwt", "type": "string"}
+    ]
+  },
+  "decision_adaptations": {
+    "conflicts_presented": 0,
+    "warnings": 0
+  },
+  "data": {
+    "epic_id": "epic-199",
+    "dev_branch": "dev",
+    "project_root": "/Users/kelsiandrews/gauntlet/apex-validator",
+    "stories": [
+      {
+        "id": "story-896",
+        "title": "Validator — semver/cron/jwt implementation",
+        "agent": "architect",
+        "detail_file": "/tmp/gemini/story-896.md",
+        "stage_type": "implementation",
+        "depends_on": [],
+        "parallel_group": 0
+      },
+      {
+        "id": "story-897",
+        "title": "Validator — test suite",
+        "agent": "architect",
+        "detail_file": "/tmp/gemini/story-897.md",
+        "stage_type": "test_suite",
+        "depends_on": ["story-896"],
+        "parallel_group": 1
+      }
+    ]
+  }
+}

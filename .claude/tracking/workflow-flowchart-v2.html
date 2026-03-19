@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Orchestration Workflow v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 24px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; color: #e6edf3; }
+  h2 { font-size: 15px; font-weight: 500; margin: 24px 0 8px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  .charts { display: flex; flex-direction: column; gap: 32px; max-width: 1200px; margin: 0 auto; }
+  .chart-section { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; }
+  .chart-section h2 { margin-top: 0; }
+  .mermaid { display: flex; justify-content: center; }
+  .mermaid svg { max-width: 100%; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid #30363d; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b949e; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot-skill { background: #58a6ff; }
+  .dot-agent { background: #f0883e; }
+  .dot-artifact { background: #3fb950; }
+  .dot-db { background: #bc8cff; }
+  .dot-gate { background: #f85149; }
+  .dot-research { background: #d2a8ff; }
+  .note { font-size: 12px; color: #8b949e; margin-top: 8px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>Orchestration Workflow v2</h1>
+<p class="subtitle">~/.claude pipeline — 2026-03-13</p>
+
+<div class="charts">
+
+<div class="chart-section">
+<h2>1. Pre-research Pipeline — /presearch</h2>
+<pre class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#1f6feb', 'primaryTextColor': '#fff', 'primaryBorderColor': '#388bfd', 'lineColor': '#484f58', 'secondaryColor': '#161b22', 'tertiaryColor': '#0d1117', 'fontSize': '13px' }}}%%
+flowchart LR
+    A["Topic / requirements.md"] --> B["/presearch\n(orchestrator)"]
+    B --> C["/scope\nproject definition\n+ complexity class"]
+    C -->|".scope-slug.json"| D["/research\nfan-out parallel:\nClaude + Gemini angles\n→ web-researcher agents"]
+    D -->|".research-slug.json"| EF["/clarify + /scout\n(parallel)"]
+    EF -->|".clarify + .scout"| G["/briefing\nGemini synthesis\n+ Claude critique"]
+    G -->|"presearch/slug.md"| H["/ship"]
+
+    C -.->|"scope small"| QF["/quickfix\n(shortcut)"]
+    D -.->|"scope small"| QF
+    EF -.->|"scope small"| QF
+
+    style B fill:#58a6ff,stroke:#388bfd,color:#000
+    style C fill:#d2a8ff,stroke:#8957e5,color:#000
+    style D fill:#d2a8ff,stroke:#8957e5,color:#000
+    style EF fill:#d2a8ff,stroke:#8957e5,color:#000
+    style G fill:#d2a8ff,stroke:#8957e5,color:#000
+    style H fill:#1f6feb,stroke:#388bfd,color:#fff
+    style QF fill:#58a6ff,stroke:#388bfd,color:#000
+</pre>
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot dot-skill"></div> Orchestrator skill</div>
+  <div class="legend-item"><div class="legend-dot dot-research"></div> Research / analysis stage</div>
+</div>
+<p class="note">Each stage writes a JSON artifact consumed by the next. /quickfix shortcuts available when scope is small enough.</p>
+</div>
+
+<div class="chart-section">
+<h2>2. Ship Pipeline — /ship (default for all new work)</h2>
+<pre class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#1f6feb', 'primaryTextColor': '#fff', 'primaryBorderColor': '#388bfd', 'lineColor': '#484f58', 'secondaryColor': '#161b22', 'tertiaryColor': '#0d1117', 'fontSize': '13px' }}}%%
+flowchart TD
+    A["Idea / PRD / presearch briefing"] --> B["/ship\n(orchestrator)"]
+    B --> C{Mode?}
+    C -->|"--quickfix"| QF["/quickfix"]
+    C -->|"inline, PRD,\nor briefing"| D["/plan-stories\nplanner agent → Gemini\n→ epic + stories in DB"]
+
+    D -->|".ship-manifest.json"| E["/draft-plans\n1 background agent per story\n→ plans/*.md"]
+    E -->|"plans/*.md"| F["/critique\nloop until NMIP\n→ Gemini fresh eyes"]
+    F --> G["/env-preflight\nscan for API keys,\nenv vars"]
+    G --> H["/run-stories\nparallel coders\nin worktrees"]
+
+    H --> I1["Coder 1\nquick-fixer\nor architect"]
+    H --> I2["Coder 2"]
+    H --> I3["Coder N"]
+
+    I1 --> R["Reviewer\n(per story)"]
+    I2 --> R
+    I3 --> R
+    R --> T["Unit-tester\n(per story)"]
+    T --> M["/merge-worktree\n→ dev branch"]
+    M --> V["/verify\nreview + build + test\n+ acceptance criteria"]
+    V --> DONE["dev → main"]
+
+    QF --> QW["Coder\n(worktree)"]
+    QW --> QM["/merge-worktree\n→ dev"]
+
+    style A fill:#161b22,stroke:#484f58,color:#c9d1d9
+    style B fill:#1f6feb,stroke:#388bfd,color:#fff
+    style D fill:#58a6ff,stroke:#388bfd,color:#000
+    style E fill:#58a6ff,stroke:#388bfd,color:#000
+    style F fill:#f85149,stroke:#da3633,color:#fff
+    style G fill:#f85149,stroke:#da3633,color:#fff
+    style H fill:#58a6ff,stroke:#388bfd,color:#000
+    style V fill:#f85149,stroke:#da3633,color:#fff
+    style I1 fill:#f0883e,stroke:#d47616,color:#000
+    style I2 fill:#f0883e,stroke:#d47616,color:#000
+    style I3 fill:#f0883e,stroke:#d47616,color:#000
+    style R fill:#f0883e,stroke:#d47616,color:#000
+    style T fill:#f0883e,stroke:#d47616,color:#000
+    style M fill:#3fb950,stroke:#238636,color:#000
+    style DONE fill:#3fb950,stroke:#238636,color:#000
+    style QF fill:#58a6ff,stroke:#388bfd,color:#000
+    style QW fill:#f0883e,stroke:#d47616,color:#000
+    style QM fill:#3fb950,stroke:#238636,color:#000
+</pre>
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot dot-skill"></div> Skill (orchestrator)</div>
+  <div class="legend-item"><div class="legend-dot dot-agent"></div> Background agent</div>
+  <div class="legend-item"><div class="legend-dot dot-artifact"></div> Merge / output</div>
+  <div class="legend-item"><div class="legend-dot dot-gate"></div> Quality gate</div>
+</div>
+</div>
+
+<div class="chart-section">
+<h2>3. Coder Lifecycle — inside /run-stories</h2>
+<pre class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#1f6feb', 'primaryTextColor': '#fff', 'primaryBorderColor': '#388bfd', 'lineColor': '#484f58', 'secondaryColor': '#161b22', 'tertiaryColor': '#0d1117', 'fontSize': '13px' }}}%%
+flowchart TD
+    A["Story ready\n+ plan file"] --> B{"Agent type?"}
+    B -->|"≤2 files, no protected"| C["quick-fixer\n(Sonnet)"]
+    B -->|">2 files or\nprotected/schema"| D["architect\n(Sonnet)"]
+
+    C --> E{"Haiku eligible?\n1 file + exact code\n+ no regex/conditionals\n+ not pipeline file"}
+    E -->|yes| F["quick-fixer\n(Haiku)"]
+    E -->|no| C2["quick-fixer\n(Sonnet)"]
+
+    F --> G{Result}
+    C2 --> G
+    D --> G
+
+    G -->|"DONE"| H["Reviewer → Tester → Merge"]
+    G -->|"NEED_DECISION"| I["Main session picks\n→ resume agent"]
+    G -->|"BLOCKED (1st)"| J["Retry same model"]
+    G -->|"BLOCKED (2nd)"| K["Escalate:\nSonnet → Opus\n(architect only)"]
+    K -->|"still BLOCKED"| L["Mark story blocked"]
+
+    I --> G
+
+    style C fill:#f0883e,stroke:#d47616,color:#000
+    style D fill:#f0883e,stroke:#d47616,color:#000
+    style F fill:#f0883e,stroke:#d47616,color:#000
+    style C2 fill:#f0883e,stroke:#d47616,color:#000
+    style H fill:#3fb950,stroke:#238636,color:#000
+    style L fill:#f85149,stroke:#da3633,color:#fff
+</pre>
+</div>
+
+<div class="chart-section">
+<h2>4. Branch Model</h2>
+<pre class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#1f6feb', 'primaryTextColor': '#fff', 'primaryBorderColor': '#388bfd', 'lineColor': '#484f58', 'secondaryColor': '#161b22', 'tertiaryColor': '#0d1117', 'fontSize': '13px' }}}%%
+flowchart BT
+    S1["story-NNN\n(worktree)"] -->|"/merge-worktree"| DEV["dev"]
+    S2["story-NNN\n(worktree)"] -->|"/merge-worktree"| DEV
+    HF["hotfix/slug"] -->|"direct merge"| DEV
+    QF["quickfix/slug\n(worktree)"] -->|"/merge-worktree"| DEV
+    DEV -->|"/verify passes\nthen merge"| MAIN["main\n(production)"]
+
+    style MAIN fill:#3fb950,stroke:#238636,color:#000
+    style DEV fill:#58a6ff,stroke:#388bfd,color:#000
+    style S1 fill:#f0883e,stroke:#d47616,color:#000
+    style S2 fill:#f0883e,stroke:#d47616,color:#000
+    style HF fill:#d2a8ff,stroke:#8957e5,color:#000
+    style QF fill:#d2a8ff,stroke:#8957e5,color:#000
+</pre>
+<p class="note">Everything merges to dev. Only dev merges to main. No direct commits to main or dev.</p>
+</div>
+
+<div class="chart-section">
+<h2>5. Learning Loop — corrections → behavioral prefs → compliance hooks</h2>
+<pre class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#1f6feb', 'primaryTextColor': '#fff', 'primaryBorderColor': '#388bfd', 'lineColor': '#484f58', 'secondaryColor': '#161b22', 'tertiaryColor': '#0d1117', 'fontSize': '13px' }}}%%
+flowchart TD
+    A["User correction\nin session"] --> B["corrections.md\n(manual + AUTO-detected)"]
+    B --> C["Stop hook\nsignal_processor.py"]
+    C --> D["correction_groups\ntable (epics.db)"]
+    C --> DP["decision_preferences\ntable (epics.db)"]
+    D --> E{"count ≥ 3?"}
+    E -->|"no"| F["accumulating\n(wait for more)"]
+    E -->|"yes"| G["pending_promotion"]
+    G --> H["session-learning-check.sh\n(next stop hook)"]
+    H --> I["Auto-distill →\nbehavioral-prefs.md"]
+    H --> J["hook_generator.py\nclassify hookability"]
+    J --> K{"hookable?"}
+    K -->|"tool/CLI pattern"| L["Generate compliance hook\n→ hooks/compliance/\n→ register in settings.json"]
+    K -->|"style/tone/judgment"| M["Log to OpenMemory\n(not enforceable)"]
+    I --> N["om_write.py\n→ OpenMemory"]
+
+    DP --> P["pm_predict_preference\n(queried next session)"]
+
+    style A fill:#f85149,stroke:#da3633,color:#fff
+    style B fill:#3fb950,stroke:#238636,color:#000
+    style D fill:#bc8cff,stroke:#8957e5,color:#000
+    style DP fill:#bc8cff,stroke:#8957e5,color:#000
+    style G fill:#f0883e,stroke:#d47616,color:#000
+    style I fill:#3fb950,stroke:#238636,color:#000
+    style L fill:#f85149,stroke:#da3633,color:#fff
+    style M fill:#bc8cff,stroke:#8957e5,color:#000
+    style N fill:#bc8cff,stroke:#8957e5,color:#000
+</pre>
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot dot-gate"></div> Correction / hook</div>
+  <div class="legend-item"><div class="legend-dot dot-artifact"></div> File output</div>
+  <div class="legend-item"><div class="legend-dot dot-db"></div> Database / OpenMemory</div>
+  <div class="legend-item"><div class="legend-dot dot-agent"></div> Pending action</div>
+</div>
+</div>
+
+<div class="chart-section">
+<h2>6. Roles & Model Selection</h2>
+<pre class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#1f6feb', 'primaryTextColor': '#fff', 'primaryBorderColor': '#388bfd', 'lineColor': '#484f58', 'secondaryColor': '#161b22', 'tertiaryColor': '#0d1117', 'fontSize': '13px' }}}%%
+flowchart LR
+    subgraph Main["Main Session"]
+        direction TB
+        M1["Orchestrate skills"]
+        M2["Write plan files"]
+        M3["Critique plans"]
+        M4["Merge decisions"]
+        M5["Sonnet default\nOpus if high-risk"]
+    end
+
+    subgraph Gemini["Gemini MCP"]
+        direction TB
+        G1["pm_plan_stories\npm_plan_story"]
+        G2["Research / analyze"]
+        G3["Audit / find-bug"]
+        G4["Writes to epics.db"]
+    end
+
+    subgraph Coders["Coder Agents"]
+        direction TB
+        C1["quick-fixer\nHaiku → Sonnet"]
+        C2["architect\nSonnet → Opus"]
+    end
+
+    subgraph QA["QA Agents"]
+        direction TB
+        Q1["reviewer\nHaiku → Sonnet"]
+        Q2["unit-tester\nHaiku only"]
+    end
+
+    Main -->|"MCP calls"| Gemini
+    Main -->|"launch bg"| Coders
+    Coders -->|"DONE/BLOCKED"| Main
+    Main -->|"launch bg"| QA
+    QA -->|"pass/fail"| Main
+
+    style M1 fill:#1f6feb,stroke:#388bfd,color:#fff
+    style M2 fill:#1f6feb,stroke:#388bfd,color:#fff
+    style M3 fill:#1f6feb,stroke:#388bfd,color:#fff
+    style M4 fill:#1f6feb,stroke:#388bfd,color:#fff
+    style M5 fill:#1f6feb,stroke:#388bfd,color:#fff
+    style G1 fill:#bc8cff,stroke:#8957e5,color:#000
+    style G2 fill:#bc8cff,stroke:#8957e5,color:#000
+    style G3 fill:#bc8cff,stroke:#8957e5,color:#000
+    style G4 fill:#bc8cff,stroke:#8957e5,color:#000
+    style C1 fill:#f0883e,stroke:#d47616,color:#000
+    style C2 fill:#f0883e,stroke:#d47616,color:#000
+    style Q1 fill:#f0883e,stroke:#d47616,color:#000
+    style Q2 fill:#f0883e,stroke:#d47616,color:#000
+</pre>
+</div>
+
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "slug": "simplify-memory-infrastructure",
+  "skill": "scope",
+  "scope": {
+    "files": 6,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [],
+  "data": {
+    "topic": "Simplify memory infrastructure: reduce 7 persistence surfaces to fewer layers, make Stop hook async, address Ollama dependency for correction detection (decision-74 chose no regex fallback), evaluate whether OpenMemory embedding stack is justified at current scale",
+    "what": null,
+    "audience": null,
+    "platform": null,
+    "in_scope": null,
+    "out_of_scope": null,
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": null,
+        "language": "bash/python",
+        "dependencies": ["sqlite3", "ollama", "git"]
+      }
+    ],
+    "needs_research": false,
+    "complexity_reasoning": "Internal infrastructure refactor with full codebase knowledge — all persistence surfaces, hooks, and dependencies are well-understood."
+  }
+}

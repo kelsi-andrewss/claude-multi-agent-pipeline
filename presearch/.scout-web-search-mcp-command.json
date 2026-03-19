@@ -1,0 +1,225 @@
+{
+  "slug": "web-search-mcp-command",
+  "scope": {
+    "files": 3,
+    "stories": null,
+    "complexity": "small"
+  },
+  "route_hint": "standard",
+  "prev": ["/Users/kelsiandrews/.claude/.scope-web-search-mcp-command.json"],
+  "skill": "scout",
+  "data": {
+    "topic": "web search MCP command",
+    "findings": [
+      {
+        "category": "pattern",
+        "summary": "Tool modules follow register(mcp) pattern with closures defined inside",
+        "details": "Every tool module exposes a single `register(mcp)` function. Tools are async closures defined inside that function using `@mcp.tool()` decorator. The register function returns a dict mapping tool names to their functions (though the return value isn't used by server.py). Each module is imported in server.py and its register function is called with the mcp instance.",
+        "files": [
+          "/Users/kelsiandrews/.claude/mcp-servers/gemini/server.py",
+          "/Users/kelsiandrews/.claude/mcp-servers/gemini/tools_gemini.py",
+          "/Users/kelsiandrews/.claude/mcp-servers/gemini/tools_analysis.py",
+          "/Users/kelsiandrews/.claude/mcp-servers/gemini/tools_test.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Server.py registers modules with `from tools_xxx import register as _r_xxx; _r_xxx(mcp)`",
+        "details": "server.py imports each tool module's register function with an alias (_r_gemini, _r_test, etc.) and calls it immediately. There are currently 11 tool modules registered. A new tool module would add 2 lines to server.py following this exact pattern.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/server.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Core Gemini call uses `_gemini()` from gemini_client.py which shells out to the `gemini` CLI",
+        "details": "The `_gemini()` function in gemini_client.py pipes prompts via stdin to the `gemini` CLI, reads JSON output, and extracts the `response` field. It supports optional model selection and system instructions (prepended as `[System: ...]`). This is the same function all existing tools use.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/gemini_client.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "The gemini CLI already has native google_web_search grounding",
+        "details": "Testing confirmed the gemini CLI automatically uses `google_web_search` tool when queries involve current information. The JSON output includes tool usage stats showing `google_web_search` calls. This means the web search MCP tool doesn't need to implement search separately -- it just needs to prompt gemini CLI in a way that triggers grounding, then structure the output for Claude Code consumption.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/gemini_client.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Flat imports -- no package hierarchy",
+        "details": "All imports use flat style: `from constants import X`, `from gemini_client import _gemini`. The server directory is not a Python package. sys.path is set to the server directory at runtime.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/tools_gemini.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Tool docstrings are user-facing and concise",
+        "details": "Tool docstrings describe what the tool does (not how). They are shown in Claude Code's tool listings. Args are documented with one-line descriptions.",
+        "files": ["/Users/kelsiandrews/.claude/refs/pitfalls-python-mcp.md"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Detail-heavy responses use /tmp/gemini/<name>.md pattern",
+        "details": "format_response.py defines `_write_detail()` which writes markdown to `/tmp/gemini/`. Tools return a one-liner with ` -> <path>` appended. The web search tool should follow this pattern if results are long.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/format_response.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Constants and system prompts live in constants.py",
+        "details": "Shared constants, system instructions, and configuration are centralized in constants.py. A new tool's system prompt should go here if it's reusable, or inline if it's specific to that tool only.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/constants.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "dependency",
+        "summary": "Only dependencies are mcp>=1.26.0, uvicorn, pytest",
+        "details": "No additional Python packages needed. The gemini CLI is a separate system binary (Node-based) that handles the actual Gemini API calls and web search grounding.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/requirements.txt"],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "NO_CODE_INSTRUCTION must be included in system prompts for analysis tools",
+        "details": "All Gemini tools that produce analysis (not raw chat) include the NO_CODE_INSTRUCTION constant which prevents code output. However, for a web search tool returning factual results, this constraint may not apply -- depends on the intended use case.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/constants.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "test",
+        "summary": "Tests use pytest with asyncio, mock subprocess calls",
+        "details": "test_server.py mocks `asyncio.create_subprocess_exec` to test tool logic without calling the real gemini CLI. Tests verify stdin piping, model flags, error handling, and JSON parsing. A new tool should have corresponding tests following this pattern.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/test_server.py"],
+        "source": "codebase"
+      },
+      {
+        "category": "completeness",
+        "summary": "All tool module files and their server.py registrations mapped",
+        "details": "11 tool modules exist: tools_gemini, tools_test, tools_analysis, tools_pm_read, tools_pm_plan, tools_pm_write, tools_pm_organize, tools_pm_analytics, tools_pm_ship, tools_pm_decisions, tools_knowledge. All registered in server.py lines 10-41.",
+        "files": ["/Users/kelsiandrews/.claude/mcp-servers/gemini/server.py"],
+        "source": "codebase"
+      }
+    ],
+    "decisions_relevant": [
+      {
+        "id": "decision-64",
+        "summary": "Research skill uses Gemini for broad discovery via gemini_chat",
+        "impact": "Confirms Gemini is already the designated broad-discovery/grounding model. A web search tool fits this role."
+      }
+    ],
+    "testable_assertions": [
+      {
+        "assertion": "New tool module must have a `register(mcp)` function",
+        "category": "pattern_conformance",
+        "verification": "Grep for `def register(mcp):` in the new file",
+        "source": "codebase"
+      },
+      {
+        "assertion": "server.py must import and call the new module's register function",
+        "category": "pattern_conformance",
+        "verification": "Grep server.py for the import and call lines",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Tool must use `_gemini()` from gemini_client for the underlying API call",
+        "category": "pattern_conformance",
+        "verification": "Grep new file for `from gemini_client import _gemini`",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Tool docstring must be concise and user-facing",
+        "category": "pattern_conformance",
+        "verification": "Read the @mcp.tool() decorated function's docstring",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Imports must be flat (from X import Y), not package-style",
+        "category": "pattern_conformance",
+        "verification": "Check imports don't use dotted package paths",
+        "source": "codebase"
+      },
+      {
+        "assertion": "No new dependencies required in requirements.txt",
+        "category": "dependency_constraint",
+        "verification": "Web search is handled by gemini CLI natively",
+        "source": "codebase"
+      }
+    ],
+    "write_targets": [
+      "/Users/kelsiandrews/.claude/mcp-servers/gemini/tools_search.py",
+      "/Users/kelsiandrews/.claude/mcp-servers/gemini/server.py"
+    ],
+    "read_targets": [
+      "/Users/kelsiandrews/.claude/mcp-servers/gemini/gemini_client.py",
+      "/Users/kelsiandrews/.claude/mcp-servers/gemini/constants.py",
+      "/Users/kelsiandrews/.claude/mcp-servers/gemini/format_response.py",
+      "/Users/kelsiandrews/.claude/mcp-servers/gemini/tools_gemini.py",
+      "/Users/kelsiandrews/.claude/mcp-servers/gemini/tools_analysis.py",
+      "/Users/kelsiandrews/.claude/refs/pitfalls-python-mcp.md",
+      "/Users/kelsiandrews/.claude/mcp-servers/gemini/test_server.py"
+    ],
+    "conflicts": [],
+    "completeness": {
+      "confidence": "exhaustive",
+      "occurrences": [
+        {
+          "target": "register(mcp) pattern",
+          "locations": [
+            "tools_gemini.py:40",
+            "tools_test.py:54",
+            "tools_analysis.py:412",
+            "tools_pm_read.py",
+            "tools_pm_plan.py",
+            "tools_pm_write.py",
+            "tools_pm_organize.py",
+            "tools_pm_analytics.py",
+            "tools_pm_ship.py",
+            "tools_pm_decisions.py",
+            "tools_knowledge.py"
+          ],
+          "search_strategies": ["Glob mcp-servers/gemini/*.py", "Read each file for register()"],
+          "blind_spots": []
+        },
+        {
+          "target": "server.py registration lines",
+          "locations": ["server.py:10-41"],
+          "search_strategies": ["Read server.py"],
+          "blind_spots": []
+        },
+        {
+          "target": "_gemini() callers",
+          "locations": [
+            "tools_gemini.py:37,63",
+            "tools_analysis.py:320,409",
+            "tools_test.py:100",
+            "gemini_client.py:41 (definition)"
+          ],
+          "search_strategies": ["Grep for _gemini( across *.py"],
+          "blind_spots": ["tools_pm_plan.py and tools_knowledge.py may also call _gemini -- not verified"]
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "/Users/kelsiandrews/.claude/mcp-servers/gemini/tools_search.py",
+        "dependents": ["server.py (will import it)"],
+        "test_coverage": ["test_server.py (new tests needed)"],
+        "runtime_contracts": ["MCP tool interface -- Claude Code will see a new tool called `web_search` or similar"],
+        "failure_symptoms": "If import fails, server.py crashes on startup and no Gemini MCP tools load. If tool logic fails, only web_search calls error -- other tools unaffected."
+      },
+      {
+        "write_target": "/Users/kelsiandrews/.claude/mcp-servers/gemini/server.py",
+        "dependents": ["All MCP tools depend on server.py loading correctly"],
+        "test_coverage": ["test_server.py imports server module"],
+        "runtime_contracts": ["MCP server startup -- adding an import can't break existing tools unless the import itself errors"],
+        "failure_symptoms": "SyntaxError or ImportError in added lines would prevent entire MCP server from starting. Low risk since it's 2 lines following an established pattern."
+      }
+    ],
+    "gaps": [
+      "No existing web search tool pattern in the codebase -- this is greenfield for the search-specific prompt engineering",
+      "Unclear whether the tool should return raw search results, a summarized answer, or structured data -- the gemini CLI returns a synthesized response, not raw search result links",
+      "No established pattern for controlling whether gemini CLI uses grounding -- it auto-decides based on the prompt content"
+    ]
+  }
+}

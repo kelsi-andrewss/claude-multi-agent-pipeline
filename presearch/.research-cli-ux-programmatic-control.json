@@ -1,0 +1,106 @@
+{
+  "angle": "CLI UX and programmatic control",
+  "findings": [
+    {
+      "claim": "Claude Code custom slash commands are created as Markdown files in .claude/commands/ (project-scoped) or ~/.claude/commands/ (global), using $1/$2/$ARGUMENTS for arguments and ! syntax for dynamic shell command injection into context",
+      "source_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code skills are stored as directories containing SKILL.md with YAML frontmatter for metadata and progressive disclosure -- core instructions load on activation, supporting files (references/, assets/) load on demand to conserve context",
+      "source_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code hooks use exit code 2 to block proposed actions (e.g., preventing a git commit), exit 0 for success, and exit 1 for general error. Hooks receive event data via stdin as JSON and respond by printing JSON to stdout",
+      "source_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code -p (--print) flag enables non-interactive headless mode for scripting. Combined with --output-format json for structured output, --output-format stream-json for real-time parsing, --max-budget-usd for cost caps, and --max-turns to prevent infinite loops",
+      "source_url": "https://github.com/anthropics/claude-code",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code supports session chaining in scripts via -c (continue last session) or -r <session-id> (target specific session), enabling multi-step automation pipelines with persistent context",
+      "source_url": "https://www.sitepoint.com/anthropic-claude-code-cli-guide/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code uses Esc to pause mid-action (preserving context for redirection), Ctrl+C to cancel, /rewind or double-Esc for checkpoint rollback, and Ctrl+B to background a running task",
+      "source_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+      "confidence": "high"
+    },
+    {
+      "claim": "Aider uses Ctrl+C for safe mid-generation halt (partial response stays in chat), /undo for git-level revert of last agent commit, and /ask for discussion-only mode without file modifications",
+      "source_url": "https://aider.chat/docs/usage.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "Gemini CLI has a 'model steering' feature where text typed during agent processing is treated as a steering hint, injected into model context for the next turn. Ctrl+O enters dedicated steering mode. The agent applies minimal plan changes to accommodate hints without abandoning the overall goal",
+      "source_url": "https://geminicli.com/docs/features/steering",
+      "confidence": "medium"
+    },
+    {
+      "claim": "LangGraph implements human-in-the-loop as middleware that intercepts proposed agent actions and waits for user decision (Approve, Edit, or Reject) before proceeding",
+      "source_url": "https://medium.com/p/human-in-the-loop-ai-agents-with-langgraph-7a0e3f8b0e5a",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Some agent systems use external plan files (e.g., plan.md) as a steering mechanism -- user interrupts agent, edits the plan file, signals resume. This decouples intent from execution",
+      "source_url": "https://github.com/anthropics/claude-code",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Rich (Python) uses a background thread for non-blocking progress via its Live display system, supporting nested progress bars and dynamic renderables updated without blocking main execution",
+      "source_url": "https://rich.readthedocs.io/en/latest/progress.html",
+      "confidence": "high"
+    },
+    {
+      "claim": "Listr2 (npm) is designed for multi-step task lists with subtasks, concurrent step tracking, custom renderers, and per-task state tracking (pending/running/completed/failed) -- ideal for autonomous fix-verify loops",
+      "source_url": "https://listr2.kilic.dev/",
+      "confidence": "high"
+    },
+    {
+      "claim": "CLI best practice: detect TTY to gracefully degrade -- disable animations/spinners in CI/piped contexts, use plain-text log entries instead to avoid control character pollution",
+      "source_url": "https://clig.dev/#user-feedback",
+      "confidence": "high"
+    },
+    {
+      "claim": "CLI best practice: show both high-level progress (Step 3 of 10: Analyzing) and low-level activity (spinner/current file) to confirm tool is active during long autonomous steps",
+      "source_url": "https://clig.dev/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Ink (npm) treats the terminal as a DOM-like environment using React reconciliation, handling non-blocking updates through state changes. Enables complex interactive TUIs with component-based spinners, progress bars, and layouts",
+      "source_url": "https://github.com/vadimdemedes/ink",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code skill design pattern: use deterministic scripts (Python/Bash) in a scripts/ folder for logic requiring 100% reliability rather than relying on LLM reasoning for complex calculations or strict validation",
+      "source_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+      "confidence": "high"
+    },
+    {
+      "claim": "Claude Code skill design pattern: include explicit verification gates -- instruct agent to run tests or linters before finalizing, creating a validate step in the workflow",
+      "source_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+      "confidence": "high"
+    },
+    {
+      "claim": "For CLI automation auth, ANTHROPIC_API_KEY must be set as environment variable since standard OAuth login is designed for interactive use only",
+      "source_url": "https://github.com/anthropics/claude-code",
+      "confidence": "high"
+    }
+  ],
+  "key_insights": [
+    "Three distinct steering paradigms exist: checkpoint-based (Claude Code rewind, LangGraph approve/reject), inline-hint (Gemini CLI steering where typed text during processing redirects the agent), and git-based (Aider undo reverting commits). Inline-hint is the most non-disruptive for autonomous fix loops since it does not require full pause-and-restart.",
+    "Programmatic invocation of Claude Code is production-ready with -p flag, --output-format json, --max-turns, --max-budget-usd, and session chaining (-c/-r). The hook system with exit code 2 for blocking provides a clean way to add safety gates in autonomous repair pipelines.",
+    "Non-blocking CLI progress requires TTY detection for graceful degradation, dual-granularity feedback (high-level step + low-level activity), and decoupled UI/logic threads. Listr2 is the strongest fit for multi-step autonomous workflows due to native subtask tracking and concurrent step state management."
+  ],
+  "gaps": [
+    "No reliable information found on standardized slash command patterns specifically designed for long-running autonomous repair loops (most slash command documentation covers one-shot prompts, not iterative fix-verify cycles)",
+    "Limited information on how to propagate mid-loop steering hints into subagent processes spawned by a parent CLI agent",
+    "No established convention for structured error output that distinguishes between 'agent gave up', 'agent hit budget limit', 'agent completed but with warnings', and 'agent blocked by hook' -- exit codes are too coarse for this",
+    "No documented patterns for resumable autonomous fix loops where the CLI agent can be killed and restarted mid-iteration without losing progress on the current fix attempt"
+  ]
+}

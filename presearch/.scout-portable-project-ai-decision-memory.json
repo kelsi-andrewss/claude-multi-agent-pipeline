@@ -1,0 +1,439 @@
+{
+  "slug": "portable-project-ai-decision-memory",
+  "scope": {
+    "files": 8,
+    "stories": null,
+    "complexity": "large"
+  },
+  "route_hint": null,
+  "prev": ["presearch/.research-portable-project-ai-decision-memory.json"],
+  "skill": "scout",
+  "data": {
+    "topic": "portable per-project AI decision memory: vector-backed decision tracking for legacy codebases that auto-discovers implicit architectural decisions, stores them with file-level associations in a portable embedded database, and dynamically injects relevant context at edit time",
+    "findings": [
+      {
+        "category": "architecture",
+        "summary": "Two separate decision storage systems already exist: decisions table (epics.db) for explicit architectural decisions, and decision_preferences table (epics.db) for behavioral decision tracking with signal scoring",
+        "details": "The decisions table stores title/chose/rejected/reasoning with file/pattern/tech scopes via decision_scopes junction table. decision_preferences tracks routing/scope/communication/architecture decisions with signal_score/signal_count for correction correlation. These are complementary but disconnected systems — decisions are explicitly recorded via pm_add_decision, while decision_preferences are auto-correlated with user corrections via signal_processor.py.",
+        "files": [
+          "mcp-servers/gemini/tools_knowledge.py",
+          "mcp-servers/gemini/tools_pm_decisions.py",
+          "hooks/lib/signal_processor.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "OpenMemory is the existing semantic memory layer — Node.js MCP server backed by openmemory.sqlite with Ollama embeddings, user_id scoping, and sector-based organization",
+        "details": "OpenMemory runs as a separate Node.js MCP server (~/.claude/.claude/openmemory-server/) communicating via stdio. Uses sqlite3 (Node) for metadata and vectors. Embeddings via Ollama nomic-embed-text. Supports HSG (hierarchical semantic graph) queries with sector filtering (episodic, semantic, procedural, emotional, reflective). All writes from Python hooks route through om_write.py which enforces tag whitelist, dedup (0.85 cosine), per-category budgets, and decay-weighted pruning.",
+        "files": [
+          ".claude/openmemory-server/stdio.sh",
+          ".claude/openmemory-server/package.json",
+          "hooks/lib/om_write.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "Decision shadow writes already bridge epics.db decisions to OpenMemory via om_write() with 'decision' tag and semantic sector",
+        "details": "tools_knowledge.py:_om_shadow_decision() calls om_write() after every pm_add_decision, storing '[decision-ID] title: chose X. reasoning' with tags=['decision'], user_id='proj:dotclaude', sector='semantic', decay_lambda=0.01. This gives decisions semantic search capability via OpenMemory queries. Budget is 50 decision entries.",
+        "files": [
+          "mcp-servers/gemini/tools_knowledge.py",
+          "hooks/lib/om_write.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Embedding utilities are centralized in hooks/lib/embedding_utils.py — single source of truth per decision-105",
+        "details": "get_embedding() calls Ollama nomic-embed-text at localhost:11434/api/embeddings. Returns 768d float vectors. Utility functions: cosine_similarity(), embedding_to_blob() (struct.pack little-endian float32), blob_to_embedding(). MCP server imports via sys.path manipulation (server.py adds project root to sys.path).",
+        "files": [
+          "hooks/lib/embedding_utils.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "Context injection follows a three-tier architecture per decision-66: SessionStart always, UserPromptSubmit keyword-triggered, async background",
+        "details": "Tier 1: load-session-context.sh runs at session start — loads CLAUDE.md, ORCHESTRATION.md, renders behavioral prefs from correction_groups DB, queries top 5 tool-learnings from OpenMemory, computes trust scores, shows session agenda. Tier 2: inject-tier2-context.sh fires on UserPromptSubmit, matches keywords (story-NNN, epics.db, openmemory, hook, worktree, etc.) and injects targeted context fragments. Max 3 injections per session. Tier 3: background async processing.",
+        "files": [
+          "hooks/load-session-context.sh",
+          "hooks/inject-tier2-context.sh"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "pattern",
+        "summary": "MCP server registration pattern: FastMCP with modular tool registration via register(mcp) functions in separate files",
+        "details": "server.py creates FastMCP('gemini'), then imports register functions from each tools_*.py module and calls them with the mcp instance. Each module defines tools via @mcp.tool() decorator. DB access through _db_op() context manager with WAL mode, busy_timeout=3000, foreign_keys=ON. Schema migrations run once at server startup via startup_migrate().",
+        "files": [
+          "mcp-servers/gemini/server.py",
+          "mcp-servers/gemini/tools_pm_helpers.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "constraint",
+        "summary": "Current embedding stack requires Ollama running locally — no fallback for embeddings, only simhash fallback for dedup",
+        "details": "decision-74 explicitly chose 'no regex fallback if Ollama unavailable' for correction detection. om_write.py falls back to MD5 simhash for dedup only when Ollama is down, but stores no embedding vector. OpenMemory queries return empty when Ollama is unreachable. The session start hook warns about this but doesn't block.",
+        "files": [
+          "hooks/lib/embedding_utils.py",
+          "hooks/lib/om_write.py",
+          "hooks/load-session-context.sh"
+        ],
+        "source": "decision"
+      },
+      {
+        "category": "constraint",
+        "summary": "Memory infrastructure reduced to 3 persistence surfaces per decision-79: correction_groups (epics.db), rendered-prefs.md (sidecar), openmemory.sqlite",
+        "details": "Four surfaces were killed (corrections.md, correction-tallies.jsonl, om-ops.json, tool-learnings.md). Adding a new persistence surface contradicts this consolidation decision. Any new portable decision DB would be surface #4 unless it replaces or subsumes one of the existing three.",
+        "files": [
+          "CLAUDE.md",
+          "hooks/lib/om_write.py",
+          "refs/orch-memory.md"
+        ],
+        "source": "decision"
+      },
+      {
+        "category": "constraint",
+        "summary": "All OpenMemory writes must go through om_write.py — tag whitelist, dedup, and budget enforcement are mandatory",
+        "details": "ALLOWED_TAGS: behavioral-pref, tool-learning, decision, prompt-pattern, session-summary, critique-learning, gemini-blind-spot. Adding a new tag requires updating: om_write.py ALLOWED_TAGS, BUDGETS, CLAUDE.md integration surfaces, and refs/orch-memory.md. Direct INSERT into the memories table is prohibited per decision-104.",
+        "files": [
+          "hooks/lib/om_write.py",
+          "CLAUDE.md",
+          "refs/orch-memory.md"
+        ],
+        "source": "decision"
+      },
+      {
+        "category": "dependency",
+        "summary": "Python MCP server uses Python 3.11 with mcp>=1.26.0, standard lib sqlite3, and Ollama for embeddings",
+        "details": "requirements.txt is minimal: mcp>=1.26.0, uvicorn, pytest. All embedding work uses stdlib urllib for Ollama HTTP calls. OpenMemory server is Node.js (openmemory-js v1.3.3) with sqlite3 v5.1.7. No sqlite-vec, fastembed, or ONNX dependencies exist anywhere in the project today.",
+        "files": [
+          "mcp-servers/gemini/requirements.txt",
+          ".claude/openmemory-server/package.json"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "dependency",
+        "summary": "Existing decision schema in epics.db has file-level scope associations via decision_scopes but no vector embeddings",
+        "details": "decisions table: id, title, chose, rejected, reasoning, status, decided_at, superseded_by, story_id. decision_scopes: decision_id, scope_type (file|pattern|tech), scope_value. No embedding column, no vector index. Semantic search goes through OpenMemory shadow copies, not the decisions table directly.",
+        "files": [
+          "mcp-servers/gemini/tools_pm_helpers.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "test",
+        "summary": "Test patterns: pytest with subprocess execution for integration tests, tmp_path fixtures, sqlite3 direct assertions",
+        "details": "Tests in .claude/tests/ use pytest. Pattern: subprocess.run the script, assert returncode, parse JSON stdout, verify SQLite state via direct connection. GitFixture class creates bare+worktree repos for integration tests. No mocking of Ollama or embedding calls in existing tests.",
+        "files": [
+          ".claude/tests/test_init_run_db.py",
+          ".claude/tests/test_merge_gate.py"
+        ],
+        "source": "codebase"
+      },
+      {
+        "category": "architecture",
+        "summary": "The project is a user-scoped Claude Code orchestration system (~/.claude/), not a standalone library — portability means working across projects the user opens",
+        "details": "Everything lives under ~/.claude/ and is registered via Claude Code MCP configuration and hooks (settings.json). Per-project scoping exists via user_id='proj:<name>' in OpenMemory. The decision memory currently lives in a single epics.db that mixes cross-project infrastructure (correction_groups, decision_preferences) with project-specific data (stories, epics, tasks). Making decisions truly per-project-portable means either: (a) a per-project .decisions.db file discoverable from any project root, or (b) user_id-scoped partitions in the existing centralized stores.",
+        "files": [
+          "CLAUDE.md",
+          ".claude/CLAUDE.md",
+          "ORCHESTRATION.md"
+        ],
+        "source": "codebase"
+      }
+    ],
+    "decisions_relevant": [
+      {
+        "id": "decision-105",
+        "summary": "Embedding logic consolidated via sys.path import — MCP server imports from hooks.lib.embedding_utils",
+        "impact": "Any new embedding code must use hooks/lib/embedding_utils.py as the single source of truth. Cannot introduce a parallel embedding module."
+      },
+      {
+        "id": "decision-104",
+        "summary": "Shadow decision writes route through om_write() — no direct INSERT into memories table",
+        "impact": "All semantic memory writes must go through om_write.py. A portable per-project DB would need its own write gate or extend om_write."
+      },
+      {
+        "id": "decision-79",
+        "summary": "Memory infrastructure reduced to 3 persistence surfaces",
+        "impact": "Adding a new .db file is surface #4 — must justify why it can't be folded into existing surfaces. Strong preference for extending over adding."
+      },
+      {
+        "id": "decision-74",
+        "summary": "Correction detection uses semantic delta via Ollama nomic-embed-text, no fallback",
+        "impact": "Establishes that Ollama dependency is accepted. FastEmbed/ONNX alternative from research would be a new dependency contradicting the accepted Ollama-only pattern."
+      },
+      {
+        "id": "decision-66",
+        "summary": "Three-tier context injection architecture",
+        "impact": "Edit-time decision injection must fit into this tiered model — likely Tier 2 (keyword-triggered) or a new MCP tool query. Cannot add a Tier 1 (always-load) decision dump."
+      },
+      {
+        "id": "decision-73",
+        "summary": "Behavioral prefs use dynamic sidecar file via @import for compaction resilience",
+        "impact": "Established pattern for session-start context: render from DB to sidecar file, load via @import. Per-project decision context could follow the same pattern."
+      },
+      {
+        "id": "decision-67",
+        "summary": "Memory snapshot dedup: dropped behavioral-pref from session-start OpenMemory query, kept only tool-learnings",
+        "impact": "Precedent against loading all decisions at session start. Decision memory injection must be selective/on-demand."
+      },
+      {
+        "id": "decision-80",
+        "summary": "Async Stop hook via background subprocess for slow operations",
+        "impact": "Pattern for decision discovery: heavy LLM-based analysis of code should run in background stop hook, not block session operations."
+      },
+      {
+        "id": "decision-90",
+        "summary": "Graduated autonomy with layered trust — global baseline + domain overrides",
+        "impact": "Establishes pattern for per-domain scoping. Per-project decision memory follows same pattern: global decisions + project-scoped overrides."
+      }
+    ],
+    "testable_assertions": [
+      {
+        "assertion": "All embedding operations use hooks/lib/embedding_utils.py functions (get_embedding, cosine_similarity, embedding_to_blob, blob_to_embedding)",
+        "category": "pattern_conformance",
+        "verification": "Grep for 'import.*embedding' and 'get_embedding\\|cosine_similarity' across all .py files, verify no parallel implementations",
+        "source": "decision-105"
+      },
+      {
+        "assertion": "All OpenMemory writes go through om_write() with valid ALLOWED_TAGS",
+        "category": "pattern_conformance",
+        "verification": "Grep for 'INSERT INTO memories' — should only appear inside om_write.py. Grep for om_write() calls — all must use tags from ALLOWED_TAGS set",
+        "source": "decision-104"
+      },
+      {
+        "assertion": "No new persistence surface (.db file, .json state, .md rendered output) is introduced without replacing or extending an existing one",
+        "category": "architecture_boundary",
+        "verification": "Count .db, .sqlite files read/written by hooks and MCP server. Must not exceed current 3 surfaces unless decision-79 is explicitly superseded",
+        "source": "decision-79"
+      },
+      {
+        "assertion": "Edit-time context injection fits within the tiered injection architecture (Tier 1/2/3)",
+        "category": "architecture_boundary",
+        "verification": "Any new injection path must be categorized into one of the three tiers. Verify it doesn't add unbounded content to Tier 1 (session start)",
+        "source": "decision-66"
+      },
+      {
+        "assertion": "Decision scope associations preserve the file/pattern/tech type taxonomy from decision_scopes table",
+        "category": "pattern_conformance",
+        "verification": "Schema CHECK constraint on scope_type IN ('file', 'pattern', 'tech'). Any new scope storage must use the same taxonomy",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Per-project isolation uses user_id scoping (user_id='proj:<name>') consistent with existing OpenMemory pattern",
+        "category": "pattern_conformance",
+        "verification": "Verify all project-scoped queries and writes use user_id='proj:<basename>' convention, not separate databases per project",
+        "source": "codebase"
+      },
+      {
+        "assertion": "Heavy analysis (LLM-based decision discovery, batch embedding) runs in background/async path, not in session-blocking hooks",
+        "category": "architecture_boundary",
+        "verification": "Any decision discovery pipeline must not run in SessionStart or UserPromptSubmit hooks synchronously. Must use background subprocess pattern from decision-80",
+        "source": "decision-80"
+      },
+      {
+        "assertion": "Graceful degradation when Ollama is unavailable — keyword/text fallback for queries, silent skip for writes",
+        "category": "dependency_constraint",
+        "verification": "With Ollama stopped: decision queries should still return results via FTS5 or text matching, writes should store without embedding but not fail",
+        "source": "codebase"
+      }
+    ],
+    "write_targets": [
+      "hooks/lib/embedding_utils.py",
+      "hooks/lib/om_write.py",
+      "hooks/inject-tier2-context.sh",
+      "hooks/load-session-context.sh",
+      "mcp-servers/gemini/tools_knowledge.py",
+      "mcp-servers/gemini/tools_pm_helpers.py",
+      "refs/orch-memory.md",
+      "CLAUDE.md"
+    ],
+    "read_targets": [
+      "hooks/lib/signal_processor.py",
+      "hooks/lib/stop_processor.py",
+      "mcp-servers/gemini/server.py",
+      "mcp-servers/gemini/constants.py",
+      "mcp-servers/gemini/tools_pm_decisions.py",
+      "mcp-servers/gemini/requirements.txt",
+      ".claude/openmemory-server/stdio.sh",
+      ".claude/openmemory-server/package.json",
+      "ORCHESTRATION.md",
+      ".claude/CLAUDE.md",
+      ".claude/tests/test_init_run_db.py",
+      ".claude/tests/test_merge_gate.py",
+      ".gitignore",
+      "settings.json"
+    ],
+    "conflicts": [
+      {
+        "subject": "Embedding runtime: Ollama vs FastEmbed/ONNX",
+        "codebase_says": "All embedding operations use Ollama nomic-embed-text via HTTP API (decision-74, decision-105). No ONNX, no FastEmbed. Accepted dependency with 'no fallback if unavailable' policy.",
+        "research_says": "FastEmbed (ONNX Runtime) enables serverless embedding without Ollama — ~15ms/chunk on CPU, fully offline after model download. Recommended for portability.",
+        "resolution": "Codebase wins for the orchestration project. FastEmbed is relevant only if building a standalone portable library intended for machines without Ollama. For this project's per-project decision memory, Ollama is the established embedding provider. If portability to Ollama-free environments is a goal, FastEmbed would require a new decision superseding decision-74."
+      },
+      {
+        "subject": "sqlite-vec for vector search vs current BLOB + Python cosine",
+        "codebase_says": "Embeddings stored as raw float32 BLOBs in openmemory.sqlite memories table. Similarity computed in Python (cosine_similarity in embedding_utils.py). No native vector indexing. Works for <1000 entries.",
+        "research_says": "sqlite-vec provides native vector search in SQLite — sub-75ms at 100k vectors, binary quantization for 10x speedup. Required for scaling beyond a few hundred entries.",
+        "resolution": "Research wins if decision count per project exceeds ~500. Current Python brute-force is fine for the existing ~50-entry decision budget. sqlite-vec becomes necessary if the portable DB is intended to hold code-chunk embeddings (thousands) alongside decisions. Add sqlite-vec as an optional dependency — use it when available, fall back to Python cosine for small datasets."
+      },
+      {
+        "subject": "Separate per-project .db file vs centralized store with user_id partitioning",
+        "codebase_says": "All memory in centralized openmemory.sqlite with user_id='proj:<name>' scoping. decision-79 limits to 3 persistence surfaces. Adding a 4th .db is a policy violation.",
+        "research_says": "A single portable .db file per project (committed to repo or in .claude/) is the key to cross-tool portability. Continue.dev and Cursor both use per-project indexes.",
+        "resolution": "Tension is real. For pure cross-tool portability (Cursor/Windsurf reading the same DB), a standalone per-project file wins. For internal consistency, extending the existing centralized stores wins. Recommend: per-project .decisions.db file that is optionally importable into OpenMemory, rather than replacing OpenMemory. This adds surface #4 but the new surface lives in the target project's repo, not in ~/.claude/."
+      },
+      {
+        "subject": "Auto-discovery of implicit decisions from code behavior",
+        "codebase_says": "No mechanism for auto-discovering decisions from code. All decisions are explicitly recorded via pm_add_decision. The codebase has no AST analysis, no commit parsing, no SATD detection.",
+        "research_says": "Auto-discovery is a confirmed research gap — 44% false positive rate, no published end-to-end system. Multi-stage pipeline (SATD + commits + LLM synthesis) is untested.",
+        "resolution": "Both agree this is novel and hard. Codebase has no foundation for it. If pursued, it should be a separate feature with human-in-the-loop validation, not an automatic pipeline. Start with explicit decision recording + edit-time injection, add auto-discovery later as an optional enrichment step."
+      },
+      {
+        "subject": "256d Matryoshka vs full 768d embeddings",
+        "codebase_says": "embedding_utils.py returns whatever nomic-embed-text produces — currently 768d vectors. No truncation, no dimension selection. BLOB storage assumes full dimension.",
+        "research_says": "256d Matryoshka embeddings give 98.8% quality at half the storage. Sweet spot for decision memory use case.",
+        "resolution": "Research is right that 256d is sufficient for decisions, but changing dimensions would break compatibility with existing OpenMemory embeddings. If building a new per-project DB from scratch, use 256d. If extending the existing system, keep 768d for compatibility unless migrating all embeddings."
+      }
+    ],
+    "completeness": {
+      "confidence": "exhaustive",
+      "occurrences": [
+        {
+          "target": "embedding operations (get_embedding, cosine_similarity)",
+          "locations": [
+            "hooks/lib/embedding_utils.py (definitions)",
+            "hooks/lib/om_write.py (imports and uses all 4 functions)",
+            "hooks/lib/signal_processor.py (imports and uses get_embedding, cosine_similarity, embedding_to_blob, blob_to_embedding)",
+            "mcp-servers/gemini/tools_knowledge.py (imports om_write which transitively uses embeddings)"
+          ],
+          "search_strategies": ["grep 'embedding_utils' **/*.py", "grep 'get_embedding' **/*.py", "grep 'cosine_similarity' **/*.py"],
+          "blind_spots": ["OpenMemory Node.js server has its own embedding logic (Ollama HTTP calls in TypeScript) — not searched"]
+        },
+        {
+          "target": "decision storage (INSERT/UPDATE decisions, decision_scopes)",
+          "locations": [
+            "mcp-servers/gemini/tools_knowledge.py (pm_add_decision, pm_supersede_decision)",
+            "mcp-servers/gemini/tools_pm_helpers.py (_ensure_knowledge_tables — schema creation)",
+            "hooks/load-session-context.sh (reads decision_preferences at session start)"
+          ],
+          "search_strategies": ["grep 'decisions' mcp-servers/gemini/*.py", "grep 'decision_scopes' **/*.py"],
+          "blind_spots": []
+        },
+        {
+          "target": "context injection hooks (SessionStart, UserPromptSubmit)",
+          "locations": [
+            "hooks/load-session-context.sh (SessionStart — 493 lines)",
+            "hooks/inject-tier2-context.sh (UserPromptSubmit — 133 lines)"
+          ],
+          "search_strategies": ["grep 'additionalContext' hooks/*.sh", "glob hooks/*.sh"],
+          "blind_spots": ["settings.json hook registration not read — may reference additional hooks"]
+        },
+        {
+          "target": "om_write.py ALLOWED_TAGS references",
+          "locations": [
+            "hooks/lib/om_write.py (definition: 7 tags)",
+            "CLAUDE.md (integration surfaces section references tag taxonomy)",
+            "refs/orch-memory.md (tag table with budgets and write sources)"
+          ],
+          "search_strategies": ["grep 'ALLOWED_TAGS' **/*.py", "grep 'behavioral-pref\\|tool-learning\\|decision\\|prompt-pattern\\|session-summary' **/*.md"],
+          "blind_spots": []
+        }
+      ]
+    },
+    "blast_radius": [
+      {
+        "write_target": "hooks/lib/embedding_utils.py",
+        "dependents": [
+          "hooks/lib/om_write.py",
+          "hooks/lib/signal_processor.py",
+          "mcp-servers/gemini/tools_knowledge.py (via om_write)"
+        ],
+        "test_coverage": ["No direct tests for embedding_utils.py exist"],
+        "runtime_contracts": ["get_embedding() must return list[float] or None", "embedding_to_blob/blob_to_embedding must be inverse operations", "cosine_similarity(a, b) must return float in [-1, 1]"],
+        "failure_symptoms": "Broken embeddings → om_write dedup fails (duplicates proliferate), signal_processor correction detection fails silently (returns empty list), OpenMemory shadows fail"
+      },
+      {
+        "write_target": "hooks/lib/om_write.py",
+        "dependents": [
+          "mcp-servers/gemini/tools_knowledge.py (_om_shadow_decision)",
+          "hooks/lib/stop_processor.py (auto-distillation)",
+          "hooks/load-session-context.sh (prune_expired call)"
+        ],
+        "test_coverage": ["No direct tests for om_write.py exist"],
+        "runtime_contracts": ["om_write(content, tags, ...) → id or None", "ALLOWED_TAGS whitelist", "BUDGETS per-category limits", "dedup at 0.85 cosine threshold"],
+        "failure_symptoms": "Broken om_write → decisions not shadowed to OpenMemory, stop hook distillation fails, session-start pruning fails. All fail silently due to try/except."
+      },
+      {
+        "write_target": "hooks/inject-tier2-context.sh",
+        "dependents": ["settings.json (hook registration)"],
+        "test_coverage": ["No tests for inject-tier2-context.sh"],
+        "runtime_contracts": ["Must exit 0 always", "Must output JSON with hookSpecificOutput.additionalContext", "Max 3 injections per session"],
+        "failure_symptoms": "Broken injection → user gets no on-demand context for decisions, but session continues normally"
+      },
+      {
+        "write_target": "hooks/load-session-context.sh",
+        "dependents": ["settings.json (hook registration)", "Every session start"],
+        "test_coverage": ["No automated tests — manually tested via session start"],
+        "runtime_contracts": ["Must exit 0 always", "Outputs CLAUDE.md, ORCHESTRATION.md content, behavioral prefs, session agenda", "Python blocks must not crash (all wrapped in try/except or || true)"],
+        "failure_symptoms": "Broken session context → Claude starts without behavioral prefs, trust scores, or agenda. Still functional but missing context."
+      },
+      {
+        "write_target": "mcp-servers/gemini/tools_knowledge.py",
+        "dependents": [
+          "mcp-servers/gemini/server.py (imports register function)",
+          "All pm_add_decision/pm_list_decisions callers (Claude, Gemini)"
+        ],
+        "test_coverage": ["mcp-servers/gemini/test_server.py has tests for the MCP server"],
+        "runtime_contracts": ["pm_add_decision returns JSON with id", "pm_list_decisions returns JSON array", "_om_shadow_decision must not throw"],
+        "failure_symptoms": "Broken tools_knowledge → cannot record or query decisions via MCP. Gemini planning pipeline partially broken."
+      },
+      {
+        "write_target": "mcp-servers/gemini/tools_pm_helpers.py",
+        "dependents": [
+          "mcp-servers/gemini/tools_pm_write.py",
+          "mcp-servers/gemini/tools_pm_read.py",
+          "mcp-servers/gemini/tools_pm_plan.py",
+          "mcp-servers/gemini/tools_pm_organize.py",
+          "mcp-servers/gemini/tools_pm_analytics.py",
+          "mcp-servers/gemini/tools_pm_ship.py",
+          "mcp-servers/gemini/tools_knowledge.py",
+          "mcp-servers/gemini/tools_pm_decisions.py"
+        ],
+        "test_coverage": ["test_server.py covers some tool functions"],
+        "runtime_contracts": ["_db_op() yields sqlite3.Connection with WAL mode", "_next_id() returns unique sequential IDs", "startup_migrate() is idempotent"],
+        "failure_symptoms": "Broken helpers → ALL PM tools fail. This is the most dangerous write target."
+      },
+      {
+        "write_target": "refs/orch-memory.md",
+        "dependents": ["ORCHESTRATION.md references it", "Human readers"],
+        "test_coverage": ["None — documentation only"],
+        "runtime_contracts": ["None — reference material"],
+        "failure_symptoms": "None immediate — only affects future session context accuracy"
+      },
+      {
+        "write_target": "CLAUDE.md",
+        "dependents": ["Every session start loads it", "All hooks reference it"],
+        "test_coverage": ["None — loaded as context, not executed"],
+        "runtime_contracts": ["Must be valid markdown", "Must contain @import for rendered-prefs.md"],
+        "failure_symptoms": "Broken CLAUDE.md → all sessions start with incorrect instructions"
+      }
+    ],
+    "gaps": [
+      "No per-project decision database exists — all decisions are centralized in ~/.claude/.claude/epics.db regardless of which project they belong to",
+      "No mechanism to discover decisions when editing a file — decisions have file scopes but no query path triggered by file access",
+      "No sqlite-vec or any native vector index in the project — all similarity computed in Python brute-force",
+      "No FastEmbed or ONNX runtime — Ollama is the only embedding provider, creating a hard dependency for portability",
+      "No FTS5 (full-text search) on any decision-related table — no keyword fallback when embeddings are unavailable",
+      "No import/export mechanism for decisions — cannot move decisions between machines or projects",
+      "No auto-discovery pipeline for implicit decisions from code patterns, commits, or comments",
+      "No tests for embedding_utils.py, om_write.py, or the context injection hooks",
+      "OpenMemory Node.js server embedding logic is separate from Python embedding_utils.py — two implementations of the same Ollama API call"
+    ]
+  }
+}

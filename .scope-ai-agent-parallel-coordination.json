@@ -1,0 +1,47 @@
+{
+  "slug": "ai-agent-parallel-coordination",
+  "skill": "scope",
+  "scope": {
+    "files": 12,
+    "stories": 7,
+    "complexity": "large"
+  },
+  "route_hint": "research",
+  "prev": [],
+  "data": {
+    "topic": "Auto-detection, self-learning, and auto-memory systems for AI coding agents — conflict detection in parallel multi-agent systems, self-learning memory architectures, autonomous coordination patterns, trust calibration and graduated autonomy",
+    "what": "Integrate parallel coordination, self-learning, and graduated autonomy patterns from other AI agent systems into our dotclaude orchestration pipeline",
+    "audience": "Kelsi (sole operator of the dotclaude system)",
+    "platform": "CLI — Claude Code skills/hooks/MCP orchestration layer",
+    "in_scope": [
+      "Conflict detection and prediction in multi-agent parallel coding systems",
+      "Self-learning memory architectures (correction pipelines, behavioral preference distillation, outcome-based learning)",
+      "Autonomous coordination patterns (merge queues, dependency graphs, write-target analysis)",
+      "Trust calibration and graduated autonomy (measurable gates for increasing agent independence)",
+      "Cross-epic story parallelism (removing epic-level serialization)",
+      "Smart merge queue (beyond sequential merging)",
+      "Agent health monitoring and watchdog patterns",
+      "Auto-review and testing loops (Ralph Loop pattern)",
+      "Comparison with: Gastown/Beads, Devin, SWE-Agent, OpenHands, Cursor, Windsurf, Aider, Ralph Loop, academic research"
+    ],
+    "out_of_scope": [
+      "Building a separate Go/Rust binary (stay within Claude Code primitives)",
+      "Replicating GT's 20-30 agent scale for its own sake (scale follows need)",
+      "Replacing our existing memory system (extend it, don't rebuild)",
+      "Cost optimization as a primary goal (correctness and throughput first)"
+    ],
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": "Claude Code orchestration (skills/hooks/MCP)",
+        "language": "Python, Shell, JSON",
+        "dependencies": ["Gemini MCP", "OpenMemory MCP", "epics.db (SQLite)", "Ollama embeddings"]
+      }
+    ],
+    "problem": "Epic-level serialization limits throughput. Stories run in parallel but epics never do. Sequential merging is the actual ceiling. No agent health monitoring. No auto-review loops. Conflict detection is untested at scale.",
+    "why": "Without cross-epic parallelism and a smart merge queue, we can't scale beyond 3-5 concurrent stories. The system works but doesn't compound its efficiency gains as project complexity grows.",
+    "end_goal": "Research briefing that feeds directly into /ship — build changes to ORCHESTRATION.md, run-stories, merge-worktree, and new skills for agent health, merge queue, and graduated autonomy",
+    "needs_research": true,
+    "complexity_reasoning": "Requires surveying 10+ external systems and academic approaches across 4 research dimensions, then synthesizing into actionable changes to our orchestration layer"
+  }
+}

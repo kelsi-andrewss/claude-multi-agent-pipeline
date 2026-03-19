@@ -1,0 +1,52 @@
+{
+  "slug": "web-search-mcp-command",
+  "skill": "clarify",
+  "scope": {
+    "files": 2,
+    "stories": 1,
+    "complexity": "small"
+  },
+  "route_hint": "quickfix",
+  "prev": [],
+  "data": {
+    "topic": "web search MCP command",
+    "input_summary": "Add a web_search tool to the existing Gemini MCP server that uses Gemini's native Google Search grounding to perform web searches and return structured results.",
+    "decisions": [
+      {
+        "area": "Search backend",
+        "choice": "Gemini API with Google Search grounding — same as every other tool in the Gemini MCP server",
+        "reasoning": "Consistent architecture. No separate API key, no third-party dependency. Gemini already has native search grounding built in.",
+        "source": "user"
+      },
+      {
+        "area": "Result format",
+        "choice": "Structured search results from Gemini's grounded response — titles, URLs, snippets extracted from the grounding metadata",
+        "reasoning": "Gemini's search grounding returns grounding chunks with URLs and content. Parse and structure these.",
+        "source": "user"
+      },
+      {
+        "area": "Query handling",
+        "choice": "Pass query to Gemini with search grounding enabled, let Gemini handle query optimization",
+        "reasoning": "Gemini's search grounding already optimizes queries. No need for a separate preprocessing layer.",
+        "source": "user"
+      }
+    ],
+    "constraints": [
+      {
+        "type": "stack",
+        "value": "Must be added to existing Gemini MCP server (TypeScript/Node), not a separate server",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "Uses Gemini API with Google Search grounding — no separate search API",
+        "source": "user"
+      },
+      {
+        "type": "requirement",
+        "value": "Returns structured search results (title, URL, snippet)",
+        "source": "user"
+      }
+    ]
+  }
+}

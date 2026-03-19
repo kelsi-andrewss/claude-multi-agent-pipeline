@@ -1,0 +1,370 @@
+{
+  "slug": "iterative-auto-fix-loop",
+  "skill": "research",
+  "scope": {
+    "files": null,
+    "stories": null,
+    "complexity": null
+  },
+  "route_hint": null,
+  "prev": [".scope-iterative-auto-fix-loop.json"],
+  "data": {
+    "topic": "iterative auto-fix loop skill for Claude Code CLI - patterns for building an automated issue resolution loop that handles UI visual regressions, compile errors, test failures, and lint warnings by repeatedly running checks, diagnosing issues, applying fixes, and re-validating until all problems are resolved",
+    "angles_generated": 5,
+    "partial_research": false,
+    "synthesized_findings": [
+      {
+        "theme": "Core loop architecture",
+        "claims": [
+          {
+            "claim": "All successful auto-fix agents converge on a common pattern: execute action (run test/lint/build) → capture stdout/stderr + exit code → append error context to LLM conversation → let model diagnose and apply fix → re-validate by rerunning the failing command. The loop terminates when the model produces no further tool calls OR an external budget/turn limit fires.",
+            "source_urls": ["https://platform.claude.com/docs/en/agent-sdk/agent-loop", "https://aider.chat/docs/usage/lint-test.html", "https://swe-agent.com/", "https://cursor.com/features"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Claude Code Agent SDK terminates the loop on one of four conditions: Claude finishes with no tool calls (success), max_turns exceeded (error_max_turns), max_budget_usd exceeded (error_max_budget_usd), or an API/execution error. max_turns counts only tool-use round trips, not text-only turns.",
+            "source_urls": ["https://platform.claude.com/docs/en/agent-sdk/agent-loop"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "The Drafter-Auditor (Generator-Validator) pattern decouples repair logic into two roles: the Drafter proposes a fix based on context, while the Auditor executes a verification suite (tests, linters, static analysis). If the Auditor finds a failure, it returns raw logs and error traces back to the Drafter for the next iteration.",
+            "source_urls": ["https://aclanthology.org/2024.findings-acl.486/"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "Aider uses an Architect-Editor split where the Architect (high-reasoning model) plans the fix logic and the Editor (faster model) generates Search/Replace blocks. If an edit fails to match the file, the mismatch error is fed back to the LLM for self-correction — edit-application failures are treated as a distinct error type from logical errors.",
+            "source_urls": ["https://aider.chat/docs/architect.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          }
+        ],
+        "key_insight": "The universal pattern is execute→capture→diagnose→fix→revalidate. The key differentiator between tools is HOW they scope context for the LLM: Aider uses Tree-Sitter structural maps, SWE-agent uses 100-line view windows, Cursor uses RAG embeddings, Devin captures full VM state."
+      },
+      {
+        "theme": "Termination and retry budgets",
+        "claims": [
+          {
+            "claim": "Aider caps its auto-fix retry loop at exactly 3 reflections via max_reflections=3 hardcoded in aider/coders/base_coder.py. This was introduced after a bug (issue #1090) where the lint-fix loop ran indefinitely when the LLM failed to fix errors but produced no code change.",
+            "source_urls": ["https://github.com/Aider-AI/aider/issues/3450", "https://github.com/paul-gauthier/aider/issues/1090"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "SWE-agent recommends a $1 cost limit and 50-turn limit per instance for competitive runs. Without a per-instance cost limit, 'the average cost will converge to infinity, as the agent will never stop iterating.'",
+            "source_urls": ["https://swe-agent.com/latest/usage/competitive_runs/"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "RepairAgent uses a hard maximum of 40 cycles per bug with early exit when the agent invokes a 'goal_accomplished' tool after tests pass. Median resource consumption per bug is ~270,000 tokens and 920 seconds, with 99% of time in test execution, not LLM inference.",
+            "source_urls": ["https://arxiv.org/html/2403.17134v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "The Art of Repair uses a fixed patch budget of 10 patches maximum per bug across all strategies, formalized as no + (ni × i) ≤ 10. ThinkRepair caps its Collect-Fix loop at 5 interactions. ChatRepair limits to 5 regeneration rounds.",
+            "source_urls": ["https://arxiv.org/html/2505.02931v1", "https://arxiv.org/pdf/2407.20898", "https://arxiv.org/html/2506.23749v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "SWE-bench evaluation uses pass@1 and pass@3 metrics, establishing 3 independent attempts as a practical retry budget norm. SWE-agent's multi-attempt config runs 5 attempts with varied configs, then uses a discriminator model to select the best result.",
+            "source_urls": ["https://www.verdent.ai/blog/swe-bench-verified-technical-report", "https://swe-agent.com/latest/usage/competitive_runs/"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Hard fixed budgets (not adaptive detection) are the dominant termination mechanism. Iteration limits cluster: 3-5 for focused repair loops, 10 for patch budgets, 40-100 for full autonomous agents. Every tool has documented failure modes where the loop does NOT converge — hard limits are the only reliable safety net."
+      },
+      {
+        "theme": "Anti-oscillation and convergence detection",
+        "claims": [
+          {
+            "claim": "RepairAgent implements exact-duplicate command detection: if the agent proposes the same tool call with identical arguments twice consecutively, the middleware flags it and forces a new cycle. This is the only explicit anti-oscillation mechanism in the paper.",
+            "source_urls": ["https://arxiv.org/html/2403.17134v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "PatchAgent prevents oscillation by treating failed patches as counterexamples: each failed validation result is injected into subsequent prompts instructing the LLM not to generate similar patches again.",
+            "source_urls": ["https://cs.uwaterloo.ca/~m285xu/assets/publication/patch_agent-paper.pdf"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Cycling detection via state hashing: maintain a history of codebase state using cryptographic hashes after each repair pass. If a new pass produces a state identical to a previous one, the system detects circular dependency and terminates. ESLint uses this exact pattern for --fix.",
+            "source_urls": ["https://eslint.org/docs/latest/use/command-line-interface#--fix"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "Progress metrics track the delta in validation failures across iterations. If the error count remains stagnant or flaps between the same numbers for several turns, the system identifies lack of progress and can change strategy or terminate.",
+            "source_urls": ["https://aider.chat/docs/usage/watch.html"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "Cursor has a documented oscillation failure mode: the agent fixes Bug A, the fix introduces Bug B, the agent reverts to reintroduce Bug A, creating an oscillating cycle that does not converge. Users must break the loop manually.",
+            "source_urls": ["https://forum.cursor.com/t/getting-stuck-in-a-loop-cursor-fixes-one-bug-but-brings-another-then-repeats-the-first-again/75633"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "DynaFix re-executes the modified program after each failed patch to collect new dynamic execution information (variable states, control-flow paths), creating a convergence signal based on whether new failure data differs from prior iterations.",
+            "source_urls": ["https://arxiv.org/html/2512.24635"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Three complementary anti-oscillation mechanisms exist: (1) state hashing to detect repeated codebase states, (2) progress metrics monitoring error count deltas, (3) counterexample injection of failed patches. No production system implements all three. Semantic/hash-based near-duplicate detection is an unsolved gap."
+      },
+      {
+        "theme": "Hierarchical validation ordering",
+        "claims": [
+          {
+            "claim": "Hierarchical validation follows a fast-to-slow gatekeeping pattern: (1) Syntax/parse checks, (2) Linting/static analysis, (3) Type checking, (4) Unit tests on modified files, (5) Full test suite. Each level acts as a gatekeeper — failure prevents running more expensive downstream checks.",
+            "source_urls": ["https://arxiv.org/abs/2103.04149", "https://addyosmani.com/blog/self-improving-agents/"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "SWE-agent's inline linter automatically triggers after every edit and rejects edits with syntax errors BEFORE they are saved, creating a tight inner correction loop that prevents wasting full test runs on syntactically invalid code.",
+            "source_urls": ["https://swe-agent.com/", "https://arxiv.org/abs/2405.15793"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Process-based feedback (feeding intermediate build/test logs back into the model) is more effective than outcome-based feedback (simple pass/fail signals). Process feedback allows the system to fix last-mile errors like syntax issues or missing imports not part of the original bug.",
+            "source_urls": ["https://www.cs.cmu.edu/~ckaestne/pdf/icse24b.pdf"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "Cost-aware test prioritization runs high-yield tests first: tests that exercise modified lines of code, or tests that have historically failed for similar changes. This avoids running the full test suite when targeted tests provide faster signal.",
+            "source_urls": ["https://arxiv.org/abs/2103.04149"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          }
+        ],
+        "key_insight": "The validation pyramid (syntax→lint→types→unit tests→integration tests) is not an optimization — it is a structural requirement. Each layer creates a cheap inner correction loop. SWE-agent's pre-save syntax check is the strongest example: it never wastes a test run on broken syntax."
+      },
+      {
+        "theme": "State management and rollback",
+        "claims": [
+          {
+            "claim": "Formal state machines are not the industry norm. The dominant pattern is ReAct trajectory accumulation combined with persistent file-based artifacts (task lists, progress logs, git history) that survive context resets between iterations.",
+            "source_urls": ["https://addyosmani.com/blog/self-improving-agents/", "https://arxiv.org/html/2507.18755"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "SWE-agent models state as: START → ISSUE_ANALYSIS → EXPLORATION → LOCALIZATION → EDITING → VERIFICATION → REFINEMENT (loop back to EDITING or EXPLORATION) → SUBMISSION. The agent chooses its next state at each step.",
+            "source_urls": ["https://arxiv.org/abs/2405.15793"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Devin maintains VM state snapshots (checkpoints). If a fix attempt leads to a rabbit hole or breaks more code, it restores a previous checkpoint and tries a different strategy.",
+            "source_urls": ["https://devin.ai", "https://www.cognition.ai/blog/introducing-devin"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Cursor creates git-like checkpoint stashes before each fix for safe rollback. Aider is strictly git-native, committing every successful iteration with an AI-generated message.",
+            "source_urls": ["https://cursor.com/features", "https://aider.chat/docs/architect.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Context reset between iterations is a deliberate architectural choice to prevent 'confusion accumulation': agents maintain a clean context window per iteration and reconstruct state from persistent artifacts (task list, git log).",
+            "source_urls": ["https://addyosmani.com/blog/self-improving-agents/"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Spotify's Honk system uses individual verifiers that activate based on component contents (e.g., Maven verifier triggers on pom.xml presence), with an LLM-as-a-judge layer that vetoes ~25% of agent sessions; agents self-correct ~50% of the time after a veto.",
+            "source_urls": ["https://engineering.atspotify.com/2025/12/feedback-loops-background-coding-agents-part-3"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Git is the de facto state management layer for fix loops. Checkpoint-before-fix (git commit or stash) enables rollback without formal state machines. ReAct trajectory + persistent artifacts replaces explicit state tracking in most implementations."
+      },
+      {
+        "theme": "Multimodal diagnostic normalization",
+        "claims": [
+          {
+            "claim": "Claude Code's official best practices recommend providing screenshots as verification criteria for UI changes. The prescribed workflow is: paste reference screenshot → implement → screenshot result → compare → list differences → fix — forming a visual feedback loop.",
+            "source_urls": ["https://code.claude.com/docs/en/best-practices"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Visual regression tools use three primary comparison algorithms: pixel-by-pixel diff (pixelmatch), structural similarity (SSIM), and perceptual hashing. jest-image-snapshot uses pixelmatch by default with SSIM as an alternative that produces fewer false positives.",
+            "source_urls": ["https://github.com/americanexpress/jest-image-snapshot"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Compiler ecosystems are converging on native JSON diagnostic output: rustc supports --error-format=json, GCC 9+ supports -fdiagnostics-format=json. TypeScript has no native JSON output — requires --pretty false with regex parsing.",
+            "source_urls": ["https://doc.rust-lang.org/rustc/", "https://gcc.gnu.org/", "https://www.typescriptlang.org/"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "SARIF (Static Analysis Results Interchange Format) is the industry standard for structured analysis results, but is too verbose for LLM context windows. Flattening tools (sarif-to-md-rs, Docling) and source-context enrichment (5-10 surrounding lines) are needed as normalization steps.",
+            "source_urls": ["https://sarifweb.azurewebsites.net/"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "No single unified format exists that merges visual diff output and text diagnostics into one schema for LLM consumption. Agents must bridge two channels: LSP JSON-RPC for text errors and image comparison pipelines (pixelmatch/SSIM) for visual output.",
+            "source_urls": ["https://github.com/americanexpress/jest-image-snapshot", "https://amirteymoori.com/lsp-language-server-protocol-ai-coding-tools/"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "MCP is emerging as the integration standard for connecting repair agents to visual regression tools and structured log sources, enabling a unified diagnostic pipeline: detect → assemble (screenshots + accessibility tree + logs) → refine → repair → validate.",
+            "source_urls": ["https://modelcontextprotocol.io"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          }
+        ],
+        "key_insight": "Visual diffs must become structured semantic descriptions ('button shifted 20px left in .nav-header') before an LLM can reason about repairs. Text errors need JSON normalization. No unified schema exists — the agent must bridge visual and text channels itself."
+      },
+      {
+        "theme": "CLI UX and programmatic invocation",
+        "claims": [
+          {
+            "claim": "Claude Code -p (--print) flag enables non-interactive headless mode. Combined with --output-format json for structured output, --max-budget-usd for cost caps, and --max-turns to prevent infinite loops. Session chaining via -c or -r <session-id> enables multi-step automation.",
+            "source_urls": ["https://github.com/anthropics/claude-code"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Claude Code skills use YAML frontmatter in SKILL.md. disable-model-invocation: true removes a skill from Claude's awareness entirely, requiring explicit /command invocation — the canonical pattern for side-effectful long-running operations. context: fork runs in an isolated subagent.",
+            "source_urls": ["https://code.claude.com/docs/en/skills"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Three human-in-the-loop steering paradigms: checkpoint-based (Claude Code rewind, LangGraph approve/reject), inline-hint (Gemini CLI steering where typed text redirects the agent mid-processing), and git-based (Aider undo reverting commits).",
+            "source_urls": ["https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview", "https://geminicli.com/docs/features/steering", "https://aider.chat/docs/usage.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "The bundled /loop skill runs a prompt repeatedly on an interval. /batch decomposes work into 5-30 independent units, presents a plan, then spawns one background agent per unit in isolated git worktrees.",
+            "source_urls": ["https://code.claude.com/docs/en/skills"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "CLI progress best practices: action-gated spinners (tick on completion, not time), dual-granularity (high-level step + low-level activity), TTY detection for graceful degradation to plain text in CI/piped contexts.",
+            "source_urls": ["https://evilmartians.com/chronicles/cli-ux-best-practices-3-patterns-for-improving-progress-displays", "https://clig.dev/"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          }
+        ],
+        "key_insight": "Claude Code's -p mode + --max-turns + --output-format json + session chaining gives us everything needed for programmatic invocation. The skill system's context: fork and disable-model-invocation provide the isolation and safety controls for a long-running fix loop."
+      }
+    ],
+    "angle_summaries": [
+      {
+        "angle": "AI agent auto-fix implementations",
+        "source": "both",
+        "finding_count": 20,
+        "key_insights": [
+          "Universal execute→capture→diagnose→fix→revalidate pattern across all tools",
+          "Pre-validation gates (SWE-agent inline linter, Cursor Code-Apply model) prevent bad edits from persisting",
+          "Architect-Editor split decouples reasoning from edit application, reducing edit-match failures"
+        ]
+      },
+      {
+        "angle": "Multimodal diagnostic normalization",
+        "source": "both",
+        "finding_count": 15,
+        "key_insights": [
+          "Visual diffs need semantic conversion before LLM consumption — raw pixels are insufficient",
+          "JSON diagnostic output converging for compilers (rustc, gcc) but TypeScript lags",
+          "No unified schema exists for combining visual and text diagnostics"
+        ]
+      },
+      {
+        "angle": "Convergence, termination, and anti-oscillation",
+        "source": "both",
+        "finding_count": 15,
+        "key_insights": [
+          "Hard fixed budgets are dominant: 3-5 for tight loops, 40-100 for full agents",
+          "Oscillation prevention is underdeveloped — only exact-duplicate and counterexample injection exist",
+          "SWE-agent: without cost cap, cost literally diverges to infinity"
+        ]
+      },
+      {
+        "angle": "Feedback loop orchestration and state management",
+        "source": "both",
+        "finding_count": 18,
+        "key_insights": [
+          "ReAct trajectory + git-based artifacts replaces formal state machines",
+          "Validation pyramid (syntax→lint→types→tests) is structural, not optional",
+          "Spotify Honk: LLM-as-a-judge vetoes 25% of sessions, agents self-correct 50% of time"
+        ]
+      },
+      {
+        "angle": "CLI UX and programmatic control",
+        "source": "both",
+        "finding_count": 18,
+        "key_insights": [
+          "Claude Code -p + --max-turns + json output = complete programmatic interface",
+          "Three steering paradigms: checkpoint, inline-hint, git-based",
+          "context: fork in skills provides isolated subagent execution"
+        ]
+      }
+    ],
+    "citations": [
+      {"url": "https://platform.claude.com/docs/en/agent-sdk/agent-loop", "title": "How the agent loop works — Anthropic Claude Agent SDK", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations", "CLI UX and programmatic control"]},
+      {"url": "https://aider.chat/docs/usage/lint-test.html", "title": "Linting and testing — aider official docs", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations"]},
+      {"url": "https://aider.chat/docs/architect.html", "title": "Architect mode — aider official docs", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations"]},
+      {"url": "https://swe-agent.com/", "title": "SWE-agent official site", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations", "Convergence"]},
+      {"url": "https://arxiv.org/abs/2405.15793", "title": "SWE-agent: Agent-Computer Interfaces — NeurIPS 2024", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations", "Feedback loop orchestration"]},
+      {"url": "https://swe-agent.com/latest/usage/competitive_runs/", "title": "SWE-agent Competitive Runs Documentation", "quality": "authoritative", "referenced_by": ["Convergence"]},
+      {"url": "https://arxiv.org/html/2403.17134v1", "title": "RepairAgent: An Autonomous LLM-Based Agent for Program Repair", "quality": "authoritative", "referenced_by": ["Convergence"]},
+      {"url": "https://arxiv.org/html/2505.02931v1", "title": "The Art of Repair: Optimizing Iterative Program Repair", "quality": "authoritative", "referenced_by": ["Convergence"]},
+      {"url": "https://arxiv.org/html/2506.23749v1", "title": "A Survey of LLM-based Automated Program Repair", "quality": "authoritative", "referenced_by": ["Convergence"]},
+      {"url": "https://cognition.ai/blog/closing-the-agent-loop-devin-autofixes-review-comments", "title": "Devin Autofixes Review Comments — Cognition blog", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations"]},
+      {"url": "https://code.visualstudio.com/blogs/2025/02/24/introducing-copilot-agent-mode", "title": "GitHub Copilot agent mode (preview) — VS Code blog", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations"]},
+      {"url": "https://code.claude.com/docs/en/skills", "title": "Extend Claude with skills — Claude Code official docs", "quality": "authoritative", "referenced_by": ["CLI UX and programmatic control"]},
+      {"url": "https://code.claude.com/docs/en/best-practices", "title": "Best Practices for Claude Code — Anthropic", "quality": "authoritative", "referenced_by": ["Multimodal diagnostic normalization"]},
+      {"url": "https://addyosmani.com/blog/self-improving-agents/", "title": "Self-Improving Coding Agents — Addy Osmani", "quality": "authoritative", "referenced_by": ["Feedback loop orchestration"]},
+      {"url": "https://engineering.atspotify.com/2025/12/feedback-loops-background-coding-agents-part-3", "title": "Spotify Honk — Background Coding Agents Part 3", "quality": "authoritative", "referenced_by": ["Feedback loop orchestration"]},
+      {"url": "https://aclanthology.org/2024.findings-acl.486/", "title": "Drafter-Auditor pattern — ACL Findings 2024", "quality": "authoritative", "referenced_by": ["Feedback loop orchestration"]},
+      {"url": "https://github.com/americanexpress/jest-image-snapshot", "title": "Jest Image Snapshot — AmEx", "quality": "authoritative", "referenced_by": ["Multimodal diagnostic normalization"]},
+      {"url": "https://eslint.org/docs/latest/use/command-line-interface#--fix", "title": "ESLint --fix CLI — ESLint official docs", "quality": "authoritative", "referenced_by": ["Convergence"]},
+      {"url": "https://github.com/garris/BackstopJS", "title": "BackstopJS — garris/BackstopJS", "quality": "authoritative", "referenced_by": ["Multimodal diagnostic normalization"]},
+      {"url": "https://dl.acm.org/doi/10.1145/3696450", "title": "Evolving Paradigms in Automated Program Repair — ACM Computing Surveys", "quality": "authoritative", "referenced_by": ["Feedback loop orchestration"]},
+      {"url": "https://arxiv.org/html/2507.18755", "title": "Agentic Program Repair from Test Failures at Scale", "quality": "authoritative", "referenced_by": ["Feedback loop orchestration"]},
+      {"url": "https://cognition.ai/blog/swe-bench-technical-report", "title": "Devin SWE-bench Technical Report", "quality": "authoritative", "referenced_by": ["Feedback loop orchestration"]},
+      {"url": "https://cursor.com/features", "title": "Cursor Features", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations"]},
+      {"url": "https://evilmartians.com/chronicles/cli-ux-best-practices-3-patterns-for-improving-progress-displays", "title": "CLI UX best practices: progress displays — Evil Martians", "quality": "authoritative", "referenced_by": ["CLI UX and programmatic control"]},
+      {"url": "https://clig.dev/", "title": "Command Line Interface Guidelines", "quality": "authoritative", "referenced_by": ["CLI UX and programmatic control"]},
+      {"url": "https://geminicli.com/docs/features/steering", "title": "Gemini CLI model steering", "quality": "informative", "referenced_by": ["CLI UX and programmatic control"]},
+      {"url": "https://forum.cursor.com/t/getting-stuck-in-a-loop-cursor-fixes-one-bug-but-brings-another-then-repeats-the-first-again/75633", "title": "Cursor oscillation bug — community forum", "quality": "informative", "referenced_by": ["Convergence"]},
+      {"url": "https://arxiv.org/html/2512.24635", "title": "DynaFix: Iterative Automated Program Repair", "quality": "informative", "referenced_by": ["Convergence"]},
+      {"url": "https://cs.uwaterloo.ca/~m285xu/assets/publication/patch_agent-paper.pdf", "title": "PatchAgent — University of Waterloo", "quality": "authoritative", "referenced_by": ["Convergence"]},
+      {"url": "https://www.swebench.com/verified.html", "title": "SWE-bench Verified Leaderboard", "quality": "authoritative", "referenced_by": ["AI agent auto-fix implementations"]}
+    ],
+    "conflicts": [],
+    "gaps": [
+      "No published system implements semantic/hash-based near-duplicate detection for oscillating patches that differ in trivial ways — only exact-duplicate detection exists",
+      "Adaptive convergence detection (measuring progress dynamically rather than fixed iteration limits) is mentioned as future work but not implemented in any reviewed system",
+      "No unified schema exists for combining visual regression diffs with structured text diagnostics into a single normalized payload for LLM consumption",
+      "How auto-fix systems handle flaky tests or non-deterministic failures is not documented — most assume deterministic validation outcomes",
+      "Optimal circuit breaker thresholds (iteration limits, token budgets) for different task complexities — all current systems use fixed limits rather than adaptive ones",
+      "No published benchmarks comparing multimodal (visual + text) repair accuracy vs text-only repair accuracy",
+      "Resumable fix loops (kill and restart mid-iteration without losing progress) have no documented patterns"
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "slug": "audit-infra-fixes",
+  "title": "Fix hook/shell infrastructure bugs from AUDIT.md",
+  "scope": {
+    "files": 8,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "needs_research": false,
+  "in_scope": [
+    "BUG-1: Shell variable interpolation into Python heredocs (guard-direct-edit.sh lines 109-146)",
+    "BUG-2: inject-tier2-context.sh invalid JSON from unescaped control chars (lines 122-124)",
+    "BUG-3: TOCTOU race in stop_processor lockfile (stop_processor.py lines 23-49)",
+    "BUG-4: om_write.py missing WAL mode/busy_timeout on all 6 sqlite3.connect() calls",
+    "BUG-13: guard-protected-files.sh PID-based SESSION_ID for permission file (line 55)",
+    "CQ-2: Shell-subprocess SQLite in load-session-context.sh (lines 66-99, 141-146, 210-312, 317-378)",
+    "CQ-3: Inline Python repeated across 5 hooks — extract parse_hook_input.py helper",
+    "CQ-8: Inconsistent tilde vs absolute paths in settings.json (lines 14, 15, 162, 163)",
+    "CQ-9: Dead compliance hooks in settings.json causing timeout (lines 81-89, 16-17)"
+  ],
+  "out_of_scope": [
+    "Memory pipeline bugs (BUG-5, BUG-6, BUG-10, BUG-11, BUG-12) — separate presearch",
+    "PM tool bugs (BUG-7, BUG-8, BUG-9) — separate presearch",
+    "Gemini MCP server issues (CQ-1, CQ-4, CQ-5, CQ-6, CQ-7, CQ-10, CQ-11) — separate presearch",
+    "Recommendations R-1 through R-7 — separate presearch"
+  ],
+  "stack_detected": [
+    "bash (hook shell scripts)",
+    "python3 (hooks/lib/ modules, inline heredocs in shell hooks)",
+    "sqlite3 (epics.db via subprocess CLI, openmemory.sqlite via Python sqlite3 module)",
+    "FastMCP (MCP server framework — not directly touched but settings.json is shared config)"
+  ],
+  "created_at": "2026-03-14"
+}

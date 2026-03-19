@@ -1,0 +1,42 @@
+{
+  "slug": "refactor-run-stories-skill",
+  "skill": "scope",
+  "scope": {
+    "files": 6,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [],
+  "data": {
+    "topic": "Refactor run-stories SKILL.md: extract procedural logic (worktree setup, conflict detection, merge gate, batch verification) into Python/bash scripts, reduce SKILL.md to a concise orchestration prompt that calls those scripts",
+    "what": "Extract the 640-line run-stories SKILL.md into callable scripts + a concise orchestration prompt",
+    "audience": "Claude Code coder agents executing stories",
+    "platform": "CLI (Claude Code hooks/skills infrastructure)",
+    "in_scope": [
+      "Worktree setup/teardown script",
+      "Conflict detection script (file-level and symbol-level)",
+      "Merge gate with test agent cherry-pick validation",
+      "Batch verification between execution groups",
+      "Reduced SKILL.md that calls scripts instead of encoding procedures",
+      "Resolution subagent prompt construction"
+    ],
+    "out_of_scope": [
+      "Changing the worktree isolation model itself",
+      "Changing the Gemini/Claude dual-model architecture",
+      "Modifying merge-worktree skill",
+      "Changing epics.db schema",
+      "Modifying the presearch pipeline"
+    ],
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": null,
+        "language": "bash/python",
+        "dependencies": ["sqlite3", "ollama", "git"]
+      }
+    ],
+    "needs_research": false,
+    "complexity_reasoning": "Internal infrastructure refactor with complete codebase knowledge — no external APIs or domain-specific research needed."
+  }
+}

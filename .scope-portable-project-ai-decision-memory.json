@@ -1,0 +1,45 @@
+{
+  "slug": "portable-project-ai-decision-memory",
+  "skill": "scope",
+  "scope": {
+    "files": 18,
+    "stories": 7,
+    "complexity": "large"
+  },
+  "route_hint": "research",
+  "prev": [],
+  "data": {
+    "topic": "portable per-project AI decision memory: vector-backed decision tracking for legacy codebases that auto-discovers implicit architectural decisions, stores them with file-level associations in a portable embedded database, and dynamically injects relevant context at edit time",
+    "what": "Core library for per-project decision tracking with vector search + Claude Code integration layer. Auto-discovers implicit architectural decisions in legacy codebases, stores them with file-level associations, and dynamically injects relevant context when an AI is editing files.",
+    "audience": "Kelsi's projects first, then other developers/teams using AI coding tools on legacy codebases",
+    "platform": "CLI library + Claude Code MCP server/plugin",
+    "in_scope": [
+      "Per-project portable decision database (.claude/decisions.db)",
+      "Vector-backed semantic search for decisions",
+      "Auto-discovery pipeline (AI reads code, proposes implicit decisions)",
+      "File-level association (decisions linked to files/functions/patterns)",
+      "Edit-time context injection (surface relevant decisions when modifying files)",
+      "Portability across machines (clone repo, decisions work)",
+      "Scale to 100k+ LOC codebases"
+    ],
+    "out_of_scope": [
+      "Replacing OpenMemory (this complements it, per-project vs global)",
+      "Real-time collaboration / multi-user editing",
+      "Non-AI consumers (this is for AI coding tools, not human dashboards)",
+      "Language-specific AST parsing (start with file/function-level, not expression-level)"
+    ],
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": null,
+        "language": "python/shell",
+        "dependencies": ["sqlite3", "ollama/nomic-embed-text", "openmemory-mcp"]
+      }
+    ],
+    "problem": "Decisions are stored globally in epics.db and openmemory.sqlite, not per-project. When cloning a repo on a new machine or onboarding a new AI session, critical context about 'why the code is this way' is lost. Legacy codebases have implicit decisions that no one documented — AI tools break them because they look like bugs.",
+    "why": "Without this, every new AI session on a legacy codebase is a liability. The AI will 'fix' intentional workarounds, violate compliance constraints it doesn't know about, and refactor away load-bearing hacks. The cost compounds with codebase size.",
+    "end_goal": "An AI working on any file in a project automatically sees the 2-5 most relevant decisions for that file. New projects can run a discovery scan and have a populated decision store in minutes. The store travels with the repo — no external services required for basic operation.",
+    "needs_research": true,
+    "complexity_reasoning": "Involves unfamiliar territory: portable embedding stores without runtime model dependency, auto-discovery of implicit decisions from code, and edit-time injection patterns. Multiple external unknowns that the codebase can't answer."
+  }
+}

@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Pipeline — Current vs. Refactored</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0f1117; color: #e2e8f0; padding: 24px 32px;
+  }
+  h1 { font-size: 1.3rem; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
+  .subtitle { font-size: 0.8rem; color: #64748b; margin-bottom: 28px; }
+
+  .tab-bar {
+    display: flex; gap: 0; margin-bottom: 0; border-bottom: 2px solid #2d3748;
+  }
+  .tab {
+    padding: 10px 28px; font-size: 0.85rem; font-weight: 600;
+    color: #64748b; cursor: pointer; border: 2px solid transparent;
+    border-bottom: none; border-radius: 8px 8px 0 0; transition: all .15s;
+    user-select: none;
+  }
+  .tab:hover { color: #94a3b8; background: #1a1f2e; }
+  .tab.active-current { color: #f87171; background: #1e2330; border-color: #2d3748; border-bottom-color: #1e2330; margin-bottom: -2px; }
+  .tab.active-refactored { color: #34d399; background: #1e2330; border-color: #2d3748; border-bottom-color: #1e2330; margin-bottom: -2px; }
+
+  .panel { display: none; background: #1e2330; border: 2px solid #2d3748; border-top: none; border-radius: 0 0 10px 10px; padding: 32px; }
+  .panel.visible { display: block; }
+
+  /* Flowchart styles */
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .flow-row { display: flex; align-items: flex-start; gap: 24px; width: 100%; justify-content: center; flex-wrap: wrap; }
+
+  .node {
+    border-radius: 10px; padding: 14px 18px; text-align: center;
+    font-size: 0.78rem; line-height: 1.45; min-width: 180px; max-width: 260px;
+    position: relative;
+  }
+  .node .label { font-weight: 700; font-size: 0.82rem; margin-bottom: 4px; }
+  .node .detail { color: #94a3b8; font-size: 0.72rem; }
+
+  /* Node types */
+  .node.trigger { background: #1a2744; border: 2px solid #3b82f6; color: #93c5fd; }
+  .node.process { background: #1a2d2a; border: 2px solid #10b981; color: #6ee7b7; }
+  .node.store { background: #2a1f3d; border: 2px solid #8b5cf6; color: #c4b5fd; border-radius: 6px; }
+  .node.output { background: #2d2a1a; border: 2px solid #f59e0b; color: #fcd34d; }
+  .node.broken { background: #2d1a1a; border: 2px dashed #ef4444; color: #fca5a5; opacity: 0.7; }
+  .node.new { background: #0f2d1a; border: 2px solid #22c55e; color: #86efac; box-shadow: 0 0 12px rgba(34,197,94,0.15); }
+  .node.fixed { background: #1a2d2a; border: 2px solid #14b8a6; color: #5eead4; box-shadow: 0 0 8px rgba(20,184,166,0.12); }
+  .node.decision { background: #2d2a1a; border: 2px solid #eab308; color: #fde047; clip-path: none; }
+
+  /* Arrows */
+  .arrow {
+    display: flex; flex-direction: column; align-items: center;
+    color: #475569; font-size: 0.65rem; padding: 4px 0;
+  }
+  .arrow svg { width: 20px; height: 28px; }
+  .arrow .arrow-label { color: #64748b; margin-top: 2px; font-style: italic; }
+
+  .arrow-h { display: flex; align-items: center; color: #475569; padding: 0 6px; }
+  .arrow-h svg { width: 32px; height: 20px; }
+
+  .arrow.broken-arrow { color: #ef4444; opacity: 0.5; }
+  .arrow.broken-arrow svg line, .arrow.broken-arrow svg polygon { stroke: #ef4444; fill: #ef4444; }
+
+  /* Section dividers */
+  .phase-label {
+    width: 100%; text-align: left; font-size: 0.7rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.1em; padding: 16px 0 8px 4px;
+    border-top: 1px solid #2d3748; margin-top: 16px;
+  }
+  .phase-label.start { color: #3b82f6; border-color: #1e3a5f; }
+  .phase-label.runtime { color: #10b981; border-color: #134e4a; }
+  .phase-label.end { color: #f59e0b; border-color: #78350f; }
+  .phase-label.feedback { color: #8b5cf6; border-color: #4c1d95; }
+
+  /* Legend */
+  .legend {
+    display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 24px;
+    padding: 12px 16px; background: #161b26; border-radius: 8px;
+    border: 1px solid #2d3748;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: #94a3b8; }
+  .legend-swatch {
+    width: 16px; height: 16px; border-radius: 4px; border: 2px solid;
+  }
+
+  /* Status badges */
+  .badge {
+    display: inline-block; font-size: 0.6rem; font-weight: 700;
+    padding: 2px 6px; border-radius: 4px; margin-left: 4px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .badge.works { background: #064e3b; color: #6ee7b7; }
+  .badge.broken { background: #450a0a; color: #fca5a5; }
+  .badge.partial { background: #451a03; color: #fdba74; }
+  .badge.new-badge { background: #052e16; color: #86efac; }
+  .badge.fixed-badge { background: #042f2e; color: #5eead4; }
+
+  /* Parallel branch container */
+  .parallel-group {
+    display: flex; gap: 16px; padding: 16px; background: #161b26;
+    border: 1px dashed #374151; border-radius: 10px; position: relative;
+  }
+  .parallel-group::before {
+    content: attr(data-label); position: absolute; top: -10px; left: 16px;
+    background: #161b26; padding: 0 8px; font-size: 0.6rem; color: #64748b;
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+
+  .stage-group {
+    display: flex; flex-direction: column; align-items: center; gap: 0;
+    flex: 1;
+  }
+
+  /* Summary cards */
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+  .summary-card {
+    background: #161b26; border: 1px solid #2d3748; border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .summary-card h3 { font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .summary-card ul { list-style: none; padding: 0; }
+  .summary-card li { font-size: 0.75rem; padding: 3px 0; color: #cbd5e1; }
+  .summary-card li::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 8px; }
+  .summary-card.working li::before { background: #10b981; }
+  .summary-card.broken-card li::before { background: #ef4444; }
+  .summary-card.aspirational li::before { background: #f59e0b; }
+  .summary-card.refactor li::before { background: #22c55e; }
+
+  .note-box {
+    margin-top: 20px; padding: 12px 16px; background: #161b26;
+    border-left: 3px solid #6366f1; border-radius: 0 8px 8px 0;
+    font-size: 0.78rem; color: #94a3b8; line-height: 1.5;
+  }
+  .note-box strong { color: #e2e8f0; }
+</style>
+</head>
+<body>
+
+<h1>Memory & Self-Learning Pipeline</h1>
+<p class="subtitle">Audit date: 2026-03-14 &mdash; Current state vs. proposed refactor</p>
+
+<div class="tab-bar">
+  <div class="tab active-current" id="tab-current" onclick="showPanel('current')">Current State</div>
+  <div class="tab" id="tab-refactored" onclick="showPanel('refactored')">After Refactor</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CURRENT STATE PANEL                                           -->
+<!-- ============================================================ -->
+<div class="panel visible" id="panel-current">
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#3b82f6; background:#1a2744;"></div> Trigger / Event</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#10b981; background:#1a2d2a;"></div> Working Process</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#8b5cf6; background:#2a1f3d;"></div> Data Store</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#f59e0b; background:#2d2a1a;"></div> Output / Effect</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#ef4444; background:#2d1a1a; border-style:dashed;"></div> Broken / Dead Code</div>
+  </div>
+
+  <div class="flow">
+
+    <!-- SESSION START PHASE -->
+    <div class="phase-label start">Session Start &mdash; load-session-context.sh</div>
+
+    <div class="flow-row">
+      <div class="node trigger">
+        <div class="label">Session Begins</div>
+        <div class="detail">Hook event: session-init</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node process">
+        <div class="label">Schema Migration <span class="badge works">works</span></div>
+        <div class="detail">Adds text, source columns to correction_groups if missing. Creates index.</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node process">
+        <div class="label">Render Preferences <span class="badge works">works</span></div>
+        <div class="detail">SQL query on correction_groups &rarr; writes rendered-prefs.md</div>
+      </div>
+      <div class="node store">
+        <div class="label">epics.db</div>
+        <div class="detail">correction_groups table (59 rows)</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node output">
+        <div class="label">rendered-prefs.md <span class="badge works">works</span></div>
+        <div class="detail">@imported into CLAUDE.md. Survives context compaction. 7 entries currently.</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node process">
+        <div class="label">Prune OpenMemory <span class="badge works">works</span></div>
+        <div class="detail">om_write.prune_expired() &mdash; deletes decayed entries &lt; 0.01 salience</div>
+      </div>
+      <div class="node process">
+        <div class="label">Trust Calibration <span class="badge works">works</span></div>
+        <div class="detail">compute_trust_scores() from merge_outcomes (72 records)</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node output">
+        <div class="label">Context Injection <span class="badge works">works</span></div>
+        <div class="detail">Top 5 tool learnings + trust level + session agenda displayed in system message</div>
+      </div>
+    </div>
+
+    <!-- RUNTIME PHASE -->
+    <div class="phase-label runtime">Runtime &mdash; During Session</div>
+
+    <div class="flow-row">
+      <div class="node trigger">
+        <div class="label">User Corrects Claude</div>
+        <div class="detail">"don't do X", "I said Y", "stop doing Z"</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node process">
+        <div class="label">Manual Log <span class="badge partial">optional</span></div>
+        <div class="detail">log-correction.sh &mdash; Claude runs when it notices a correction (or user says "log")</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg><div class="arrow-label">upsert</div></div>
+
+    <div class="flow-row">
+      <div class="node store">
+        <div class="label">correction_groups <span class="badge works">works</span></div>
+        <div class="detail">accumulating &rarr; pending_promotion (count &ge; 3) &rarr; promoted</div>
+      </div>
+    </div>
+
+    <!-- SESSION END PHASE -->
+    <div class="phase-label end">Session End &mdash; stop_processor.py (background)</div>
+
+    <div class="flow-row">
+      <div class="node trigger">
+        <div class="label">Session Ends</div>
+        <div class="detail">session-learning-check.sh spawns stop_processor.py via nohup</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="parallel-group" data-label="5-stage background pipeline">
+
+      <!-- Stage 1 -->
+      <div class="stage-group">
+        <div class="node process">
+          <div class="label">Stage 1: Detect <span class="badge works">works</span></div>
+          <div class="detail">Embedding-based correction detection. 10 prototypes, cosine &ge; 0.55. Max 5 embeds/session.</div>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+        <div class="node store">
+          <div class="label">correction_groups</div>
+          <div class="detail">upsert detected corrections</div>
+        </div>
+      </div>
+
+      <!-- Stage 2 -->
+      <div class="stage-group">
+        <div class="node broken">
+          <div class="label">Stage 2: Signal <span class="badge broken">dead</span></div>
+          <div class="detail">Correlate corrections to decisions. Update signal_score. Table never created.</div>
+        </div>
+        <div class="arrow broken-arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#ef4444" stroke-width="2" stroke-dasharray="4,3"/><polygon points="5,20 10,28 15,20" fill="#ef4444"/></svg></div>
+        <div class="node broken">
+          <div class="label">decision_preferences</div>
+          <div class="detail">TABLE MISSING &mdash; never created in any migration</div>
+        </div>
+      </div>
+
+      <!-- Stage 3 -->
+      <div class="stage-group">
+        <div class="node process">
+          <div class="label">Stage 3: Summarize <span class="badge works">works</span></div>
+          <div class="detail">Session summary to OpenMemory. Requires &ge;3 turns, &ge;5 min.</div>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+        <div class="node store">
+          <div class="label">OpenMemory</div>
+          <div class="detail">tag: session-summary (20 records)</div>
+        </div>
+      </div>
+
+      <!-- Stage 4 -->
+      <div class="stage-group">
+        <div class="node process">
+          <div class="label">Stage 4: Distill <span class="badge works">works</span></div>
+          <div class="detail">Promote pending &rarr; promoted. Shadow to OpenMemory.</div>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+        <div class="node store">
+          <div class="label">OpenMemory</div>
+          <div class="detail">tag: behavioral-pref (17 records)</div>
+        </div>
+      </div>
+
+      <!-- Stage 5 -->
+      <div class="stage-group">
+        <div class="node broken">
+          <div class="label">Stage 5: Hooks <span class="badge broken">dead</span></div>
+          <div class="detail">Generate enforcement hooks from promoted prefs. compliance/ dir never created.</div>
+        </div>
+        <div class="arrow broken-arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#ef4444" stroke-width="2" stroke-dasharray="4,3"/><polygon points="5,20 10,28 15,20" fill="#ef4444"/></svg></div>
+        <div class="node broken">
+          <div class="label">compliance/*.sh</div>
+          <div class="detail">0 hooks generated &mdash; no enforcement</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- FEEDBACK LOOP -->
+    <div class="phase-label feedback">Feedback Loop &mdash; Does Behavior Change?</div>
+
+    <div class="flow-row">
+      <div class="node output">
+        <div class="label">Next Session Context</div>
+        <div class="detail">rendered-prefs.md injected &rarr; Claude "sees" preferences</div>
+      </div>
+      <div class="node broken">
+        <div class="label">Decision Influence <span class="badge broken">dead</span></div>
+        <div class="detail">No signal_score &rarr; no model selection bias &rarr; no behavioral conditioning</div>
+      </div>
+      <div class="node broken">
+        <div class="label">Automated Enforcement <span class="badge broken">dead</span></div>
+        <div class="detail">No hooks &rarr; no pre-tool-use blocking &rarr; relies entirely on LLM reading text</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Summary -->
+  <div class="summary-grid">
+    <div class="summary-card working">
+      <h3>Working</h3>
+      <ul>
+        <li>Correction recording (manual + auto)</li>
+        <li>Threshold promotion (count &ge; 3)</li>
+        <li>Rendered preferences at session start</li>
+        <li>OpenMemory storage + dedup + budgets</li>
+        <li>Trust scores from merge outcomes</li>
+        <li>Session summaries</li>
+        <li>Decay-based pruning</li>
+      </ul>
+    </div>
+    <div class="summary-card broken-card">
+      <h3>Broken / Dead Code</h3>
+      <ul>
+        <li>decision_preferences table (never created)</li>
+        <li>Correction &harr; decision correlation (Stage 2)</li>
+        <li>compliance/ directory (never created)</li>
+        <li>Hook generation pipeline (Stage 5)</li>
+        <li>Temporal fact graph (0 records)</li>
+        <li>Signal score influencing model selection</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note-box">
+    <strong>Bottom line:</strong> The system records and displays corrections reliably. But the "learning" part &mdash;
+    where corrections influence decisions, bias model selection, or generate enforcement hooks &mdash; is entirely
+    non-functional. What exists is <em>self-documenting</em>, not <em>self-learning</em>. The LLM reads a text file;
+    there's no feedback loop that actually conditions behavior beyond prompt injection.
+  </div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- REFACTORED STATE PANEL                                        -->
+<!-- ============================================================ -->
+<div class="panel" id="panel-refactored">
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#3b82f6; background:#1a2744;"></div> Trigger / Event</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#10b981; background:#1a2d2a;"></div> Existing (no changes)</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#14b8a6; background:#1a2d2a; box-shadow: 0 0 6px rgba(20,184,166,0.3);"></div> Fixed (was broken)</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#22c55e; background:#0f2d1a; box-shadow: 0 0 6px rgba(34,197,94,0.3);"></div> New component</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#8b5cf6; background:#2a1f3d;"></div> Data Store</div>
+    <div class="legend-item"><div class="legend-swatch" style="border-color:#f59e0b; background:#2d2a1a;"></div> Output / Effect</div>
+  </div>
+
+  <div class="flow">
+
+    <!-- SESSION START PHASE -->
+    <div class="phase-label start">Session Start &mdash; load-session-context.sh</div>
+
+    <div class="flow-row">
+      <div class="node trigger">
+        <div class="label">Session Begins</div>
+        <div class="detail">Hook event: session-init</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node process">
+        <div class="label">Schema Migration <span class="badge fixed-badge">updated</span></div>
+        <div class="detail">Now also creates decision_preferences table if missing</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node process">
+        <div class="label">Render Preferences</div>
+        <div class="detail">Same SQL query &rarr; rendered-prefs.md</div>
+      </div>
+      <div class="node new">
+        <div class="label">Render Decision Scores <span class="badge new-badge">new</span></div>
+        <div class="detail">Top penalized decisions appended to rendered-prefs.md. "Decisions that went poorly: [context] &mdash; signal: -2.5"</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node output">
+        <div class="label">rendered-prefs.md <span class="badge fixed-badge">enhanced</span></div>
+        <div class="detail">Now includes: behavioral prefs + negatively-scored decisions. Two sections, same @import.</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node process">
+        <div class="label">Prune + Trust</div>
+        <div class="detail">Same as before &mdash; prune expired, compute trust scores</div>
+      </div>
+      <div class="node new">
+        <div class="label">Decision Score Summary <span class="badge new-badge">new</span></div>
+        <div class="detail">Top 3 penalized decision types shown in context. "architecture decisions: avg signal -1.2 (5 samples)"</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node output">
+        <div class="label">Context Injection <span class="badge fixed-badge">richer</span></div>
+        <div class="detail">Tool learnings + trust level + decision health + session agenda</div>
+      </div>
+    </div>
+
+    <!-- RUNTIME PHASE -->
+    <div class="phase-label runtime">Runtime &mdash; During Session</div>
+
+    <div class="flow-row">
+      <div class="node trigger">
+        <div class="label">User Corrects Claude</div>
+        <div class="detail">"don't do X", "I said Y", "stop doing Z"</div>
+      </div>
+      <div class="node trigger">
+        <div class="label">Claude Makes Decision</div>
+        <div class="detail">pm_add_decision, pm_record_decision, or implicit routing choice</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node process">
+        <div class="label">Manual Log</div>
+        <div class="detail">log-correction.sh (unchanged)</div>
+      </div>
+      <div class="node new">
+        <div class="label">Decision Capture <span class="badge new-badge">new</span></div>
+        <div class="detail">pm_add_decision now also writes to decision_preferences with session context</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="flow-row">
+      <div class="node store">
+        <div class="label">correction_groups</div>
+        <div class="detail">Same lifecycle: accumulating &rarr; pending &rarr; promoted</div>
+      </div>
+      <div class="node store">
+        <div class="label">decision_preferences <span class="badge fixed-badge">created</span></div>
+        <div class="detail">Records: type, context, chosen_path, alternatives, signal_score, session_id</div>
+      </div>
+    </div>
+
+    <!-- SESSION END PHASE -->
+    <div class="phase-label end">Session End &mdash; stop_processor.py (background)</div>
+
+    <div class="flow-row">
+      <div class="node trigger">
+        <div class="label">Session Ends</div>
+        <div class="detail">Same spawn mechanism &mdash; nohup background</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+
+    <div class="parallel-group" data-label="5-stage background pipeline (2 stages fixed)">
+
+      <!-- Stage 1 -->
+      <div class="stage-group">
+        <div class="node process">
+          <div class="label">Stage 1: Detect</div>
+          <div class="detail">Unchanged &mdash; embedding-based correction detection</div>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+        <div class="node store">
+          <div class="label">correction_groups</div>
+          <div class="detail">upsert</div>
+        </div>
+      </div>
+
+      <!-- Stage 2 (FIXED) -->
+      <div class="stage-group">
+        <div class="node fixed">
+          <div class="label">Stage 2: Signal <span class="badge fixed-badge">fixed</span></div>
+          <div class="detail">Correlate corrections to decisions via text overlap + temporal proximity. Update signal_score &plusmn;.</div>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+        <div class="node fixed">
+          <div class="label">decision_preferences <span class="badge fixed-badge">active</span></div>
+          <div class="detail">signal_score decremented on matched corrections, incremented on implicit approval</div>
+        </div>
+      </div>
+
+      <!-- Stage 3 -->
+      <div class="stage-group">
+        <div class="node process">
+          <div class="label">Stage 3: Summarize</div>
+          <div class="detail">Unchanged &mdash; session summary to OpenMemory</div>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+        <div class="node store">
+          <div class="label">OpenMemory</div>
+          <div class="detail">session-summary</div>
+        </div>
+      </div>
+
+      <!-- Stage 4 -->
+      <div class="stage-group">
+        <div class="node process">
+          <div class="label">Stage 4: Distill</div>
+          <div class="detail">Unchanged &mdash; promote + shadow to OpenMemory</div>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+        <div class="node store">
+          <div class="label">OpenMemory</div>
+          <div class="detail">behavioral-pref</div>
+        </div>
+      </div>
+
+      <!-- Stage 5 (FIXED) -->
+      <div class="stage-group">
+        <div class="node fixed">
+          <div class="label">Stage 5: Hooks <span class="badge fixed-badge">fixed</span></div>
+          <div class="detail">Creates compliance/ dir. Generates warn-only hooks for hookable patterns.</div>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg></div>
+        <div class="node fixed">
+          <div class="label">compliance/*.sh <span class="badge fixed-badge">active</span></div>
+          <div class="detail">Warn-only hooks registered in settings.json. Never blocks &mdash; just stderr warning.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- FEEDBACK LOOP (THE KEY DIFFERENCE) -->
+    <div class="phase-label feedback">Closed Feedback Loop &mdash; Behavior Actually Changes</div>
+
+    <div class="flow-row">
+      <div class="node output">
+        <div class="label">Prompt Conditioning</div>
+        <div class="detail">rendered-prefs.md with behavioral prefs + penalized decisions injected into every session</div>
+      </div>
+      <div class="node fixed">
+        <div class="label">Decision Influence <span class="badge fixed-badge">active</span></div>
+        <div class="detail">Negatively-scored decisions visible at session start. Claude avoids patterns that were previously corrected.</div>
+      </div>
+      <div class="node fixed">
+        <div class="label">Hook Enforcement <span class="badge fixed-badge">active</span></div>
+        <div class="detail">Pre-tool-use hooks warn before repeating hookable mistakes (CLI danger, tool misuse)</div>
+      </div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 20 28"><line x1="10" y1="0" x2="10" y2="22" stroke="#475569" stroke-width="2"/><polygon points="5,20 10,28 15,20" fill="#475569"/></svg><div class="arrow-label">feeds back into</div></div>
+
+    <div class="flow-row">
+      <div class="node new">
+        <div class="label">Three Learning Channels <span class="badge new-badge">closed loop</span></div>
+        <div class="detail">
+          <strong>1. Text:</strong> rendered-prefs.md (behavioral + decision scores)<br>
+          <strong>2. Structural:</strong> hooks intercept before bad actions<br>
+          <strong>3. Statistical:</strong> signal_score biases model selection via trust calibration
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Summary of changes -->
+  <div class="summary-grid">
+    <div class="summary-card refactor">
+      <h3>What Gets Fixed</h3>
+      <ul>
+        <li>Create decision_preferences table in schema migration</li>
+        <li>Stage 2 signal processing becomes functional</li>
+        <li>mkdir compliance/ in Stage 5 before writing hooks</li>
+        <li>Hook generation pipeline produces real hooks</li>
+        <li>Penalized decisions rendered into session context</li>
+        <li>Decision scores shown alongside trust calibration</li>
+      </ul>
+    </div>
+    <div class="summary-card aspirational">
+      <h3>Deliberately Dropped</h3>
+      <ul>
+        <li>Temporal fact graph &mdash; no clear consumer, adds complexity with no feedback path</li>
+        <li>Complex signal_score &rarr; model selection override &mdash; trust scores already handle this</li>
+        <li>Hook blocking mode &mdash; warn-only is safer, avoids false positive lockouts</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note-box">
+    <strong>The refactor scope is small:</strong> 3 fixes (create table, create directory, render scores)
+    close the loop from <em>self-documenting</em> to <em>self-conditioning</em>. The existing code for
+    Stage 2 and Stage 5 is already written and correct &mdash; it just needs its prerequisites to exist.
+    The new component (decision score rendering) is ~30 lines of Python in the session-start hook.
+    <br><br>
+    <strong>What "self-learning" actually means here:</strong> The LLM can't update its weights.
+    What it <em>can</em> do is condition future behavior through three mechanisms: text injection
+    (preferences in context), structural guardrails (hooks that warn before bad patterns), and
+    statistical bias (decision scores that surface which choice patterns led to corrections).
+    The refactor closes all three channels.
+  </div>
+
+</div>
+
+<script>
+function showPanel(which) {
+  document.getElementById('panel-current').classList.remove('visible');
+  document.getElementById('panel-refactored').classList.remove('visible');
+  document.getElementById('tab-current').classList.remove('active-current');
+  document.getElementById('tab-refactored').classList.remove('active-refactored');
+
+  document.getElementById('panel-' + which).classList.add('visible');
+  document.getElementById('tab-' + which).classList.add('active-' + which);
+}
+</script>
+
+</body>
+</html>

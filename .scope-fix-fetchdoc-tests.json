@@ -1,0 +1,32 @@
+{
+  "slug": "fix-fetchdoc-tests",
+  "skill": "scope",
+  "scope": {
+    "files": 1,
+    "stories": 1,
+    "complexity": "small"
+  },
+  "route_hint": "quickfix",
+  "prev": [],
+  "data": {
+    "topic": "Fix 2 failing TestFetchDoc tests in Gemini MCP server - tests fail because DOCUMENTS dict doesn't have a 'claude' key in test environment",
+    "what": "Fix TestFetchDoc tests that assume 'claude' key exists in DOCUMENTS dict",
+    "audience": null,
+    "platform": "CLI/MCP server",
+    "in_scope": ["Fix test_claude_returns_file_content", "Fix test_nonexistent_key_returns_error"],
+    "out_of_scope": ["Changing DOCUMENTS discovery logic", "Adding new document keys"],
+    "stack_detected": [
+      {
+        "marker": "pyproject.toml",
+        "framework": null,
+        "language": "python",
+        "dependencies": ["pytest", "google-genai"]
+      }
+    ],
+    "problem": "DOCUMENTS is built dynamically by _discover_documents() and only includes keys for files that exist at PROJECT_ROOT. Tests assume 'claude' key is always present, but CLAUDE.md doesn't exist in the test environment.",
+    "why": "2 tests fail on every run, masking real regressions",
+    "end_goal": "All TestFetchDoc tests pass regardless of which files exist at PROJECT_ROOT",
+    "needs_research": false,
+    "complexity_reasoning": "Test fixture issue in one file — tests need to handle dynamic DOCUMENTS dict instead of assuming specific keys exist"
+  }
+}

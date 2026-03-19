@@ -1,0 +1,390 @@
+{
+  "slug": "ai-agent-parallel-coordination",
+  "skill": "research",
+  "scope": {
+    "files": null,
+    "stories": null,
+    "complexity": null
+  },
+  "route_hint": null,
+  "prev": [".scope-ai-agent-parallel-coordination.json"],
+  "data": {
+    "topic": "Auto-detection, self-learning, and auto-memory systems for AI coding agents — conflict detection, self-learning memory, autonomous coordination, trust calibration, auto-review loops",
+    "angles_generated": 5,
+    "partial_research": false,
+    "synthesized_findings": [
+      {
+        "theme": "Conflict Detection & Prevention",
+        "claims": [
+          {
+            "claim": "Grove detects conflicts at five granularity layers: file (same file modified), hunk (overlapping line ranges), symbol (same function/type/export modified), dependency (one branch changes an export the other imports), and schema (both touch migrations, package deps, env config, or routes). Uses AST parsing with LRU cache of 5,000 entries. Supports TS/JS, Rust, Go, Python, Java, C#.",
+            "source_urls": ["https://github.com/NathanDrake2406/grove"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Grove assigns severity scores: Green (safe), Yellow (review needed), Red (likely conflict), Black (breaking change). Integrates with Claude Code via settings.json hook triggering 'grove check' after file edits. Max 20 worktrees, 30s analysis timeout per pair, <500MB memory.",
+            "source_urls": ["https://github.com/NathanDrake2406/grove"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Clash uses git merge-tree (via gix Rust library) to perform read-only three-way merges between worktree pairs. Integrates with Claude Code via PreToolUse hook intercepting Write/Edit/MultiEdit operations.",
+            "source_urls": ["https://github.com/clash-sh/clash"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "CooperBench (Jan 2026, 652 tasks, 12 libraries) found coding agents achieve ~30% lower success rates working together vs individually. Failure modes: work overlap 33.2%, divergent architecture 29.7%, repetition 14.7%, unresponsiveness 8.7%. Root causes: expectation failures 42%, commitment failures 32%, communication failures 26%.",
+            "source_urls": ["https://arxiv.org/html/2601.13295v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "CooperBench: communication between agents reduces textual merge conflicts but does NOT improve final test pass rates. Performance degrades with scale: 68.6% (2 agents) → 46.5% (3 agents) → 30.0% (4 agents) — 'the curse of coordination.'",
+            "source_urls": ["https://arxiv.org/html/2601.13295v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Cursor tried and failed with two coordination strategies: (1) equal-status agents with file locking — agents held locks too long, 20 agents produced throughput of 2-3; (2) optimistic concurrency — agents became risk-averse. Successful architecture: hierarchical planner-worker-judge with no inter-worker coordination.",
+            "source_urls": ["https://mikemason.ca/writing/ai-coding-agents-jan-2026/"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Intent-based locking (agents declare planned changes before writing code) appears in theoretical discussion but no production tool implements it. Grove and Clash operate on actual diffs, not declared intentions.",
+            "source_urls": [],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "The field has stratified into three tiers: (1) textual/file-level via git merge-tree (Clash), (2) AST-aware symbol and dependency overlap (Grove), and (3) the unsolved problem of semantic conflicts where clean merges embed incompatible assumptions. Proactive locking and peer-to-peer coordination have empirically failed at scale — the winning pattern is hierarchical non-overlapping task assignment so workers never need to coordinate."
+      },
+      {
+        "theme": "Self-Learning Memory Architectures",
+        "claims": [
+          {
+            "claim": "MemRL (Jan 2026) decouples stable LLM reasoning from dynamic episodic memory using Intent-Experience-Utility triplets (z_i, e_i, Q_i). Memory Q-values updated via Monte Carlo RL while model parameters stay frozen, avoiding catastrophic forgetting. +3.8% cumulative success rate on BigCodeBench.",
+            "source_urls": ["https://arxiv.org/html/2601.03192v2"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "MemRL's value-aware retrieval: score = (1-λ)*sim(Emb(s),Emb(z_i)) + λ*Q_i with optimal λ=0.5, balancing semantic relevance against learned utility. Transfer learning on held-out tasks: +2.8% success rate.",
+            "source_urls": ["https://arxiv.org/html/2601.03192v2"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Devin uses a three-tiered memory: Knowledge Base (cross-session facts), Snapshots (environment state), and Playbooks (procedural workflows). Auto-generates Knowledge entries from user feedback and session insights at end of task.",
+            "source_urls": ["https://cognition.ai", "https://devin.ai"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Windsurf implements dual-memory: 'Automatic Memories' (extracted from interactions, workspace-scoped, stored at ~/.codeium/windsurf/memories/) and 'User-Defined Rules' (explicit instructions, global/workspace/system scope). Context pipeline: Load Rules → Load Memories → Read files → Codebase retrieval (M-Query) → Recent actions → Assemble prompt.",
+            "source_urls": ["https://docs.windsurf.com/windsurf/cascade/memories", "https://markaicode.com/windsurf-flow-context-engine/", "https://windsurf.com"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Cursor deprecated .cursorrules for .mdc files in .cursor/rules/ with metadata and glob-pattern scoping. Added 'Generate Memories' feature (requires privacy mode disabled). Study of 401 repos: 89% include guideline rules, 84% convention rules, 28.7% content duplicated from templates.",
+            "source_urls": ["https://arxiv.org/html/2512.18925v2"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "OpenHands CodeAct agent bounded by LLM context window. For long-range tasks (500+ turns), proposes persisting history as files in sandbox. No automated rule generation or self-learning — memory management remains open issue (#1748).",
+            "source_urls": ["https://github.com/OpenHands/OpenHands/issues/1748"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Aider maintains session continuity via Git-native history and a 'Repo Map' using ctags for persistent structural understanding of the codebase.",
+            "source_urls": ["https://aider.chat"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "MACLA (Dec 2025) learns hierarchical procedural memory from agent trajectories using Bayesian decision-making for procedure extraction and contrastive learning to distinguish effective from ineffective procedures.",
+            "source_urls": ["https://arxiv.org/pdf/2512.18950"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Academic taxonomy converging: replace 'short-term vs long-term' with three-part: factual (what is true), experiential/episodic (what happened), procedural (what to do). Four-level hierarchy proposed: Domain → Category → Memory Trace → Episode.",
+            "source_urls": ["https://arxiv.org/abs/2512.13564", "https://arxiv.org/html/2507.22925v1"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "RimRule uses Minimum Description Length (MDL) to consolidate rules extracted from failure patterns into a compact rule library for future reasoning.",
+            "source_urls": ["https://arxiv.org/abs/2601.05"],
+            "confidence": "medium",
+            "agent_attribution": "gemini"
+          }
+        ],
+        "key_insight": "Production coding agents (Windsurf, Cursor) implement two-tier systems: auto-generated memories from conversation + manually-curated rules. Neither has closed the loop on automated rule generation from failure patterns. Academic work (MemRL, MACLA) shows this gap is closable — MemRL's frozen-model + RL-on-episodic-memory pattern is the strongest signal for how to do it. The key missing piece is procedural memory that auto-updates from failure without human intervention."
+      },
+      {
+        "theme": "Coordination & Merge Queue Patterns",
+        "claims": [
+          {
+            "claim": "Overstory implements FIFO merge queue (SQLite-backed) with 4-tier conflict resolution. Coordination uses custom SQLite mail system with 8 typed message types and broadcast addresses (@all, @builders). Tiered watchdog: Tier 0 mechanical daemon (tmux/pid liveness), Tier 1 AI-assisted triage, Tier 2 full monitor agent.",
+            "source_urls": ["https://github.com/jayminwest/overstory"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "OpenHands SDK V1 (Nov 2025) implements stuck detection: detects infinite loops (same action repeated without progress) and redundant tool calls (querying same info repeatedly), automatically terminating execution. Event-sourced state with conversations resumable via base_state.json + event replay.",
+            "source_urls": ["https://arxiv.org/html/2511.03690v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Composio's agent-orchestrator: centralized hub-and-spoke, 'ao spawn' creates isolated worktrees with feature branches, CI failure auto-retry (retries: 2). Conflict detection purely reactive — discovered at PR review, not predicted. Task decomposition/reassignment not yet implemented.",
+            "source_urls": ["https://github.com/ComposioHQ/agent-orchestrator"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Auto Claude: up to 12 parallel sessions in isolated worktrees with three-tier conflict resolution: (1) git auto-merge for simple cases, (2) AI-powered resolution processing only conflict regions, (3) full-file AI merge as fallback. Can merge builds 50+ commits behind main in seconds.",
+            "source_urls": ["https://www.scriptbyai.com/auto-claude-ai-coding-agent/"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "DynTaskMAS (ICAPS 2025) introduces dynamic task graphs for LLM multi-agent orchestration with Asynchronous Parallel Execution Engine scheduling tasks to maximize parallelism while respecting dependency constraints.",
+            "source_urls": ["https://arxiv.org/html/2503.07675v1"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Dominant 2025-2026 pattern is git worktree isolation with PR-based merge-back. Agents work independently with no inter-agent communication; git serves as async coordination layer. Conflicts surface at merge time, not edit time.",
+            "source_urls": ["https://blog.heliomedeiros.com/posts/2025-11-23-swarming-with-worktree/"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Five established orchestration patterns: Orchestrator-Worker (centralized fan-out), Swarm (decentralized emergent), Mesh (peer-to-peer), Hierarchical (tree delegation), Pipeline (sequential stages). Most production coding agent systems use Orchestrator-Worker.",
+            "source_urls": ["https://gurusup.com/blog/agent-orchestration-patterns"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          }
+        ],
+        "key_insight": "Merge queue sophistication varies from zero automation (worktree + manual PR, most common) to Overstory's 4-tier FIFO queue. Loop/stuck detection is the least mature area — OpenHands has basic detection, Overstory has a tiered watchdog, but most systems have zero health monitoring. Stigmergy hypothesis was wrong: production systems use explicit messaging (SQLite mail, event streams), not indirect environment-based coordination."
+      },
+      {
+        "theme": "Trust Calibration & Graduated Autonomy",
+        "claims": [
+          {
+            "claim": "Anthropic research: new Claude Code users use full auto-approve in ~20% of sessions, increasing to >40% by 750 sessions. Experienced users increase interruption rates from 5% to ~9%, shifting from pre-approval to autonomous-with-intervention.",
+            "source_urls": ["https://www.anthropic.com/research/measuring-agent-autonomy"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Feng, McDonald & Zhang (UW, June 2025) define five autonomy levels: L1 Operator (user directs), L2 Collaborator (joint planning), L3 Consultant (agent leads, user feedback), L4 Approver (agent autonomous, user approves consequential actions), L5 Observer (fully autonomous, emergency off-switch). Existing agents classified: ChatGPT Canvas L1, GitHub Copilot Agent L3, SWE-Agent/Devin L4, AI Scientist L5.",
+            "source_urls": ["https://arxiv.org/html/2506.12469v1"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "The autonomy levels framework treats autonomy as a deliberate design decision independent of capability — does NOT prescribe performance-based progression. Developers choose appropriate levels, agents don't 'earn' higher levels.",
+            "source_urls": ["https://arxiv.org/html/2506.12469v1"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Autonomy certificates proposed as digital documents issued by third-party governing bodies prescribing maximum autonomy level based on technical specifications and an 'autonomy case.'",
+            "source_urls": ["https://arxiv.org/html/2506.12469v1"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Sliding Autonomy: systems dynamically adjust independence based on real-time confidence scores and task complexity. Confidence thresholds between 80-95% used for HITL triggers. Target 10-15% escalation rates for sustainable operations.",
+            "source_urls": ["https://galileo.ai/blog/human-in-the-loop-agent-oversight"],
+            "confidence": "medium",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Devin's PR merge rate improved from 34% to 67% over 2025 — 1-in-3 PRs still need significant rework. Branch protection rules recommended so Devin PRs must pass CI before merge.",
+            "source_urls": ["https://docs.devin.ai/release-notes/overview"],
+            "confidence": "medium",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Cursor evolved from flat peer-to-peer (20 agents produced 2-3 agents' throughput) to hierarchical planner-worker-judge, producing 1M+ lines of code for a web browser project in one week. Found GPT-5.2 better than Claude Opus 4.5 for extended autonomous work. Adopted heterogeneous model strategy.",
+            "source_urls": ["https://www.zenml.io/llmops-database/scaling-multi-agent-autonomous-coding-systems"],
+            "confidence": "high",
+            "agent_attribution": "claude"
+          },
+          {
+            "claim": "Neural networks exhibit systematic overconfidence — high confidence scores for incorrect predictions breaks naive threshold-based escalation. Production systems require calibration: temperature scaling, ensemble disagreement, conformal prediction with statistical guarantees.",
+            "source_urls": ["https://galileo.ai/blog/human-in-the-loop-agent-oversight"],
+            "confidence": "medium",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Trust calibration measured via 'Task Horizon' (how long agent works accurately without intervention) and 'Recovery Rate' (ability to self-heal from past error logs).",
+            "source_urls": ["https://galileo.ai/blog/measuring-ai-agent-performance/"],
+            "confidence": "medium",
+            "agent_attribution": "gemini"
+          }
+        ],
+        "key_insight": "No production system implements automatic performance-based autonomy graduation. Trust scaling is user-initiated, not system-driven. Anthropic's data shows developers organically shift to autonomous-with-intervention over ~750 sessions. The hypothesis that agents graduate based on track record is ahead of current implementations — this is a genuine opportunity to build something novel."
+      },
+      {
+        "theme": "Auto-Review & Testing Loops (Ralph Loop)",
+        "claims": [
+          {
+            "claim": "Ralph Wiggum technique publicly presented by Geoffrey Huntley on June 19, 2025. Originally a bash loop: `while :; do cat PROMPT.md | npx --yes @sourcegraph/amp ; done`. Anthropic released official Claude Code plugin in December 2025 using stop hooks to intercept session exit and re-inject prompt.",
+            "source_urls": ["https://www.humanlayer.dev/blog/brief-history-of-ralph"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "ralph-claude-code (v0.11.5) uses dual-condition exit gate: BOTH completion indicators >= 2 AND Claude's explicit EXIT_SIGNAL: true in RALPH_STATUS block. Config: MAX_CALLS_PER_HOUR (default 100), CLAUDE_TIMEOUT_MINUTES (1-120, default 15), CB_NO_PROGRESS_THRESHOLD (default 3 loops), CB_SAME_ERROR_THRESHOLD (default 5).",
+            "source_urls": ["https://github.com/frankbria/ralph-claude-code"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Overbaking phenomenon: loops running too long produce bizarre emergent behavior (e.g., post-quantum cryptography appearing unbidden). Huntley built complete programming language ('Cursed') with C/Rust/Zig implementations via 3-month continuous loop. YC teams shipped 6+ repos overnight for ~$297.",
+            "source_urls": ["https://www.humanlayer.dev/blog/brief-history-of-ralph", "https://www.atcyrus.com/stories/ralph-wiggum-technique-claude-code-autonomous-loops"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Aider implements auto-review via --auto-lint and --auto-test flags. After each edit, runs configured lint/test commands, automatically attempts fix on non-zero exit codes.",
+            "source_urls": ["https://aider.chat/docs/usage/lint-test.html"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "Cursor BugBot evolved from 8-parallel-pass pipeline with randomized diff ordering and majority voting to fully agentic architecture in fall 2025, resolution rate from 52% to 70%+. BugBot Autofix (GA Feb 25, 2026) closes review-fix loop autonomously on PR creation, 35%+ of proposed changes merged directly. Reviews 2M+ PRs/month.",
+            "source_urls": ["https://cursor.com/blog/building-bugbot", "https://www.adwaitx.com/cursor-bugbot-ai-code-review-agent-2026/"],
+            "confidence": "high",
+            "agent_attribution": "both"
+          },
+          {
+            "claim": "SWE-Agent uses Agent-Computer Interface (ACI) with 'lint-on-save' guardrails that reject code changes causing syntax errors before commit.",
+            "source_urls": ["https://morphllm.com"],
+            "confidence": "high",
+            "agent_attribution": "gemini"
+          },
+          {
+            "claim": "Three autonomous validation patterns identified: (1) Verification-Driven (run tests/linters, feed logs back), (2) Critic-Revision (second model reviews first agent's code), (3) Hypothesis-Driven (agent formulates diagnosis before applying fix).",
+            "source_urls": ["https://morphllm.com"],
+            "confidence": "medium",
+            "agent_attribution": "gemini"
+          }
+        ],
+        "key_insight": "The pattern has converged across tools: Aider's --auto-test, BugBot's review-fix-verify, and Ralph loops all implement run-evaluate-fix-repeat at different granularities. Ralph Loop's power is architectural simplicity (stop hook + re-injection), but overbaking is the key failure mode. Best results come from well-defined success criteria, bounded iterations, and circuit breakers that detect lack of progress."
+      }
+    ],
+    "angle_summaries": [
+      {
+        "angle": "Predictive conflict detection in parallel coding agents",
+        "source": "claude",
+        "finding_count": 7,
+        "key_insights": [
+          "Three tiers: textual (Clash/git merge-tree), AST-aware (Grove/5-layer), semantic (unsolved)",
+          "Proactive locking empirically failed — Cursor's 20 agents degraded to 2-3 effective",
+          "Hierarchical non-overlapping assignment beats peer coordination"
+        ]
+      },
+      {
+        "angle": "Self-learning memory architectures for coding agents",
+        "source": "both",
+        "finding_count": 10,
+        "key_insights": [
+          "MemRL: freeze LLM, RL on episodic memory, +3.8% on coding benchmarks",
+          "Production tools (Windsurf, Cursor) have auto-memories but not auto-rule-generation from failures",
+          "Academic taxonomy converging: factual/experiential/procedural replaces short-term/long-term"
+        ]
+      },
+      {
+        "angle": "Autonomous coordination and merge queue patterns",
+        "source": "claude",
+        "finding_count": 7,
+        "key_insights": [
+          "Overstory: FIFO merge queue + SQLite mail + tiered watchdog is most complete system",
+          "Loop/stuck detection is least mature area across ecosystem",
+          "Dominant pattern remains worktree isolation + PR merge-back with reactive conflict discovery"
+        ]
+      },
+      {
+        "angle": "Trust calibration and graduated autonomy",
+        "source": "both",
+        "finding_count": 9,
+        "key_insights": [
+          "No production system implements automatic performance-based autonomy graduation",
+          "Anthropic data: trust grows organically over ~750 sessions",
+          "Five-level framework (L1-L5) treats autonomy as design choice, not earned progression"
+        ]
+      },
+      {
+        "angle": "Auto-review and testing loops (Ralph Loop)",
+        "source": "both",
+        "finding_count": 7,
+        "key_insights": [
+          "Ralph Loop = stop hook re-injection with dual-exit-gate + circuit breakers",
+          "BugBot Autofix: 70% resolution, 35% auto-merged, 2M PRs/month",
+          "Overbaking is the key failure mode — bounded iterations and progress detection are essential"
+        ]
+      }
+    ],
+    "citations": [
+      {"url": "https://github.com/NathanDrake2406/grove", "title": "Grove: Cross-worktree conflict intelligence for git", "quality": "authoritative", "referenced_by": ["Conflict Detection"]},
+      {"url": "https://github.com/clash-sh/clash", "title": "Clash: Avoid merge conflicts across git worktrees", "quality": "authoritative", "referenced_by": ["Conflict Detection"]},
+      {"url": "https://arxiv.org/html/2601.13295v1", "title": "CooperBench: Why Coding Agents Cannot be Your Teammates Yet (Jan 2026)", "quality": "authoritative", "referenced_by": ["Conflict Detection"]},
+      {"url": "https://arxiv.org/html/2601.03192v2", "title": "MemRL: Self-Evolving Agents via Runtime RL on Episodic Memory", "quality": "authoritative", "referenced_by": ["Self-Learning Memory"]},
+      {"url": "https://docs.windsurf.com/windsurf/cascade/memories", "title": "Cascade Memories - Windsurf Official Docs", "quality": "authoritative", "referenced_by": ["Self-Learning Memory"]},
+      {"url": "https://arxiv.org/html/2512.18925v2", "title": "Beyond the Prompt: Empirical Study of Cursor Rules", "quality": "authoritative", "referenced_by": ["Self-Learning Memory"]},
+      {"url": "https://arxiv.org/abs/2512.13564", "title": "Memory in the Age of AI Agents: A Survey", "quality": "authoritative", "referenced_by": ["Self-Learning Memory"]},
+      {"url": "https://github.com/OpenHands/OpenHands/issues/1748", "title": "Memory Management for CodeAct Agent", "quality": "authoritative", "referenced_by": ["Self-Learning Memory"]},
+      {"url": "https://github.com/jayminwest/overstory", "title": "Overstory: Multi-agent orchestration for AI coding agents", "quality": "authoritative", "referenced_by": ["Coordination & Merge Queues"]},
+      {"url": "https://arxiv.org/html/2511.03690v1", "title": "OpenHands Software Agent SDK V1", "quality": "authoritative", "referenced_by": ["Coordination & Merge Queues"]},
+      {"url": "https://github.com/ComposioHQ/agent-orchestrator", "title": "Composio Agent Orchestrator", "quality": "informative", "referenced_by": ["Coordination & Merge Queues"]},
+      {"url": "https://www.anthropic.com/research/measuring-agent-autonomy", "title": "Measuring AI Agent Autonomy in Practice — Anthropic", "quality": "authoritative", "referenced_by": ["Trust Calibration"]},
+      {"url": "https://arxiv.org/html/2506.12469v1", "title": "Levels of Autonomy for AI Agents (Feng et al. 2025)", "quality": "authoritative", "referenced_by": ["Trust Calibration"]},
+      {"url": "https://www.zenml.io/llmops-database/scaling-multi-agent-autonomous-coding-systems", "title": "Cursor: Scaling Multi-Agent Autonomous Coding Systems", "quality": "informative", "referenced_by": ["Trust Calibration"]},
+      {"url": "https://galileo.ai/blog/human-in-the-loop-agent-oversight", "title": "Human-in-the-Loop Oversight for AI Agents — Galileo", "quality": "informative", "referenced_by": ["Trust Calibration"]},
+      {"url": "https://www.humanlayer.dev/blog/brief-history-of-ralph", "title": "A Brief History of Ralph", "quality": "authoritative", "referenced_by": ["Ralph Loop"]},
+      {"url": "https://github.com/frankbria/ralph-claude-code", "title": "ralph-claude-code: Autonomous AI development loop", "quality": "authoritative", "referenced_by": ["Ralph Loop"]},
+      {"url": "https://aider.chat/docs/usage/lint-test.html", "title": "Aider: Linting and testing docs", "quality": "authoritative", "referenced_by": ["Ralph Loop"]},
+      {"url": "https://cursor.com/blog/building-bugbot", "title": "Building BugBot — Cursor Blog", "quality": "authoritative", "referenced_by": ["Ralph Loop"]},
+      {"url": "https://mikemason.ca/writing/ai-coding-agents-jan-2026/", "title": "AI Coding Agents in 2026: Coherence Through Orchestration", "quality": "informative", "referenced_by": ["Conflict Detection", "Coordination"]},
+      {"url": "https://arxiv.org/pdf/2512.18950", "title": "MACLA: Learning Hierarchical Procedural Memory", "quality": "authoritative", "referenced_by": ["Self-Learning Memory"]},
+      {"url": "https://docs.devin.ai/release-notes/overview", "title": "Devin Release Notes", "quality": "authoritative", "referenced_by": ["Trust Calibration"]},
+      {"url": "https://arxiv.org/html/2503.07675v1", "title": "DynTaskMAS: Dynamic Task Graph Framework", "quality": "authoritative", "referenced_by": ["Coordination"]}
+    ],
+    "conflicts": [
+      {
+        "topic": "Whether agent communication helps or hurts parallel coordination",
+        "gemini_claim": {"claim": "Decentralized stigmergy-based communication is replacing centralized orchestrators", "source_urls": []},
+        "claude_claim": {"claim": "CooperBench shows communication reduces textual conflicts but does NOT improve success rates. Cursor's peer coordination failed at scale. Production systems use explicit messaging or hierarchical assignment, not stigmergy.", "source_urls": ["https://arxiv.org/html/2601.13295v1", "https://mikemason.ca/writing/ai-coding-agents-jan-2026/"]},
+        "credibility_assessment": "Claude's position is better sourced — CooperBench (652 tasks, controlled study) and Cursor's production experience directly contradict the stigmergy hypothesis. Gemini's angle was speculative; no production coding system uses stigmergy."
+      },
+      {
+        "topic": "Whether autonomy levels are static design choices or earned through performance",
+        "gemini_claim": {"claim": "Systems implement performance-based autonomy scaling where agents start with propose-only and graduate to auto-merge", "source_urls": ["https://galileo.ai/blog/human-in-the-loop-agent-oversight"]},
+        "claude_claim": {"claim": "The Feng et al. framework explicitly treats autonomy as a design decision independent of capability, not earned progression. No production system implements automatic graduation.", "source_urls": ["https://arxiv.org/html/2506.12469v1", "https://www.anthropic.com/research/measuring-agent-autonomy"]},
+        "credibility_assessment": "Both partially correct. Gemini found sliding autonomy patterns exist in theory; Claude found no production implementation. The gap between theoretical frameworks and production reality is real — this is an opportunity, not just a research finding."
+      }
+    ],
+    "gaps": [
+      "No production tool implements intent-based locking (declaring planned changes before writing code)",
+      "No system implements automatic performance-based autonomy graduation — all use manual toggle or static design",
+      "Devin's internal memory architecture is proprietary with no technical documentation",
+      "Cursor's Generate Memories internal algorithm (embedding model, retrieval, pruning) undocumented",
+      "No coding agent implements automatic rule deprecation or contradiction resolution for accumulated memories",
+      "Quantitative benchmarks comparing multi-agent vs single-agent throughput on real codebases — no controlled studies exist",
+      "Progress velocity calculation algorithms for stuck detection — heuristics not publicly documented",
+      "Semantic conflict detection (clean merges that embed incompatible assumptions) remains unsolved",
+      "No academic work specifically studies convergence properties of autonomous code review loops"
+    ]
+  }
+}

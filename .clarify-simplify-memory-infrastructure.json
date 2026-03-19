@@ -1,0 +1,86 @@
+{
+  "slug": "simplify-memory-infrastructure",
+  "skill": "clarify",
+  "scope": {
+    "files": 8,
+    "stories": 3,
+    "complexity": "medium"
+  },
+  "route_hint": "standard",
+  "prev": [".scope-simplify-memory-infrastructure.json"],
+  "data": {
+    "topic": "Simplify memory infrastructure: reduce persistence surfaces, make Stop hook async, fix schema migration bug, purge OpenMemory bloat, dedupe embedding code",
+    "input_summary": "Fix the broken behavioral learning pipeline (schema migration bug), reduce 7 persistence surfaces to 3, make Stop hook async via background subprocess, purge 49% bloat from OpenMemory, and extract shared embedding utilities.",
+    "decisions": [
+      {
+        "area": "Ollama dependency for correction detection",
+        "choice": "Accept the dependency. Add a warning in the Stop hook when Ollama is unavailable so degradation is visible, not silent. Do not add regex or simhash fallback for correction detection.",
+        "reasoning": "decision-74 deliberately chose semantic embeddings. The Ollama dependency is the cost of high-quality correction detection. Making it visible (warning) is sufficient — users can start Ollama if they want learning active.",
+        "source": "user"
+      },
+      {
+        "area": "Dedup strategy in om_write.py",
+        "choice": "Keep current embedding-based dedup. Fix the real problems: purge 366 legacy/orphaned entries from OpenMemory, stop re-embedding 3 static tool-learnings entries every session end.",
+        "reasoning": "Tiered dedup is an optimization that doesn't address the actual bottleneck (unnecessary work on bloated data). Clean the DB first, then reassess if dedup performance is still a concern.",
+        "source": "user"
+      },
+      {
+        "area": "Persistence surface elimination",
+        "choice": "Kill 4 surfaces: correction-tallies.jsonl (dead, replaced by correction_groups), om-ops.json (write-only, zero readers — replace with stderr), tool-learnings.md (move entirely to OpenMemory), corrections.md (move entries into correction_groups DB directly). Reduces 7 surfaces to 3: correction_groups in epics.db, rendered-prefs.md sidecar, openmemory.sqlite.",
+        "reasoning": "Aggressive consolidation. corrections.md is already parsed by signal_processor.py — making the DB the sole source eliminates the dual-write. tool-learnings.md duplicates what's in OpenMemory. The other two are dead/debug-only.",
+        "source": "user"
+      },
+      {
+        "area": "Stop hook async strategy",
+        "choice": "Background subprocess via nohup/disown. Stop hook keeps fast sections (mtime comparison, <1s) synchronous. Heavy sections (signal processing, session summary, tool learning sync, auto-distillation) spawned as background Python process. Main hook exits immediately.",
+        "reasoning": "Reduces exit latency from ~2-5s to <1s. Background process writes to DB; next session start reads. No race condition — different sessions, different processes.",
+        "source": "user"
+      },
+      {
+        "area": "Schema migration bug (BLOCKING)",
+        "choice": "Fix correction_groups table to add text and source columns. Run migration on existing data. This unblocks the entire behavioral learning pipeline — rendered-prefs.md has been blank.",
+        "reasoning": "Scout found the text column doesn't exist despite being referenced by the renderer. 4 promoted entries exist but their text can't be accessed. This is the highest priority item — everything else is optimization on a broken system.",
+        "source": "gemini"
+      },
+      {
+        "area": "Shared embedding utilities",
+        "choice": "Extract _get_embedding, _cosine_similarity, _embedding_to_blob, _blob_to_embedding into a shared module (~/.claude/hooks/lib/embedding_utils.py). Both signal_processor.py and om_write.py import from it.",
+        "reasoning": "~80 lines duplicated across two files. Single source of truth for embedding operations, Ollama URL config, similarity thresholds.",
+        "source": "gemini"
+      },
+      {
+        "area": "OpenMemory purge",
+        "choice": "One-time purge of 366 legacy/orphaned entries (261 transcript entries + 105 entries with tags outside ALLOWED_TAGS). Reduces DB from 749 to ~383 entries.",
+        "reasoning": "49% of the DB is bloat from before tag enforcement was added. Dedup and budget enforcement are doing unnecessary work against entries that should never have been stored.",
+        "source": "gemini"
+      }
+    ],
+    "constraints": [
+      {
+        "type": "requirement",
+        "value": "decision-74 (ACTIVE): semantic embeddings for correction detection. No regex fallback.",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "decision-73 (ACTIVE): rendered-prefs.md sidecar via @import must remain compaction-resilient.",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "decision-75 (ACTIVE): single authority for correction pipeline in signal_processor.py.",
+        "source": "detected"
+      },
+      {
+        "type": "stack",
+        "value": "bash/python only. No new dependencies.",
+        "source": "detected"
+      },
+      {
+        "type": "requirement",
+        "value": "epics.db ownership: Gemini writes via pm_* tools, Claude writes only plan_file and state.",
+        "source": "detected"
+      }
+    ]
+  }
+}

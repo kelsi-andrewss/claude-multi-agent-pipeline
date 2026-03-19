@@ -1,0 +1,226 @@
+{
+  "slug": "simplify-memory-infrastructure",
+  "skill": "scout",
+  "prev": [".scope-simplify-memory-infrastructure.json"],
+  "data": {
+    "findings": [
+      {
+        "id": "F1",
+        "title": "Stop hook is already async but has a 10s timeout that likely truncates Ollama work",
+        "detail": "session-learning-check.sh is registered with `async: true` and `timeout: 10` in settings.json. However, the hook calls signal_processor.py which embeds 10 prototype sentences (10 Ollama calls at ~100ms each = ~1s) plus up to MAX_EMBEDDING_CALLS_PER_SESSION=5 per-message calls, plus correction_groups embedding work. With the 10s timeout, sections 3-6 of the hook may get killed before completing. The tracking stop-hook.sh has a 30s timeout and runs 4+ Python scripts sequentially. Combined, these two async Stop hooks compete for Ollama resources.",
+        "source": "code_analysis",
+        "files": [
+          "~/.claude/hooks/session-learning-check.sh",
+          "~/.claude/hooks/lib/signal_processor.py",
+          "~/.claude/settings.json"
+        ]
+      },
+      {
+        "id": "F2",
+        "title": "OpenMemory has 749 entries; 366 are transcript/correction bloat outside budget enforcement",
+        "detail": "OpenMemory contains 261 transcript entries (tags like 'transcript,session-2026-03-*') and 105 correction/behavioral entries that predate the budget system. The ALLOWED_TAGS whitelist in om_write.py does NOT include 'transcript' or 'correction' tags, meaning these were written before the gate existed. Budget enforcement (max 20 session-summary, 30 behavioral-pref, etc.) only applies to new writes — it never retroactively prunes legacy entries. 366 of 749 entries (49%) are legacy bloat. The 4.5MB DB stores 644 entries with embeddings and 105 without.",
+        "source": "code_analysis + sqlite_queries",
+        "files": [
+          "~/.claude/.claude/openmemory.sqlite",
+          "~/.claude/hooks/lib/om_write.py"
+        ]
+      },
+      {
+        "id": "F3",
+        "title": "correction-tallies.jsonl is legacy dead code with only 2 entries",
+        "detail": "correction-tallies.jsonl has 2 entries and is only consumed by _parse_corrections() in signal_processor.py to skip already-promoted entries. Since correction_groups DB table now tracks promotion status directly, this file is redundant. The only reader checks `entry.get('promoted')` — the same data is in `correction_groups.status='promoted'`.",
+        "source": "code_analysis",
+        "files": [
+          "~/.claude/correction-tallies.jsonl",
+          "~/.claude/hooks/lib/signal_processor.py"
+        ]
+      },
+      {
+        "id": "F4",
+        "title": "om-ops.json is 2781 lines of append-only ops log with no consumer",
+        "detail": "om-ops.json logs every write/dedup/prune/error operation from om_write.py. It has 2781 entries. No code reads this file — it is write-only diagnostic data. It grows unbounded. The useful signal (dedup rates, write failures) could be a SQLite table with aggregation, or simply removed if the budget/dedup system is working correctly.",
+        "source": "code_analysis + grep",
+        "files": [
+          "~/.claude/.claude/tracking/om-ops.json",
+          "~/.claude/hooks/lib/om_write.py"
+        ]
+      },
+      {
+        "id": "F5",
+        "title": "tool-learnings.md has 3 entries and is shadowed to OpenMemory (29 OM entries)",
+        "detail": "tool-learnings.md is an append-only audit trail with 3 entries. The Stop hook (Section 5) reads every non-AUTO entry and writes each to OpenMemory via om_write. OpenMemory has 29 tool-learning entries. The flat file is the 'source of truth' but contains far less than OM. The sync is one-directional (file -> OM) and re-runs every session, deduping via embedding similarity. This is O(n*m) embedding work on every session end for 3 entries.",
+        "source": "code_analysis",
+        "files": [
+          "~/.claude/tool-learnings.md",
+          "~/.claude/hooks/session-learning-check.sh"
+        ]
+      },
+      {
+        "id": "F6",
+        "title": "corrections.md is both human-editable source of truth AND machine-parsed input",
+        "detail": "corrections.md (30+ entries, ~170 lines) serves dual roles: (1) human-readable log that Claude and user both write to, (2) input to _parse_corrections() which embeds each entry and clusters into correction_groups. This dual role means the file can't be moved to SQLite without breaking the user's editing workflow. The shadow-table pattern (keep md, ingest to DB) is already partially implemented via process_session_corrections().",
+        "source": "code_analysis",
+        "files": [
+          "~/.claude/corrections.md",
+          "~/.claude/hooks/lib/signal_processor.py"
+        ]
+      },
+      {
+        "id": "F7",
+        "title": "Ollama dependency is load-bearing for correction detection but has graceful degradation",
+        "detail": "decision-74 chose semantic embeddings over regex for correction detection. When Ollama is down: (1) extract_corrections() returns empty list (no corrections detected), (2) om_write dedup falls back to simhash, (3) _process_correction_groups() skips entirely. The system silently loses all correction detection capability when Ollama is unavailable. The MAX_EMBEDDING_CALLS_PER_SESSION=5 cap already limits the embedding tax. At <500 entries, a character n-gram Jaccard approach could replace prototype matching without Ollama, but this conflicts with decision-74's explicit rejection of non-semantic approaches.",
+        "source": "code_analysis + decision-74 lookup",
+        "files": [
+          "~/.claude/hooks/lib/signal_processor.py",
+          "~/.claude/hooks/lib/om_write.py"
+        ]
+      },
+      {
+        "id": "F8",
+        "title": "Duplicate embedding infrastructure: signal_processor.py and om_write.py both implement _get_embedding, _cosine_similarity, blob serialization",
+        "detail": "Both files independently implement: _get_embedding() (Ollama HTTP call), _cosine_similarity() (dot product), _embedding_to_blob()/_blob_to_embedding() (struct pack/unpack), and _compute_simhash() (in om_write). This is ~80 lines of duplicated code. A shared embedding_utils.py module would eliminate this.",
+        "source": "code_analysis",
+        "files": [
+          "~/.claude/hooks/lib/signal_processor.py",
+          "~/.claude/hooks/lib/om_write.py"
+        ]
+      },
+      {
+        "id": "F9",
+        "title": "rendered-prefs.md is currently empty (schema migration pending) — the entire preference rendering pipeline is dormant",
+        "detail": "rendered-prefs.md contains only '# Behavioral Preferences\\n\\n_Schema migration pending._' The SessionStart hook's Python block checks for a 'text' column in correction_groups and writes empty if missing. However, the correction_groups table DOES have a 'text' column (added in session-learning-check.sh Section 6b schema migration). The render query requires status IN ('promoted','pending_promotion') OR source='manual' — current data shows 4 promoted and 0 pending_promotion with source='manual'. The text field on those 4 promoted rows may be empty, causing the sidecar to appear blank despite promoted entries existing.",
+        "source": "code_analysis + sqlite_queries",
+        "files": [
+          "~/.claude/.claude/rendered-prefs.md",
+          "~/.claude/hooks/load-session-context.sh"
+        ]
+      }
+    ],
+    "apis_and_packages": [
+      {
+        "name": "Ollama API (nomic-embed-text)",
+        "role": "Local embedding generation for correction detection and dedup",
+        "dependency_type": "runtime_service",
+        "removable": "partially — dedup can use simhash; correction detection requires decision-74 supersession"
+      },
+      {
+        "name": "SQLite3 (stdlib)",
+        "role": "Primary structured storage (epics.db, openmemory.sqlite)",
+        "dependency_type": "stdlib",
+        "removable": "no — keep and consolidate into"
+      },
+      {
+        "name": "hashlib.md5",
+        "role": "SimHash fallback for dedup when Ollama unavailable",
+        "dependency_type": "stdlib",
+        "removable": "no — would become primary dedup if Ollama removed"
+      }
+    ],
+    "architecture_patterns": [
+      {
+        "name": "Tiered dedup (fast-reject + semantic)",
+        "description": "Tier 1: exact MD5 hash match (microseconds). Tier 2: character trigram Jaccard >= 0.8 (sub-ms for <500 entries). Tier 3: embedding cosine similarity only for borderline cases (Jaccard 0.4-0.8). Reduces Ollama calls by ~90% at current scale.",
+        "source": "gemini",
+        "applicability": "om_write.py dedup_check(), signal_processor.py _find_matching_group()"
+      },
+      {
+        "name": "Background detach with PID lockfile",
+        "description": "Double-fork pattern: redirect all streams to /tmp log, write PID file, use SQLite WAL mode with busy_timeout=5000. Check PID file before starting to prevent duplicate runs. Though the Stop hook is already async, the 10s timeout likely kills long-running embedding work. Alternative: split the hook into fast (mtime check, DB reads) and slow (embedding work) sections, running slow section via nohup.",
+        "source": "gemini",
+        "applicability": "session-learning-check.sh — split sections 1-2 (fast, <1s) from sections 3-6 (slow, Ollama-dependent)"
+      },
+      {
+        "name": "System-state vs user-knowledge split",
+        "description": "Machine-consumed data (om-ops.json, correction-tallies.jsonl, tool-learnings sync) goes to SQLite tables. Human-editable data (corrections.md) stays as flat files with shadow-table ingestion. Currently 4 of 7 surfaces are machine-only and could consolidate.",
+        "source": "gemini + code_analysis",
+        "applicability": "All 7 persistence surfaces"
+      },
+      {
+        "name": "One-time legacy purge for OpenMemory",
+        "description": "Delete 261 transcript entries and 105 correction/behavioral entries that predate the budget system. These tags are not in ALLOWED_TAGS and will never be written again. Reduces DB from 749 to ~383 entries and reclaims ~2MB of embedding storage.",
+        "source": "code_analysis",
+        "applicability": "openmemory.sqlite"
+      }
+    ],
+    "testable_assertions": [
+      {
+        "id": "T1",
+        "assertion": "correction-tallies.jsonl can be deleted with zero behavior change if _parse_corrections() skip-promoted check is replaced with a DB query",
+        "verification": "Remove tallies file, grep for 'tallies' references, run _parse_corrections() against current corrections.md, compare output"
+      },
+      {
+        "id": "T2",
+        "assertion": "om-ops.json can be deleted with zero behavior change (no readers exist)",
+        "verification": "grep -r 'om-ops' across codebase — only om_write.py _log_op() writes to it, nothing reads"
+      },
+      {
+        "id": "T3",
+        "assertion": "Deleting OpenMemory entries with tags containing 'transcript' or tags=['correction','behavioral'] removes ~366 entries with no feature impact",
+        "verification": "These tag patterns are not in ALLOWED_TAGS and not queried by load-session-context.sh (which queries tool-learning and behavioral-pref)"
+      },
+      {
+        "id": "T4",
+        "assertion": "Stop hook Section 5 (tool-learnings sync) can be removed — it re-syncs 3 static entries every session end via O(n*m) embedding calls",
+        "verification": "The 29 OM tool-learning entries already exist. With 3 file entries that never change, the sync is pure waste after first run"
+      },
+      {
+        "id": "T5",
+        "assertion": "rendered-prefs.md is blank because the correction_groups table lacks the 'text' column — the schema migration in Section 6b of session-learning-check.sh has never successfully run. 4 promoted rows exist (themes: 'use ship skill', 'do NOT skip research', 'deep research on web', 'hooks that don't work') but have no text to render. The migration adds text+source columns via table rebuild but the conditional check ('dismissed' not in schema) may not trigger correctly.",
+        "verification": "PRAGMA table_info(correction_groups) — confirms 9 columns, no 'text' or 'source'. SELECT status, count FROM correction_groups WHERE status='promoted' — confirms 4 rows exist."
+      },
+      {
+        "id": "T6",
+        "assertion": "Character trigram Jaccard with threshold 0.7 matches embedding-based dedup (cosine >= 0.85) with <5% false negative rate at <500 entries of short text",
+        "verification": "Run both approaches on current OM entries, compare match sets"
+      }
+    ],
+    "conflicts": [
+      {
+        "id": "C1",
+        "decision": "decision-74",
+        "conflict_description": "decision-74 explicitly chose semantic embeddings over regex for correction detection and rejected fallback. Any proposal to replace Ollama-based correction detection with n-gram/Jaccard/keyword approaches for the prototype matching step directly conflicts. However: (1) the decision was about regex specifically, not about all non-neural approaches, (2) dedup in om_write.py already has a simhash fallback that decision-74 didn't address, (3) the 'no regex fallback' stance means corrections are silently lost when Ollama is down.",
+        "resolution_options": [
+          "Keep decision-74 for correction detection, only remove Ollama from dedup (where simhash fallback already exists)",
+          "Supersede decision-74 with evidence that character n-gram Jaccard captures semantic similarity better than regex while still being non-neural",
+          "Implement tiered approach: simhash for dedup, keep Ollama only for correction prototype matching (reduces Ollama calls from ~15 to ~5 per session)"
+        ]
+      },
+      {
+        "id": "C2",
+        "decision": "corrections.md dual-role",
+        "conflict_description": "corrections.md serves as both human-editable correction log and machine input for correction grouping. Moving it to SQLite breaks the human editing workflow. Keeping it means maintaining the parse-and-embed pipeline.",
+        "resolution_options": [
+          "Shadow table pattern: keep corrections.md as source of truth, use mtime-based change detection to trigger DB re-sync only when modified",
+          "Accept the dual role, consolidate everything else into DB"
+        ]
+      }
+    ],
+    "search_queries": [
+      "python trigram jaccard similarity short text implementation",
+      "sqlite WAL mode concurrent writes from background process",
+      "claude code hooks async timeout behavior",
+      "simhash vs minhash false positive rate small corpus",
+      "nohup disown background process sqlite writes",
+      "nomic-embed-text latency benchmarks local"
+    ],
+    "agent_attribution": {
+      "gemini": [
+        "Tiered dedup pattern (exact -> trigram Jaccard -> semantic)",
+        "System-state vs user-knowledge split for flat file consolidation",
+        "Double-fork background detach with PID lockfile and WAL mode",
+        "Character n-gram Jaccard as best non-neural alternative for short text (<300 chars)",
+        "Assessment that <1000 entries makes brute-force Jaccard sub-5ms, eliminating perf justification for embeddings"
+      ],
+      "claude": [
+        "OpenMemory bloat discovery: 366/749 entries (49%) are legacy transcript/correction entries outside ALLOWED_TAGS",
+        "correction-tallies.jsonl is dead code (2 entries, function duplicated by correction_groups DB)",
+        "om-ops.json is write-only diagnostic with no readers (2781 lines)",
+        "Stop hook timeout analysis: 10s timeout likely kills Ollama-dependent sections 3-6",
+        "tool-learnings.md sync is O(n*m) embedding waste for 3 static entries",
+        "rendered-prefs.md blank state root cause: likely empty text fields on promoted rows, not missing schema",
+        "Duplicate embedding infrastructure across signal_processor.py and om_write.py (~80 lines)",
+        "decision-74 conflict analysis: distinguishing regex (rejected) from non-neural approaches (not addressed)"
+      ]
+    }
+  }
+}

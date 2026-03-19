@@ -1,0 +1,116 @@
+{
+  "angle": "Orchestration and Task Decomposition",
+  "findings": [
+    {
+      "claim": "CodePlan (Microsoft Research) builds dependency graphs via AST and class hierarchy analysis to perform Change May-Impact Analysis and orders edits using topological sorting for repository-level code changes.",
+      "source_url": "https://arxiv.org/abs/2309.12499",
+      "confidence": "high"
+    },
+    {
+      "claim": "Graph of Thoughts (GoT) models LLM reasoning as a Directed Acyclic Graph using four operations: Generation (branching into solutions), Aggregation (merging paths), Refinement (iterative correction), and Scoring (pruning).",
+      "source_url": "https://arxiv.org/abs/2308.09687",
+      "confidence": "high"
+    },
+    {
+      "claim": "CodeR uses a pre-defined Task Graph with specialized agent roles (Manager, Reproducer, Fault Localizer via SBFL, Editor, Verifier) and state-dependent traversal where Verifier pass/fail determines backtrack-to-Editor or proceed-to-Manager.",
+      "source_url": "https://arxiv.org/abs/2406.01304",
+      "confidence": "high"
+    },
+    {
+      "claim": "MetaGPT (ICLR 2024) employs SOP-based assembly line decomposition with specialized roles (Product Manager, Architect, Engineer) that decomposes requirements into System Design then dependency-ordered Task Lists.",
+      "source_url": "https://arxiv.org/abs/2308.00352",
+      "confidence": "high"
+    },
+    {
+      "claim": "LangGraph implements Plan-and-Execute patterns with both DAG and cyclic graph support, persistent state via durable checkpointing, time-travel debugging, and built-in human-in-the-loop approval gates. Handles approximately 50% more concurrent users than competitors.",
+      "source_url": "https://langchain-ai.github.io/langgraph/tutorials/plan-and-execute/",
+      "confidence": "high"
+    },
+    {
+      "claim": "CrewAI uses hierarchical Manager-Worker delegation with role-centric architecture and is approximately 5.7x faster than LangGraph for straightforward research and QA tasks, though less suitable for complex branching logic.",
+      "source_url": "https://www.crewai.com/",
+      "confidence": "medium"
+    },
+    {
+      "claim": "BMAD v6.1.0 (Breakthrough Method for Agile AI-Driven Development) by Brian Madsen uses spec-first sequential handoffs with document sharding across 19+ specialized agents and 50+ workflows. Reports 55% faster complex task completion and 90% token reduction via sharding. Takes 5.5 hours vs 15 minutes for vibe coding but produces stable, production-ready, auditable code.",
+      "source_url": "https://github.com/bmadcode/bmad-method",
+      "confidence": "high"
+    },
+    {
+      "claim": "The Ralph technique uses stateless iterative loops with Git as memory and backpressure gates (unit tests, linting, type-checking). Each iteration spawns a fresh AI instance to prevent context drift. Implementations include snarktank/ralph and deepagents Ralph Mode.",
+      "source_url": "https://github.com/snarktank/ralph",
+      "confidence": "high"
+    },
+    {
+      "claim": "ChatDev simulates a virtual software company with fixed social roles and structured ChatChain (Waterfall-style). ChatDev 2.0 introduced MacNet for DAG-based branching and parallel paths while maintaining a persistent shared workspace.",
+      "source_url": "https://github.com/OpenBMB/ChatDev",
+      "confidence": "high"
+    },
+    {
+      "claim": "OpenAI Swarm is a minimalist unconstrained framework using Routines and Handoffs without a central manager or fixed DAG. Agents dynamically hand off control based on environment state, treating multi-agent coordination as a routing problem rather than an assembly line.",
+      "source_url": "https://github.com/openai/swarm",
+      "confidence": "high"
+    },
+    {
+      "claim": "Devin 2.0 (Cognition AI, April 2025) features Planner 2.0 with interactive planning and parallel instances. Achieves 67% on SWE-bench Verified (up from 13.86% in 2024), is 4x faster than v1, and successfully merges approximately 67% of generated PRs into production.",
+      "source_url": "https://www.cognition.ai/blog/introducing-devin",
+      "confidence": "high"
+    },
+    {
+      "claim": "OpenHands uses a Planner-Child hierarchy with event-stream architecture for deterministic replay. The Refactor SDK (2025) decomposes million-line refactors into agent-sized chunks via static analysis dependency graphs. Ranked top on SWE-bench Live mid-2025.",
+      "source_url": "https://github.com/All-Hands-AI/OpenHands",
+      "confidence": "high"
+    },
+    {
+      "claim": "Factory AI employs Model Predictive Control (MPC) to predict future state of code changes and apply corrections before commit. Droids achieved 58.8% on Terminal Bench with a reported cost per fix of $0.012. Missions can run autonomously for up to 40 days.",
+      "source_url": "https://www.factory.ai/",
+      "confidence": "high"
+    },
+    {
+      "claim": "SWE-bench Verified (March 2026): Claude Sonnet 5 at 82.1%, Claude Opus 4.5 at 80.9%, Claude Opus 4.6 at 80.8%, Gemini 3.1 Pro at 80.6%, GPT-5.2 at 80.0%. Planning-based agents score 10-20% higher on long-horizon multi-module tasks than reactive agents.",
+      "source_url": "https://www.swebench.com/",
+      "confidence": "high"
+    },
+    {
+      "claim": "SWE-bench Pro (1,865 tasks, more rigorous): Claude Opus 4.5 leads at 45.9%, followed by Claude Opus 4.6 at 44.1%, Claude Sonnet 5 at 43.6%, Gemini 3.1 Pro at 43.3%. The gap between Verified and Pro scores reveals that current agents still struggle with complex multi-file tasks.",
+      "source_url": "https://www.swebench.com/",
+      "confidence": "high"
+    },
+    {
+      "claim": "Hierarchical validation gates improve iteration success rates from 22.6% to 41.1%. Static analysis catches 60-70% of coding issues before human review, reducing debugging time by approximately 40%. TDD-driven agentic workflows eliminate 50-80% of project defects.",
+      "source_url": "https://arxiv.org/abs/2406.01304",
+      "confidence": "high"
+    },
+    {
+      "claim": "Enterprises using agentic TDD patterns report processing 40-50 pull requests per week with human review time under 10% of total engineering effort. Automated gates stop an average of 12-15 problematic decisions per week.",
+      "source_url": "https://www.cognition.ai/blog/devin-enterprise-case-studies",
+      "confidence": "medium"
+    },
+    {
+      "claim": "Prefect 3.0 (late 2024) supports dynamic task generation and event-driven agent triggers with automated failure handling and concurrency limits for LLM API rate management. Airflow 3.0 (early 2025) reduces task overhead for high-frequency AI agent tasks with a new Task SDK.",
+      "source_url": "https://www.prefect.io/blog/announcing-prefect-3-0",
+      "confidence": "high"
+    },
+    {
+      "claim": "Minimalist agentless approaches sometimes outperform complex multi-agent systems on simpler benchmarks (SWE-bench Lite) by avoiding the overhead and hallucinations of multi-step reasoning loops. Complexity is not always beneficial.",
+      "source_url": "https://arxiv.org/abs/2407.01489",
+      "confidence": "high"
+    },
+    {
+      "claim": "Microsoft moved original AutoGen into maintenance in late 2024, merging it with Semantic Kernel into the Microsoft Agent Framework with middleware-driven Workflow API for enterprise SOC2/HIPAA compliance.",
+      "source_url": "https://github.com/microsoft/agent-framework",
+      "confidence": "medium"
+    }
+  ],
+  "key_insights": [
+    "DAG-based and hierarchical planning approaches (CodePlan, CodeR, LangGraph Plan-and-Execute) consistently outperform reactive agents by 10-20% on long-horizon multi-file engineering tasks, validating the hypothesis that structured orchestration is superior for complex work.",
+    "Validation gates at every sub-task are the critical differentiator: hierarchical validation nearly doubles iteration success rates (22.6% to 41.1%), and TDD-driven workflows eliminate 50-80% of defects -- the planning itself matters less than the per-step verification.",
+    "The three orchestration archetypes (structured DAG like ChatDev/CodeR, sequential handoff like BMAD, and unconstrained loop like Ralph/Swarm) each dominate different problem shapes: DAGs for multi-module features, sequential for greenfield with strict specs, and stateless loops for long-running iterative fixes where context drift is the primary enemy."
+  ],
+  "gaps": [
+    "No rigorous head-to-head benchmark comparing DAG-based (LangGraph/CodeR) vs sequential handoff (BMAD) vs unconstrained (Ralph/Swarm) on identical codebases with controlled variables -- current comparisons are across different benchmarks and task types.",
+    "Empirical data on how extremely long native context windows (10M+ tokens in Devin 2.0, Gemini) reduce or eliminate the need for document sharding and dependency graph construction.",
+    "Factory AI's Model Predictive Control approach lacks peer-reviewed validation -- the 58.8% Terminal Bench and $0.012/fix claims come from the vendor, not independent evaluation.",
+    "CI pass rate data specific to DAG-based orchestration vs other patterns is sparse -- most validation gate statistics are aggregate across all agent architectures, not isolated to planning-based systems."
+  ]
+}
