@@ -86,10 +86,9 @@ Use 10-char progress bars.
 
 ## add "Title"
 
-1. Determine the next milestone_order: call `pm_roadmap()`, read the detail file to find the max `milestone_order` among milestones, add 1.
-2. Call `pm_create_epic(title="Title", milestone_order=<next>)`.
-3. Print: `Created epic-NNN: "Title" (milestone #N).`
-4. Display the updated roadmap table.
+1. Call `pm_create_epic(title="Title")`. Server auto-assigns `milestone_order`.
+2. Print: `Created epic-NNN: "Title" (milestone #N).`
+3. Call `pm_roadmap()` and display the updated table.
 
 ---
 
