@@ -30,7 +30,7 @@ SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
 
 OUTCOMES_CHANGED=false
 RUN_STATE_DB="$HOME/.claude/.claude/run-state.db"
-SESSION_START_FILE="/tmp/session-start-${SESSION_ID}"
+SESSION_START_FILE="$CLAUDE_TEMP_DIR/session-start-${SESSION_ID}"
 
 if [[ -f "$RUN_STATE_DB" && -f "$SESSION_START_FILE" ]]; then
   SESSION_START_EPOCH=$(cat "$SESSION_START_FILE")
@@ -50,7 +50,7 @@ fi
 
 # ── Section 3: Spawn background processor ──
 if [[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]]; then
-  rm -f "/tmp/session-start-${SESSION_ID}"
+  rm -f "$CLAUDE_TEMP_DIR/session-start-${SESSION_ID}"
   exit 0
 fi
 
@@ -58,11 +58,11 @@ DB_FILE="$HOME/.claude/.claude/epics.db"
 SAFE_SESSION=$(echo "$SESSION_ID_RAW" | tr -dc 'a-zA-Z0-9')
 
 # Skip spawn if an active process already exists for this session
-PIDFILE="/tmp/stop-processor-${SAFE_SESSION}.pid"
+PIDFILE="$CLAUDE_TEMP_DIR/stop-processor-${SAFE_SESSION}.pid"
 if [[ -f "$PIDFILE" ]]; then
   OLD_PID=$(cat "$PIDFILE" 2>/dev/null)
   if kill -0 "$OLD_PID" 2>/dev/null; then
-    rm -f "/tmp/session-start-${SESSION_ID}"
+    rm -f "$CLAUDE_TEMP_DIR/session-start-${SESSION_ID}"
     exit 0
   fi
 fi
@@ -73,9 +73,9 @@ nohup python3 "$HOME/.claude/hooks/lib/stop_processor.py" \
   --session "${SESSION_ID_RAW:-}" \
   --project "$HOME/.claude" \
   --cwd "${CWD:-}" \
-  > "/tmp/stop-processor-${SAFE_SESSION}.log" 2>&1 &
+  > "$CLAUDE_TEMP_DIR/stop-processor-${SAFE_SESSION}.log" 2>&1 &
 disown
 
 # Cleanup
-rm -f "/tmp/session-start-${SESSION_ID}"
+rm -f "$CLAUDE_TEMP_DIR/session-start-${SESSION_ID}"
 exit 0

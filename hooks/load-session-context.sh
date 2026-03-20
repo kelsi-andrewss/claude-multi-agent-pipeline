@@ -8,8 +8,8 @@ require_profile 1
 
 # Display active hook profile
 ACTIVE_PROFILE="standard"
-if [[ -f /tmp/claude-hook-profile ]]; then
-  ACTIVE_PROFILE=$(cat /tmp/claude-hook-profile 2>/dev/null)
+if [[ -f "$CLAUDE_TEMP_DIR/claude-hook-profile" ]]; then
+  ACTIVE_PROFILE=$(cat "$CLAUDE_TEMP_DIR/claude-hook-profile" 2>/dev/null)
 fi
 if [[ -n "$CLAUDE_HOOK_PROFILE" && "$ACTIVE_PROFILE" == "standard" ]]; then
   ACTIVE_PROFILE="$CLAUDE_HOOK_PROFILE"
@@ -305,7 +305,7 @@ TRUSTEOF
 
   # Background: compute decision freshness scores (no session output)
   if [[ -f "$HOME/.claude/.claude/decisions.sql" || -f "$HOME/.claude/.claude/decisions.db" ]]; then
-    nohup python3 "$HOME/.claude/scripts/decision-freshness.py" --project-root "$HOME/.claude" > "/tmp/decision-freshness-${CLAUDE_SESSION_ID:-$$}.log" 2>&1 &
+    nohup python3 "$HOME/.claude/scripts/decision-freshness.py" --project-root "$HOME/.claude" > "$CLAUDE_TEMP_DIR/decision-freshness-${CLAUDE_SESSION_ID:-$$}.log" 2>&1 &
   fi
 
   SESSION_ID=$(echo "$CLAUDE_SESSION_ID" | tr -dc 'a-zA-Z0-9')
@@ -320,11 +320,11 @@ TRUSTEOF
   fi
 
   # Session-start timestamp for debrief freshness check
-  echo "$(date +%s)" > "/tmp/session-start-${SESSION_ID}"
+  echo "$(date +%s)" > "$CLAUDE_TEMP_DIR/session-start-${SESSION_ID}"
 
   # Background: decision freshness scoring (no session output)
   if [[ -f "$HOME/.claude/.claude/decisions.sql" || -f "$HOME/.claude/.claude/decisions.db" ]]; then
-    nohup python3 "$HOME/.claude/scripts/decision-freshness.py" --project-root "$HOME/.claude" > "/tmp/decision-freshness-${SESSION_ID}.log" 2>&1 &
+    nohup python3 "$HOME/.claude/scripts/decision-freshness.py" --project-root "$HOME/.claude" > "$CLAUDE_TEMP_DIR/decision-freshness-${SESSION_ID}.log" 2>&1 &
   fi
 
   # Session agenda + stale detection (single Python block)
