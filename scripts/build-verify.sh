@@ -54,6 +54,7 @@ cd "$PROJECT_ROOT"
 PROJECT_TYPE="unknown"
 BUILD_CMD=""
 LINT_CMD=""
+TEST_CMD=""
 
 if [[ -f "package.json" ]]; then
   PROJECT_TYPE="node_ts"
@@ -80,6 +81,11 @@ elif [[ -f "pubspec.yaml" ]]; then
 elif [[ -f "pyproject.toml" ]]; then
   PROJECT_TYPE="python"
   BUILD_CMD="pip install -e . 2>&1 | tail -5"
+  # Discover pytest: require both test files and a working pytest
+  TEST_FILES=$(find . -maxdepth 4 -name 'test_*.py' -o -name '*_test.py' 2>/dev/null | head -1)
+  if [[ -n "$TEST_FILES" ]] && python3 -m pytest --version >/dev/null 2>&1; then
+    TEST_CMD="python3 -m pytest -x -q --tb=short"
+  fi
 elif [[ -f "Cargo.toml" ]]; then
   PROJECT_TYPE="rust"
   BUILD_CMD="cargo check && cargo clippy --quiet 2>&1"
@@ -139,15 +145,46 @@ if [[ -n "$LINT_CMD" ]]; then
   LINT_WARNINGS=$(echo "$LINT_OUTPUT" | grep -c -i "warning" || true)
 fi
 
+# Run tests if available (currently Python/pytest only)
+TEST_OUTPUT=""
+TEST_EXIT=0
+if [[ -n "$TEST_CMD" ]]; then
+  echo "Running tests: $TEST_CMD" >&2
+  set +e
+  TEST_OUTPUT=$(bash -c "$TEST_CMD" 2>&1 | tail -30)
+  TEST_EXIT=$?
+  set -e
+
+  if [[ $TEST_EXIT -ne 0 ]]; then
+    python3 -c "
+import json, sys
+print(json.dumps({
+    'status': 'error',
+    'project_type': sys.argv[1],
+    'build_cmd': sys.argv[2],
+    'lint_cmd': sys.argv[3] if sys.argv[3] else None,
+    'test_cmd': sys.argv[4],
+    'build_result': 'fail',
+    'test_output': sys.argv[5],
+    'lint_warnings': 0
+}))
+" "$PROJECT_TYPE" "$BUILD_CMD" "${LINT_CMD:-}" "$TEST_CMD" "$TEST_OUTPUT"
+    exit 1
+  fi
+fi
+
 # Emit success
 python3 -c "
 import json, sys
-print(json.dumps({
+result = {
     'status': 'success',
     'project_type': sys.argv[1],
     'build_cmd': sys.argv[2],
     'lint_cmd': sys.argv[3] if sys.argv[3] else None,
     'build_result': 'pass',
     'lint_warnings': int(sys.argv[4])
-}))
-" "$PROJECT_TYPE" "$BUILD_CMD" "${LINT_CMD:-}" "$LINT_WARNINGS"
+}
+if sys.argv[5]:
+    result['test_cmd'] = sys.argv[5]
+print(json.dumps(result))
+" "$PROJECT_TYPE" "$BUILD_CMD" "${LINT_CMD:-}" "$LINT_WARNINGS" "${TEST_CMD:-}"

