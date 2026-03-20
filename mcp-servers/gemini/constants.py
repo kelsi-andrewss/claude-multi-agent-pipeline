@@ -153,6 +153,9 @@ PLAN_SYSTEM_INSTRUCTION = (
     '- "story_id": the story ID exactly as given (e.g. "story-293") — required for matching\n'
     '- "agent": one of "quick-fixer" (small fixes/styling), "architect" (new features/refactors), "unit-tester" (tests only)\n'
     '- "write_files": list of file paths this story will modify\n'
+    '- "test_files": list of test file paths for this story. '
+    "Infer from write_files: for Python, use test_<module>.py in the same directory. "
+    "For JS/TS, use __tests__/<module>.test.ts. Empty array if no tests needed.\n"
     '- "tasks": ordered list of implementation steps as strings\n'
     '- "parallel_group": integer (1=first, 2=after group 1 finishes, etc.)\n'
     '- "depends_on": list of story IDs that must complete first\n\n'
