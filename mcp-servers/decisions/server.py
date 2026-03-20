@@ -61,9 +61,45 @@ def _format_decision(d: Decision) -> str:
     if d.scopes:
         scope_strs = [f"{s.scope_type}:{s.scope_value}" for s in d.scopes]
         parts.append(f"  Scopes: {', '.join(scope_strs)}")
+    if d.related_decisions:
+        rels = _parse_relationships(d.related_decisions)
+        if rels:
+            formatted = ", ".join(f"decision-{rid} ({rtype})" for rid, rtype in rels)
+            parts.append(f"  Related: {formatted}")
     if d.created_at:
         parts.append(f"  Created: {d.created_at}")
     return "\n".join(parts)
+
+
+def _parse_relationships(raw: str) -> list[tuple[int, str]]:
+    """Parse 'id:type,id:type' into [(id, type), ...]."""
+    if not raw or not raw.strip():
+        return []
+    result = []
+    for token in raw.split(","):
+        token = token.strip()
+        if ":" not in token:
+            continue
+        parts = token.split(":", 1)
+        try:
+            result.append((int(parts[0]), parts[1]))
+        except (ValueError, IndexError):
+            continue
+    return result
+
+
+def _merge_relationships(existing: str | None, new_entry: str) -> str:
+    """Append new_entry to existing comma-separated relationships, deduplicating by (id, type)."""
+    seen: set[str] = set()
+    if existing and existing.strip():
+        for token in existing.split(","):
+            token = token.strip()
+            if token:
+                seen.add(token)
+    new_entry = new_entry.strip()
+    if new_entry:
+        seen.add(new_entry)
+    return ",".join(sorted(seen))
 
 
 def _compute_scope_overlap(new_patterns: set[str], existing_patterns: set[str]) -> float:
@@ -131,6 +167,7 @@ def record_project_decision(
 
     superseded_ids = []
     warnings = []
+    related_entries: list[str] = []
     new_patterns = {s.scope_value for s in scopes}
     if new_patterns:
         existing = store.list_all(status="active")
@@ -154,6 +191,20 @@ def record_project_decision(
                     warnings.append(
                         f"decision-{existing_d.id} has partial scope overlap ({overlap:.0%})"
                     )
+                    related_entries.append(f"{existing_d.id}:related")
+                    merged = _merge_relationships(existing_d.related_decisions, f"{decision_id}:related")
+                    conn.execute(
+                        "UPDATE decisions SET related_decisions = ?, updated_at = ? WHERE id = ?",
+                        (merged, now, existing_d.id),
+                    )
+            if related_entries:
+                new_rels = None
+                for entry in related_entries:
+                    new_rels = _merge_relationships(new_rels, entry)
+                conn.execute(
+                    "UPDATE decisions SET related_decisions = ?, updated_at = ? WHERE id = ?",
+                    (new_rels, now, decision_id),
+                )
             conn.commit()
         finally:
             conn.close()
@@ -343,7 +394,7 @@ def query_decisions_by_domain(domain: str, limit: int = 50) -> str:
 
         rows = conn.execute(
             "SELECT id, content, reasoning, status, source, superseded_by, "
-            "created_at, updated_at FROM decisions "
+            "created_at, updated_at, related_decisions FROM decisions "
             "WHERE status = 'active' AND (domain = ? OR domain LIKE ?) "
             "ORDER BY id LIMIT ?",
             (domain, f"%{domain}%", limit),
@@ -372,6 +423,7 @@ def query_decisions_by_domain(domain: str, limit: int = 50) -> str:
                 superseded_by=row[5],
                 created_at=row[6],
                 updated_at=row[7],
+                related_decisions=row[8],
                 scopes=scopes,
             )
             lines.append(_format_decision(d))

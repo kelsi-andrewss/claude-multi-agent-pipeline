@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS decisions (
     superseded_by INTEGER REFERENCES decisions(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    domain TEXT
+    domain TEXT,
+    related_decisions TEXT
 );
 
 CREATE TABLE IF NOT EXISTS decision_scopes (
@@ -135,8 +136,8 @@ class DecisionStore:
             if domain is None and decision.scopes:
                 domain = _derive_domain_from_scopes(decision.scopes)
             cursor = conn.execute(
-                "INSERT INTO decisions (content, reasoning, status, source, superseded_by, created_at, updated_at, domain) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO decisions (content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     decision.content,
                     decision.reasoning,
@@ -146,6 +147,7 @@ class DecisionStore:
                     now,
                     now,
                     domain,
+                    decision.related_decisions,
                 ),
             )
             decision_id = cursor.lastrowid
@@ -171,7 +173,7 @@ class DecisionStore:
         conn = self._get_connection()
         try:
             row = conn.execute(
-                "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain "
+                "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
                 "FROM decisions WHERE id = ?",
                 (decision_id,),
             ).fetchone()
@@ -198,6 +200,7 @@ class DecisionStore:
                 created_at=row[6],
                 updated_at=row[7],
                 domain=row[8],
+                related_decisions=row[9],
                 scopes=scopes,
             )
         finally:
@@ -209,13 +212,13 @@ class DecisionStore:
         try:
             if status is not None:
                 rows = conn.execute(
-                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain "
+                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
                     "FROM decisions WHERE status = ? ORDER BY id",
                     (status,),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain "
+                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
                     "FROM decisions ORDER BY id"
                 ).fetchall()
 
@@ -240,6 +243,7 @@ class DecisionStore:
                         created_at=row[6],
                         updated_at=row[7],
                         domain=row[8],
+                        related_decisions=row[9],
                         scopes=scopes,
                     )
                 )
@@ -276,6 +280,7 @@ class DecisionStore:
 
     def _init_schema(self, conn: sqlite3.Connection) -> None:
         self._migrate_v1_to_v2(conn)
+        self._migrate_v2_to_v3(conn)
         conn.executescript(_SCHEMA_SQL)
         conn.executescript(_METADATA_SQL)
         conn.executescript(_FTS_SQL)
@@ -289,6 +294,15 @@ class DecisionStore:
         col_names = {c[1] for c in cols}
         if cols and "domain" not in col_names:
             conn.execute("ALTER TABLE decisions ADD COLUMN domain TEXT")
+
+    def _migrate_v2_to_v3(self, conn: sqlite3.Connection) -> None:
+        try:
+            cols = conn.execute("PRAGMA table_info(decisions)").fetchall()
+        except sqlite3.OperationalError:
+            return
+        col_names = {c[1] for c in cols}
+        if cols and "related_decisions" not in col_names:
+            conn.execute("ALTER TABLE decisions ADD COLUMN related_decisions TEXT")
 
     def _try_create_vec_table(self, conn: sqlite3.Connection) -> None:
         if self._vec_available is False:
