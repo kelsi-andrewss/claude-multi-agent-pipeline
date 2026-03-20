@@ -294,6 +294,93 @@ def stage_hook_generation(db_file, project_root):
     print(f"Stage 5 complete: {generated} hooks generated", file=sys.stderr)
 
 
+# -- Stage 6: Staleness gardening --
+
+def stage_staleness_gardening(project_root):
+    """Read decision_freshness from run-state.db, join with decisions.db for content/scopes,
+    and write .claude/stale-decisions.md sidecar for Tier 1 injection at session start."""
+    print("Stage 6: Staleness gardening", file=sys.stderr)
+
+    run_state_path = os.path.join(project_root, ".claude", "run-state.db")
+    decisions_path = os.path.join(project_root, ".claude", "decisions.db")
+    sidecar_path = os.path.join(project_root, ".claude", "stale-decisions.md")
+
+    if not os.path.isfile(run_state_path) or not os.path.isfile(decisions_path):
+        # Clear sidecar if source data missing
+        if os.path.isfile(sidecar_path):
+            with open(sidecar_path, "w") as f:
+                f.write("")
+        print("Stage 6: skipped (missing run-state.db or decisions.db)", file=sys.stderr)
+        return
+
+    # Query stale decisions from run-state.db
+    rs_conn = _connect_db(run_state_path)
+    try:
+        stale_rows = rs_conn.execute(
+            "SELECT decision_id, staleness_score, days_since_activity "
+            "FROM decision_freshness WHERE staleness_score > 0.7 "
+            "ORDER BY staleness_score DESC"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # Table doesn't exist yet (freshness scoring hasn't run)
+        rs_conn.close()
+        if os.path.isfile(sidecar_path):
+            with open(sidecar_path, "w") as f:
+                f.write("")
+        print("Stage 6: skipped (decision_freshness table missing)", file=sys.stderr)
+        return
+    rs_conn.close()
+
+    if not stale_rows:
+        with open(sidecar_path, "w") as f:
+            f.write("")
+        print("Stage 6 complete: no stale decisions", file=sys.stderr)
+        return
+
+    # Join with decisions.db for content and scopes
+    dec_conn = sqlite3.connect(f"file:{decisions_path}?mode=ro", uri=True)
+    entries = []
+    for decision_id, score, days in stale_rows:
+        row = dec_conn.execute(
+            "SELECT content FROM decisions WHERE id = ? AND status = 'active'",
+            (decision_id,),
+        ).fetchone()
+        if not row:
+            continue
+        content = row[0]
+
+        scopes = dec_conn.execute(
+            "SELECT scope_value FROM decision_scopes "
+            "WHERE decision_id = ? AND scope_type = 'file'",
+            (decision_id,),
+        ).fetchall()
+        scope_list = [s[0] for s in scopes] if scopes else []
+
+        entries.append({
+            "id": decision_id,
+            "content": content,
+            "score": score,
+            "days": days,
+            "scopes": scope_list,
+        })
+    dec_conn.close()
+
+    # Write sidecar
+    with open(sidecar_path, "w") as f:
+        if not entries:
+            f.write("")
+        else:
+            f.write("# Stale Decisions\n\n")
+            f.write("These decisions have not had relevant file activity recently.\n")
+            f.write("Review: reinforce with `/reinforce <id>`, supersede, or deprecate.\n\n")
+            for e in entries:
+                scope_str = ", ".join(e["scopes"][:3]) if e["scopes"] else "(no file scope)"
+                f.write(f"- [decision-{e['id']}] (staleness: {e['score']:.2f}, {e['days']}d inactive) {e['content'][:120]}\n")
+                f.write(f"  Scopes: {scope_str}\n")
+
+    print(f"Stage 6 complete: {len(entries)} stale decisions written to sidecar", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Background Stop hook processor")
     parser.add_argument("--transcript", required=True)
@@ -355,6 +442,12 @@ def main():
         stage_hook_generation(args.db, args.project)
     except Exception as e:
         print(f"Stage 5 FAILED: {e}", file=sys.stderr)
+
+    # Stage 6: Staleness gardening
+    try:
+        stage_staleness_gardening(args.project)
+    except Exception as e:
+        print(f"Stage 6 FAILED: {e}", file=sys.stderr)
 
     print("stop_processor complete", file=sys.stderr)
 
