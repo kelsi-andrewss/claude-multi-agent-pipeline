@@ -63,6 +63,7 @@ if [[ "$RUN_IN_BG" != "true" ]]; then
     echo "  Corrected call example:" >&2
     echo "    Bash(command: \"${COMMAND}\", run_in_background: true)" >&2
     echo "  Only block on this result when the next action actually depends on it." >&2
+    bash "$HOME/.claude/scripts/emit-event.sh" "hook.warn-sync-heavy-bash" "hook" "${CMD_TYPE:-bash}" "{\"command_type\":\"$REASON\",\"result\":\"warned\"}" || true
   fi
 fi
 
@@ -99,6 +100,7 @@ if [[ -n "$FILE_OP_TOOL" ]]; then
   echo "" >&2
   echo "TOOL SUGGESTION: '$FILE_OP_REASON' detected — prefer the dedicated $FILE_OP_TOOL tool instead." >&2
   echo "  Dedicated tools have correct permissions, better output formatting, and avoid shell quoting issues." >&2
+  bash "$HOME/.claude/scripts/emit-event.sh" "hook.warn-sync-heavy-bash" "hook" "${FILE_OP_REASON:-unknown}" "{\"suggested_tool\":\"$FILE_OP_TOOL\",\"detected\":\"$FILE_OP_REASON\",\"result\":\"warned\"}" || true
 fi
 
 # Always allow — this is advisory only

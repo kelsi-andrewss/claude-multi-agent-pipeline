@@ -56,4 +56,5 @@ fi
 echo "BLOCKED: $PROTECTED_NAME is a protected Konva file." >&2
 echo "Grant explicit permission first by saying: \"I grant permission to edit $PROTECTED_NAME\"" >&2
 echo "This causes the main session to write: $CLAUDE_TEMP_DIR/konva-permission-${PROTECTED_NAME}" >&2
+bash "$HOME/.claude/scripts/emit-event.sh" "hook.guard-protected-files" "hook" "$FILE_PATH" "{\"protected_file\":\"$PROTECTED_NAME\",\"result\":\"blocked\"}" || true
 exit 2

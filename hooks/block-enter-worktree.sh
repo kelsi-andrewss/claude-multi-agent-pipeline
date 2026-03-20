@@ -8,4 +8,5 @@ require_profile 3
 echo "BLOCKED: The main session must not use EnterWorktree." >&2
 echo "Story worktrees are created by background coder agents only." >&2
 echo "See ORCHESTRATION.md §1." >&2
+bash "$HOME/.claude/scripts/emit-event.sh" "hook.block-enter-worktree" "hook" "EnterWorktree" '{"result":"blocked"}' || true
 exit 2

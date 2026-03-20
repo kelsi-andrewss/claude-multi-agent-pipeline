@@ -64,5 +64,6 @@ if [[ -f "$CHANGELOG" ]] && grep -qF "- ${TODAY} ${ACTION} /${SKILL_NAME}" "$CHA
   exit 0
 fi
 echo "- ${TODAY} ${ACTION} /${SKILL_NAME} — ${DESC}" >> "$CHANGELOG"
+bash "$HOME/.claude/scripts/emit-event.sh" "hook.track-skill-changes" "hook" "${SKILL_NAME}" "{\"action\":\"${ACTION}\",\"skill\":\"${SKILL_NAME}\",\"result\":\"logged\"}" || true
 
 exit 0
