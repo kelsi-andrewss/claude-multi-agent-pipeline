@@ -109,7 +109,7 @@ echo "Running build: $BUILD_CMD" >&2
 BUILD_OUTPUT=""
 BUILD_EXIT=0
 set +e
-BUILD_OUTPUT=$(eval "$BUILD_CMD" 2>&1 | tail -30)
+BUILD_OUTPUT=$(bash -c "$BUILD_CMD" 2>&1 | tail -30)
 BUILD_EXIT=$?
 set -e
 
@@ -134,7 +134,7 @@ LINT_WARNINGS=0
 if [[ -n "$LINT_CMD" ]]; then
   echo "Running lint: $LINT_CMD" >&2
   set +e
-  LINT_OUTPUT=$(eval "$LINT_CMD" 2>&1)
+  LINT_OUTPUT=$(bash -c "$LINT_CMD" 2>&1)
   set -e
   LINT_WARNINGS=$(echo "$LINT_OUTPUT" | grep -c -i "warning" || true)
 fi
