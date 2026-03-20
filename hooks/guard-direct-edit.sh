@@ -4,8 +4,8 @@
 # (.claude/worktrees/). Blocks direct edits to project source files from
 # the main session.
 #
-# Enhanced: also checks the active story's write_targets list in epics.db.
-# If the file is not in write_targets AND not in an allowed path, blocks with
+# Enhanced: also checks the active story's write_files list in epics.db.
+# If the file is not in write_files AND not in an allowed path, blocks with
 # a scope-creep message. Falls back to warn-only if epics.db is unavailable.
 #
 # Coder agents running inside a worktree pass automatically because their
@@ -94,7 +94,7 @@ if [[ -f "$HOTFIX_SENTINEL" ]]; then
   fi
 fi
 
-# Enhanced check: look up the active story's write_targets in epics.db.
+# Enhanced check: look up the active story's write_files in epics.db.
 # If a running story exists, check whether this file is in scope.
 DB_FILE="$HOME/.claude/.claude/epics.db"
 
@@ -110,7 +110,7 @@ running_states = ('in-progress','in-review','approved','running','testing','revi
 try:
     conn = sqlite3.connect(db_path, timeout=5)
     placeholders = ','.join('?' for _ in running_states)
-    query = f'SELECT write_targets FROM stories WHERE state IN ({placeholders}) AND archived=0'
+    query = f'SELECT write_files FROM stories WHERE state IN ({placeholders}) AND archived=0'
     cursor = conn.execute(query, running_states)
     rows = [r[0].strip() for r in cursor.fetchall() if r[0] and r[0].strip()]
     conn.close()
@@ -122,7 +122,7 @@ if not rows:
     print('NO_RUNNING_STORY')
     sys.exit(0)
 
-# write_targets is a newline or comma-separated list of file paths
+# write_files is a newline or comma-separated list of file paths
 all_write_files = []
 for row in rows:
     for wf in row.replace(',', '\n').splitlines():
