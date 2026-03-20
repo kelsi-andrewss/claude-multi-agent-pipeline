@@ -35,6 +35,8 @@ DEDUP_THRESHOLD = 0.85
 PRUNE_THRESHOLD = 0.01
 DEFAULT_DECAY = 0.05
 
+_ollama_fallback_warned = False
+
 
 @contextmanager
 def _db_connection():
@@ -73,7 +75,10 @@ def dedup_check(content, primary_tag):
             pass
         return None
 
-    print("om_write: ollama_fallback — embedding unavailable for dedup", file=sys.stderr)
+    global _ollama_fallback_warned
+    if not _ollama_fallback_warned:
+        print("om_write: ollama_fallback — embedding unavailable for dedup", file=sys.stderr)
+        _ollama_fallback_warned = True
     simhash = _content_hash(content)
     try:
         with _db_connection() as conn:
