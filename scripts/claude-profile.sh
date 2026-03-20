@@ -2,8 +2,15 @@
 # Switch hook profile: claude-profile [minimal|standard|strict]
 # Without args, shows current profile.
 
-mkdir -p "$HOME/.claude/tmp"
-PROFILE_FILE="$HOME/.claude/tmp/claude-hook-profile"
+PROFILE_FILE="$HOME/.claude/hook-profile"
+
+# Migrate from old locations
+for old in /tmp/claude-hook-profile "$HOME/.claude/tmp/claude-hook-profile"; do
+  if [[ -f "$old" && ! -f "$PROFILE_FILE" ]]; then
+    mv "$old" "$PROFILE_FILE" 2>/dev/null || true
+    break
+  fi
+done
 VALID_PROFILES=("minimal" "standard" "strict")
 
 if [[ $# -eq 0 ]]; then

@@ -88,6 +88,12 @@ def register(mcp):
             description: Optional epic description.
         """
         with _db_op() as conn:
+            if milestone_order is None:
+                max_order = conn.execute(
+                    "SELECT MAX(milestone_order) FROM epics"
+                ).fetchone()[0]
+                milestone_order = (max_order or 0) + 1
+
             epic_id = _next_id(conn, "epics", "epic-")
             conn.execute(
                 "INSERT INTO epics (id, title, branch, persistent, state, milestone_order, target_date, description) "

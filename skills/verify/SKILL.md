@@ -165,8 +165,8 @@ For each criterion, attempt programmatic verification:
 
 | Criterion type | Detection signal | Verification method |
 |---|---|---|
-| API endpoint | URL pattern, HTTP method, "endpoint", "route" | `curl` the endpoint, verify response status and shape |
-| CLI command | "run", "execute", command-line syntax | Run the command, verify output |
+| API endpoint | URL pattern, HTTP method, "endpoint", "route" | `curl --max-time 10 --connect-timeout 5 -sS` the endpoint, verify response status and shape. If curl exits non-zero (timeout or connection failure), mark the criterion as `failed` with the exit reason — do not retry. |
+| CLI command | "run", "execute", command-line syntax | **Do not execute directly.** Check the command against the safe-command allowlist (read-only inspection commands: `ls`, `cat`, `head`, `tail`, `wc`, `file`, `stat`, `test -f`, `test -d`, `jq`, `grep`, `diff`). If the command is on the allowlist, run it. If not, report the criterion as "manual verification needed — unsafe command: `<command>`" and skip execution. Never pipe CLI criterion commands to a shell or use `eval`. |
 | File output | "file exists", "generates", file path | Check file exists, verify contents match expectations |
 | UI/visual | "displays", "renders", "shows", "UI", "visual" | Skip — report as "manual verification needed" |
 | Behavioral/logic | Everything else not clearly programmatic | Skip — report as "manual verification needed" |
@@ -175,6 +175,12 @@ Track counts:
 - `verified`: criteria that were checked programmatically and passed
 - `failed`: criteria that were checked programmatically and failed
 - `manual`: criteria that require manual verification
+
+### Security constraints
+
+- **No unbounded network calls.** All HTTP verification uses `--max-time 10 --connect-timeout 5`. Hanging endpoints must not block the pipeline.
+- **No arbitrary execution.** CLI criteria run only allowlisted read-only commands. Everything else is reported as manual. The verify skill is an auditor, not an executor — it must never mutate state.
+- **No eval / shell expansion.** Commands are passed as explicit argv arrays, never interpolated into shell strings.
 
 ---
 
