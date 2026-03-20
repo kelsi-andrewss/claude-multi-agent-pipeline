@@ -152,7 +152,8 @@ def _render_markdown(rows: list[tuple], project_root: str, freshness: dict[int, 
 
     for did, content, reasoning, scope_type, scope_value, domain, _updated_at in rows:
         if domain:
-            domain_ids[domain].add(did)
+            for d in domain.split(","):
+                domain_ids[d.strip()].add(did)
 
         if scope_type is None and scope_value is None:
             if did not in seen_global:

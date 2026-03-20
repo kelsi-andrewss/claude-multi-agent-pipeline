@@ -66,11 +66,17 @@ def _derive_domain_from_scopes(scopes: list[DecisionScope]) -> str | None:
     file_scopes = [s for s in scopes if s.scope_type == "file"]
     if not file_scopes:
         return None
+    domains: set[str] = set()
     for scope in file_scopes:
+        matched = False
         for prefix, domain in _DOMAIN_PREFIX_MAP:
             if scope.scope_value.startswith(prefix):
-                return domain
-    return "general"
+                domains.add(domain)
+                matched = True
+                break
+        if not matched:
+            domains.add("general")
+    return ",".join(sorted(domains)) if domains else "general"
 
 
 class DecisionStore:
