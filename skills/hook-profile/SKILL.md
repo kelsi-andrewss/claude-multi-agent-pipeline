@@ -15,13 +15,13 @@ Manage the active hook profile. Profiles control which hooks run during the sess
 Steps:
 
 1. If `$ARGUMENTS` is empty or "show" or "status":
-   - Read `/tmp/claude-hook-profile` to get the current profile (default: standard)
+   - Read `~/.claude/hook-profile` to get the current profile (default: standard)
    - Report the active profile and which hooks are enabled at that level
 
 2. If `$ARGUMENTS` is a valid profile name (minimal, standard, strict):
-   - Write the profile name to `/tmp/claude-hook-profile`:
+   - Write the profile name to `~/.claude/hook-profile`:
      ```bash
-     echo "<profile>" > /tmp/claude-hook-profile
+     echo "<profile>" > ~/.claude/hook-profile
      ```
    - Report: "Hook profile set to <profile>. Active hooks: <list>"
 

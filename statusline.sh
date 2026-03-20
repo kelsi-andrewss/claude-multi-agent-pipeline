@@ -18,8 +18,8 @@ in_tok=$(echo "$DATA" | jq -r '.context_window.current_usage.input_tokens // emp
 out_tok=$(echo "$DATA" | jq -r '.context_window.current_usage.output_tokens // empty' 2>/dev/null || true)
 branch=$(git branch --show-current 2>/dev/null || true)
 hook_profile="standard"
-if [[ -f /tmp/claude-hook-profile ]]; then
-  hook_profile=$(cat /tmp/claude-hook-profile 2>/dev/null)
+if [[ -f "$HOME/.claude/hook-profile" ]]; then
+  hook_profile=$(cat "$HOME/.claude/hook-profile" 2>/dev/null)
 elif [[ -n "${CLAUDE_HOOK_PROFILE:-}" ]]; then
   hook_profile="$CLAUDE_HOOK_PROFILE"
 fi

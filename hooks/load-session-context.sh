@@ -8,8 +8,8 @@ require_profile 1
 
 # Display active hook profile
 ACTIVE_PROFILE="standard"
-if [[ -f "$CLAUDE_TEMP_DIR/claude-hook-profile" ]]; then
-  ACTIVE_PROFILE=$(cat "$CLAUDE_TEMP_DIR/claude-hook-profile" 2>/dev/null)
+if [[ -f "$HOME/.claude/hook-profile" ]]; then
+  ACTIVE_PROFILE=$(cat "$HOME/.claude/hook-profile" 2>/dev/null)
 fi
 if [[ -n "$CLAUDE_HOOK_PROFILE" && "$ACTIVE_PROFILE" == "standard" ]]; then
   ACTIVE_PROFILE="$CLAUDE_HOOK_PROFILE"
