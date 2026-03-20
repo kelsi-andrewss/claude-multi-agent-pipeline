@@ -10,58 +10,29 @@ import json
 import sys
 from datetime import datetime, timezone
 
-
-def _sql_str(value: str | None) -> str:
-    if value is None:
-        return "NULL"
-    escaped = value.replace("'", "''")
-    return f"'{escaped}'"
-
-
-def _sql_int(value: int | None) -> str:
-    if value is None:
-        return "NULL"
-    return str(value)
-
-
-_VALID_SCOPE_TYPES = frozenset({"file", "pattern", "tech"})
+from decision_memory.schema import (
+    DECISIONS_DDL,
+    DUMP_VERSION,
+    SCOPES_DDL,
+    VALID_SCOPE_TYPES,
+    sql_str,
+)
 
 
 def generate(data: dict, target_path: str = "") -> str:
     lines: list[str] = []
     now = datetime.now(timezone.utc).isoformat()
 
-    lines.append("-- decision_memory dump v1")
+    lines.append(f"-- decision_memory dump v{DUMP_VERSION}")
     lines.append(f"-- generated {now}")
     if target_path:
         lines.append(f"-- source: /scout --bootstrap {target_path}")
     lines.append("")
 
-    lines.append(
-        "CREATE TABLE IF NOT EXISTS decisions (\n"
-        "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-        "    content TEXT NOT NULL,\n"
-        "    reasoning TEXT,\n"
-        "    positive_framing TEXT,\n"
-        "    status TEXT NOT NULL DEFAULT 'active'\n"
-        "        CHECK (status IN ('active', 'deprecated', 'superseded', 'violated')),\n"
-        "    source TEXT NOT NULL DEFAULT 'human'\n"
-        "        CHECK (source IN ('human', 'ai-discovered', 'ai-proposed')),\n"
-        "    superseded_by INTEGER REFERENCES decisions(id),\n"
-        "    created_at TEXT NOT NULL DEFAULT (datetime('now')),\n"
-        "    updated_at TEXT NOT NULL DEFAULT (datetime('now'))\n"
-        ");"
-    )
+    lines.append(DECISIONS_DDL + ";")
     lines.append("")
 
-    lines.append(
-        "CREATE TABLE IF NOT EXISTS decision_scopes (\n"
-        "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-        "    decision_id INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,\n"
-        "    scope_type TEXT NOT NULL CHECK (scope_type IN ('file', 'pattern', 'tech')),\n"
-        "    scope_value TEXT NOT NULL\n"
-        ");"
-    )
+    lines.append(SCOPES_DDL + ";")
     lines.append("")
 
     decisions = data.get("architectural_decisions", [])
@@ -72,9 +43,9 @@ def generate(data: dict, target_path: str = "") -> str:
         reasoning = dec.get("reasoning", "")
         lines.append(
             f"INSERT OR REPLACE INTO decisions "
-            f"(id, content, reasoning, status, source, superseded_by, created_at, updated_at) "
-            f"VALUES ({idx}, {_sql_str(content)}, {_sql_str(reasoning)}, "
-            f"'active', 'ai-discovered', NULL, {_sql_str(now)}, {_sql_str(now)});"
+            f"(id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions) "
+            f"VALUES ({idx}, {sql_str(content)}, {sql_str(reasoning)}, "
+            f"'active', 'ai-discovered', NULL, {sql_str(now)}, {sql_str(now)}, NULL, NULL);"
         )
 
     if decisions:
@@ -82,13 +53,13 @@ def generate(data: dict, target_path: str = "") -> str:
 
     for idx, dec in enumerate(decisions, start=1):
         scope_type = dec.get("scope_type", "tech")
-        if scope_type not in _VALID_SCOPE_TYPES:
+        if scope_type not in VALID_SCOPE_TYPES:
             scope_type = "tech"
         scope_value = dec.get("scope_value", "")
         lines.append(
             f"INSERT OR REPLACE INTO decision_scopes "
             f"(id, decision_id, scope_type, scope_value) "
-            f"VALUES ({scope_id}, {idx}, {_sql_str(scope_type)}, {_sql_str(scope_value)});"
+            f"VALUES ({scope_id}, {idx}, {sql_str(scope_type)}, {sql_str(scope_value)});"
         )
         scope_id += 1
 

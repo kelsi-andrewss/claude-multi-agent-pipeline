@@ -12,7 +12,7 @@ import argparse, fcntl, json, os, re, signal, sqlite3, sys, time
 from collections import Counter
 
 
-LOCKFILE_TEMPLATE = "/tmp/stop-processor-{session}.lock"
+LOCKFILE_TEMPLATE = os.path.join(os.path.expanduser("~"), ".claude", "tmp", "stop-processor-{session}.lock")
 
 _lock_fd = None
 
@@ -25,7 +25,7 @@ def _lockfile_path(session_id):
 def _acquire_lock(session_id):
     """Acquire advisory lock via fcntl.flock(). Non-blocking.
 
-    Opens /tmp/stop-processor-{session}.lock and attempts LOCK_EX | LOCK_NB.
+    Opens $HOME/.claude/tmp/stop-processor-{session}.lock and attempts LOCK_EX | LOCK_NB.
     Returns True if lock acquired, False if another process holds it.
     File descriptor stored in module-level _lock_fd for process-lifetime hold.
     Lock auto-releases on process exit/crash (kernel-managed).

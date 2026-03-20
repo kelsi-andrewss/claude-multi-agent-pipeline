@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -174,14 +175,13 @@ def main():
         sys.exit(1)
 
     # Step 2: Run the test command
-    test_files = args.test_files.replace(",", " ")
-    full_cmd = f"{args.test_cmd} {test_files}"
+    test_file_list = [f.strip() for f in args.test_files.split(",") if f.strip()]
+    cmd_parts = shlex.split(args.test_cmd) + test_file_list
 
-    print(f"merge-gate: running tests: {full_cmd}", file=sys.stderr)
+    print(f"merge-gate: running tests: {cmd_parts}", file=sys.stderr)
     try:
         test_result = subprocess.run(
-            full_cmd,
-            shell=True,
+            cmd_parts,
             capture_output=True,
             text=True,
             timeout=300,

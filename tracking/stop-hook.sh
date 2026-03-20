@@ -57,6 +57,10 @@ python3 "$SCRIPT_DIR/write-turns.py" "$TRANSCRIPT" "$TRACKING_DIR" "$SESSION_ID"
 python3 "$SCRIPT_DIR/parse_friction.py" "$TRANSCRIPT" "$TRACKING_DIR/friction.json" \
   "$SESSION_ID" "$(basename "$PROJECT_ROOT")" "main" 2>/dev/null || true
 
+# Rotate friction.json to cap unbounded growth
+source "$HOME/.claude/hooks/lib/log_rotator.sh"
+rotate_log "$TRACKING_DIR/friction.json" 500 json_array
+
 # Parse skill invocations from JSONL
 python3 "$SCRIPT_DIR/parse_skills.py" "$TRANSCRIPT" "$TRACKING_DIR" \
   "$SESSION_ID" "$(basename "$PROJECT_ROOT")" 2>/dev/null || true

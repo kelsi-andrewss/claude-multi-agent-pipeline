@@ -310,6 +310,21 @@ def test_retry_increments_count(tmp_path):
         fixture.cleanup()
 
 
+def test_shell_metacharacters_in_paths(tmp_path):
+    """Paths with semicolons/pipes must not be interpreted as shell commands."""
+    fixture = GitFixture(tmp_path)
+    try:
+        result = run_merge_gate(fixture.mc_dir)
+        assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        output = json.loads(result.stdout.strip())
+        assert output["test_passed"] is True
+
+        # Verify the debug log shows list form (shell=False), not a string (shell=True)
+        assert "[" in result.stderr and "]" in result.stderr
+    finally:
+        fixture.cleanup()
+
+
 def test_no_db_write_without_session(tmp_path):
     db_home = str(tmp_path / "dbhome")
     os.makedirs(os.path.join(db_home, ".claude", ".claude"), exist_ok=True)

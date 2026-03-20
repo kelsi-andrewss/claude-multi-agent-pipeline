@@ -5,6 +5,7 @@
 
 source "$(dirname "$0")/lib/profile.sh"
 require_profile 2
+source "$(dirname "$0")/lib/log_rotator.sh"
 
 INPUT=$(cat)
 
@@ -15,10 +16,13 @@ from datetime import datetime, timezone
 def scrub_credentials(text):
     patterns = [
         (r'(Bearer\s+)\S+', r'\1[REDACTED]'),
-        (r'(sk-|ak-|key-)\S+', '[REDACTED]'),
+        (r'(Authorization[=:]\s*)\S+', r'\1[REDACTED]'),
+        (r'(sk-|ak-|key-|ghp_|gho_|ghu_|ghs_|ghr_)\S+', '[REDACTED]'),
+        (r'AIza[0-9A-Za-z_-]{30,}', '[REDACTED]'),
         (r'(--token\s+)\S+', r'\1[REDACTED]'),
-        (r'(password[=:]\s*)\S+', r'\1[REDACTED]'),
+        (r'((?:password|secret|passwd)[=:]\s*)\S+', r'\1[REDACTED]'),
         (r'AKIA[0-9A-Z]{16}', '[REDACTED]'),
+        (r'("(?:api_key|apikey|api_secret|token|secret|password|access_token|refresh_token|auth)"\s*:\s*)"[^"]*"', r'\1"[REDACTED]"'),
     ]
     for pat, repl in patterns:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
@@ -44,6 +48,7 @@ print(json.dumps(entry))
 
 if [[ -n "$ENTRY" ]]; then
   echo "$ENTRY" >> "$HOME/.claude/.claude/tracking/skill-telemetry.jsonl"
+  rotate_log "$HOME/.claude/.claude/tracking/skill-telemetry.jsonl" 500 jsonl
 fi
 
 exit 0

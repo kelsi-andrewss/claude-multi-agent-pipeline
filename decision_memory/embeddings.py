@@ -73,17 +73,19 @@ class EmbeddingProvider:
             return [None] * len(texts)
 
         results: list[EmbeddingResult | None] = []
-        try:
-            for vector in self._model.embed(texts):
+        for i, vector in enumerate(self._model.embed(texts)):
+            try:
                 v = vector.tolist()
                 v = v[: self._dim]
                 results.append(
                     EmbeddingResult(vector=v, model=self._model_name, dim=self._dim)
                 )
-        except Exception as e:
-            log.warning("Batch embedding failed: %s", e)
-            while len(results) < len(texts):
+            except Exception as e:
+                log.warning("Embedding failed for item %d: %s", i, e)
                 results.append(None)
+
+        while len(results) < len(texts):
+            results.append(None)
 
         return results
 
