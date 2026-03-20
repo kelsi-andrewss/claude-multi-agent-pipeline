@@ -4,6 +4,15 @@
 import sys
 import os
 
+
+def guarded_url_fetcher(url, timeout=10, ssl_context=None):
+    allowed = ("https://", "http://", "data:")
+    if not any(url.lower().startswith(scheme) for scheme in allowed):
+        raise ValueError(f"Blocked URI scheme: {url}")
+    import weasyprint
+    return weasyprint.default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
+
+
 def main():
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <input.md> <output.pdf>")
@@ -36,19 +45,21 @@ def main():
     body = markdown.markdown(text, extensions=["tables", "extra", "toc"])
 
     css_path = os.path.expanduser("~/.claude/templates/brainlift.css")
+    with open(css_path, "r") as f:
+        css_content = f.read()
 
     html = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<link rel="stylesheet" href="file://{css_path}">
+<style>{css_content}</style>
 </head>
 <body>
 {body}
 </body>
 </html>"""
 
-    weasyprint.HTML(string=html, base_url=os.path.dirname(os.path.abspath(input_path))).write_pdf(output_path)
+    weasyprint.HTML(string=html, base_url=os.path.dirname(os.path.abspath(input_path)), url_fetcher=guarded_url_fetcher).write_pdf(output_path)
     print(f"PDF written to {output_path}")
 
 
