@@ -188,3 +188,5 @@ these dates to compare friction rates before and after skill changes.
 - 2026-03-18 modified /brainlift — Facilitated BrainLift creation: domain research via Gemini + WebSearch first, th
 - 2026-03-18 modified /spec — Interactive spec builder: takes a product name + natural language description an
 - 2026-03-18 modified /spec — Interactive spec builder: takes a product name + natural language description an
+- 2026-03-19 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-19 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
