@@ -33,5 +33,9 @@ python3 "$SCRIPT_DIR/parse_friction.py" "$TRANSCRIPT" "$TRACKING_DIR/friction.js
   "$SESSION_ID" "$(basename "$PROJECT_ROOT")" "subagent" \
   --agent-type "$AGENT_TYPE" --agent-id "$AGENT_ID" 2>/dev/null || true
 
+# Rotate friction.json to cap unbounded growth
+source "$HOME/.claude/hooks/lib/log_rotator.sh"
+rotate_log "$TRACKING_DIR/friction.json" 500 json_array
+
 # Regenerate charts
 python3 "$SCRIPT_DIR/generate-charts.py" "$TRACKING_DIR" "$TRACKING_DIR/charts.html" 2>/dev/null || true

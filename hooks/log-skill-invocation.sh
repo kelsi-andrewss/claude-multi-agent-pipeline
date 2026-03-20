@@ -5,6 +5,7 @@
 
 source "$(dirname "$0")/lib/profile.sh"
 require_profile 2
+source "$(dirname "$0")/lib/log_rotator.sh"
 
 INPUT=$(cat)
 
@@ -47,6 +48,7 @@ print(json.dumps(entry))
 
 if [[ -n "$ENTRY" ]]; then
   echo "$ENTRY" >> "$HOME/.claude/.claude/tracking/skill-telemetry.jsonl"
+  rotate_log "$HOME/.claude/.claude/tracking/skill-telemetry.jsonl" 500 jsonl
 fi
 
 exit 0
