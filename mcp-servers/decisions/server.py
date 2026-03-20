@@ -250,6 +250,8 @@ def get_decision(decision_id: int) -> str:
         return f"Decision #{decision_id} not found."
 
     lines = [_format_decision(d)]
+    if d.domain:
+        lines.append(f"  Domain: {d.domain}")
     lines.append(f"  Staleness: {_staleness_tier(d.created_at)}")
 
     run_db = os.path.expanduser("~/.claude/.claude/run-state.db")
@@ -275,14 +277,14 @@ def get_decision(decision_id: int) -> str:
 
 
 @mcp.tool()
-def query_decisions_by_domain(domain: str, limit: int = 10) -> str:
-    """Query decisions filtered by domain. Returns matching decisions with staleness tier labels.
+def query_decisions_by_domain(domain: str, limit: int = 50) -> str:
+    """Query active decisions filtered by domain. Returns matching decisions with staleness tier labels.
 
     Gracefully returns an empty result if the domain column doesn't exist yet (Phase 3 schema).
 
     Args:
         domain: Domain name to filter by (exact match or substring).
-        limit: Maximum results to return (default 10).
+        limit: Maximum results to return (default 50).
     """
     store = _get_store()
     conn = store._get_connection()
@@ -299,7 +301,8 @@ def query_decisions_by_domain(domain: str, limit: int = 10) -> str:
         rows = conn.execute(
             "SELECT id, content, reasoning, status, source, superseded_by, "
             "created_at, updated_at FROM decisions "
-            "WHERE domain = ? OR domain LIKE ? ORDER BY id LIMIT ?",
+            "WHERE status = 'active' AND (domain = ? OR domain LIKE ?) "
+            "ORDER BY id LIMIT ?",
             (domain, f"%{domain}%", limit),
         ).fetchall()
 
