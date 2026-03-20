@@ -15,6 +15,15 @@ _TIER_FRESH = 0.3
 _TIER_AGING = 0.7
 
 
+def one_line(text: str, max_len: int = 120) -> str:
+    first = text.split(". ")[0].strip()
+    if len(first) > max_len - 3:
+        first = first[: max_len - 3] + "..."
+    elif not first.endswith("."):
+        first += "."
+    return first
+
+
 def generate_rules(
     project_root: str,
     decisions_db_path: str | None = None,
@@ -108,7 +117,7 @@ def _format_decision(did: int, content: str, reasoning: str | None, score: float
             f"- [STALE] [decision-{did}] {content}\n"
             f"  > Warning: this decision has not been validated against recent code changes"
         )
-    return f"- [decision-{did}] {content}"
+    return f"- [decision-{did}] {one_line(content)} (Use get_decision({did}) for full details)"
 
 
 def _tier_label(score: float) -> str:
