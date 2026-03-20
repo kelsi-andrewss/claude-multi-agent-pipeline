@@ -34,16 +34,16 @@ fi
 # Extract description from existing file (for modified) or skip (for created, file doesn't exist yet)
 DESC="updated"
 if [[ "$ACTION" == "modified" ]] && [[ -f "$FILE_PATH" ]]; then
-  DESC=$(python3 -c "
+  DESC=$(python3 - "$FILE_PATH" <<'PYEOF'
 import sys
 desc_lines = []
 in_desc = False
-with open('$FILE_PATH') as f:
+with open(sys.argv[1]) as f:
     for line in f:
         if line.startswith('description:'):
             rest = line[len('description:'):].strip()
             if rest and rest != '>':
-                print(rest.strip('\"').strip(\"'\"))
+                print(rest.strip('"').strip("'"))
                 sys.exit(0)
             in_desc = True
             continue
@@ -56,7 +56,8 @@ if desc_lines:
     print(' '.join(desc_lines)[:80])
 else:
     print('updated')
-" 2>/dev/null)
+PYEOF
+)
 fi
 
 # Dedup: skip if same skill+action+date already logged
