@@ -18,7 +18,7 @@ args:
 
 User has requested: `/prefs {{args}}`
 
-**DB path:** `~/.claude/.claude/epics.db`
+**DB path:** `"$HOME/.claude/.claude/epics.db"`
 
 **SQL injection guard:** All SQL operations use python3 with parameterized queries (`cursor.execute` with `?` placeholders). Never use string interpolation for user input.
 
@@ -54,7 +54,7 @@ rows = conn.execute(
 conn.close()
 for i, (source, text) in enumerate(rows, 1):
     print(f'{i}. [{source}] {text}')
-" ~/.claude/.claude/epics.db
+" "$HOME/.claude/.claude/epics.db"
 ```
 
 > If the query returns empty output, say: "No preferences found. Use `/prefs add \"<text>\"` to add one."
@@ -66,7 +66,7 @@ Commands: /prefs add "<text>" | /prefs edit N "<text>" | /prefs remove N
           /prefs export [path] | /prefs import <path>
 ```
 
-> If the query errors with "no such column: source" or "no such column: text", say: "The prefs schema hasn't been migrated yet. Run `bash ~/.claude/scripts/evolve-prefs-schema.sh` first."
+> If the query errors with "no such column: source" or "no such column: text", say: "The prefs schema hasn't been migrated yet. Run `bash "$HOME/.claude/scripts/evolve-prefs-schema.sh"` first."
 
 Stop.
 
@@ -91,11 +91,11 @@ Parse everything after `add` as the preference text. Strip outer quotes if prese
    )
    conn.commit()
    conn.close()
-   " ~/.claude/.claude/epics.db "<theme>" "<text>"
+   " "$HOME/.claude/.claude/epics.db" "<theme>" "<text>"
    ```
 4. Shadow to OpenMemory:
    ```bash
-   python3 ~/.claude/.claude/hooks/lib/om_write.py "behavioral-pref" "<text>" "global"
+   python3 "$HOME/.claude/.claude/hooks/lib/om_write.py" "behavioral-pref" "<text>" "global"
    ```
 5. Confirm: "Added preference." then show the updated list by running the **List** query.
 
@@ -131,7 +131,7 @@ Parse `edit N "<new text>"` where N is a 1-based row number and the rest is the 
    conn.commit()
    conn.close()
    print(f'UPDATED:{row[0]}')
-   " ~/.claude/.claude/epics.db "<N>" "<new-text>" "<theme>"
+   " "$HOME/.claude/.claude/epics.db" "<N>" "<new-text>" "<theme>"
    ```
 4. If output is `NOT_FOUND`, say: "Preference #N does not exist. Run `/prefs list` to see current preferences." and stop.
 5. Confirm: "Updated preference #N." then show the updated list by running the **List** query.
@@ -163,7 +163,7 @@ Parse `remove N` where N is a 1-based row number.
    conn.commit()
    conn.close()
    print(f'DELETED:{row[1][:80]}')
-   " ~/.claude/.claude/epics.db "<N>"
+   " "$HOME/.claude/.claude/epics.db" "<N>"
    ```
 3. If output is `NOT_FOUND`, say: "Preference #N does not exist." and stop.
 4. Confirm: "Removed preference #N: \"<text snippet (first 80 chars)>\"."
@@ -174,7 +174,7 @@ Stop.
 
 ## Export
 
-Parse optional path after `export`. Default: `~/.claude/prefs-export.json`.
+Parse optional path after `export`. Default: `"$HOME/.claude/prefs-export.json"`.
 
 1. Run:
    ```bash
@@ -190,7 +190,7 @@ Parse optional path after `export`. Default: `~/.claude/prefs-export.json`.
    with open(sys.argv[2], 'w') as f:
        json.dump(data, f, indent=2)
    print(f'Exported {len(data)} preferences to {sys.argv[2]}')
-   " ~/.claude/.claude/epics.db "<target-path>"
+   " "$HOME/.claude/.claude/epics.db" "<target-path>"
    ```
 2. Confirm with the output message.
 
@@ -231,7 +231,7 @@ Parse `import <path>` where path is required.
    conn.commit()
    conn.close()
    print(f'Imported {imported} new preferences ({skipped} skipped as duplicates).')
-   " ~/.claude/.claude/epics.db "<path>"
+   " "$HOME/.claude/.claude/epics.db" "<path>"
    ```
 5. Confirm with the output message.
 6. Show the updated list by running the **List** query.
