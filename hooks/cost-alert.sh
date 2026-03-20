@@ -61,6 +61,7 @@ print('yes' if cost >= threshold else 'no')
 if [[ "$EXCEEDED" == "yes" ]]; then
   echo "" >&2
   echo "[cost-alert] Today: \$$COST / threshold: \$$THRESHOLD — consider reviewing usage" >&2
+  bash "$HOME/.claude/scripts/emit-event.sh" "hook.cost-alert" "hook" "cost-threshold" "{\"cost_usd\":\"$COST\",\"threshold_usd\":\"$THRESHOLD\",\"result\":\"warned\"}" || true
 fi
 
 exit 0
