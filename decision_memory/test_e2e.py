@@ -1137,14 +1137,12 @@ class TestRealRepo:
             [sys.executable, str(script), "--project-root", str(real_worktree), "--dry-run"],
             capture_output=True, text=True, timeout=10,
         )
-        # Dry-run should succeed (exit 0) or exit 1 with JSON error
-        output = result.stdout.strip() or result.stderr.strip()
-        if output:
-            data = json.loads(output)
-            assert data["status"] in ("backfilled", "dry_run", "no_changes", "success", "error")
-        else:
-            # No output means script completed silently — acceptable for dry-run
-            assert result.returncode in (0, 1)
+        # Dry-run emits debug lines then JSON on last line
+        assert result.returncode == 0
+        lines = result.stdout.strip().splitlines()
+        json_line = lines[-1] if lines else ""
+        data = json.loads(json_line)
+        assert data["status"] in ("backfilled", "dry_run", "no_changes", "success")
 
 
 if __name__ == "__main__":
