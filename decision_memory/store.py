@@ -6,53 +6,10 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .schema import DUMP_DDL, FTS_DDL, METADATA_DDL, VEC_DDL
 from .types import Decision, DecisionScope
 
 log = logging.getLogger(__name__)
-
-_SCHEMA_SQL = """\
-CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    content TEXT NOT NULL,
-    reasoning TEXT,
-    status TEXT NOT NULL DEFAULT 'active'
-        CHECK (status IN ('active', 'deprecated', 'superseded', 'violated')),
-    source TEXT NOT NULL DEFAULT 'human'
-        CHECK (source IN ('human', 'ai-discovered', 'ai-proposed')),
-    superseded_by INTEGER REFERENCES decisions(id),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    domain TEXT,
-    related_decisions TEXT
-);
-
-CREATE TABLE IF NOT EXISTS decision_scopes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    decision_id INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
-    scope_type TEXT NOT NULL CHECK (scope_type IN ('file', 'pattern', 'tech')),
-    scope_value TEXT NOT NULL
-);
-"""
-
-_METADATA_SQL = """\
-CREATE TABLE IF NOT EXISTS _metadata (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-"""
-
-_FTS_SQL = """\
-CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
-    content, reasoning, content=decisions, content_rowid=id
-);
-"""
-
-_VEC_SQL = """\
-CREATE VIRTUAL TABLE IF NOT EXISTS decision_embeddings USING vec0(
-    decision_id integer primary key,
-    embedding float[256]
-);
-"""
 
 _DOMAIN_PREFIX_MAP = [
     ("hooks/", "hooks"),
@@ -281,9 +238,9 @@ class DecisionStore:
     def _init_schema(self, conn: sqlite3.Connection) -> None:
         self._migrate_v1_to_v2(conn)
         self._migrate_v2_to_v3(conn)
-        conn.executescript(_SCHEMA_SQL)
-        conn.executescript(_METADATA_SQL)
-        conn.executescript(_FTS_SQL)
+        conn.executescript(DUMP_DDL)
+        conn.executescript(METADATA_DDL)
+        conn.executescript(FTS_DDL)
         self._try_create_vec_table(conn)
 
     def _migrate_v1_to_v2(self, conn: sqlite3.Connection) -> None:
@@ -313,7 +270,7 @@ class DecisionStore:
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
-            conn.executescript(_VEC_SQL)
+            conn.executescript(VEC_DDL)
             self._vec_available = True
         except ImportError:
             log.warning("sqlite-vec not installed; vector search disabled")
