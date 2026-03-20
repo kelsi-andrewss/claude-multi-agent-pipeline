@@ -293,6 +293,9 @@ class DecisionStore:
                 pass
         return conn
 
+    def get_connection(self) -> sqlite3.Connection:
+        return self._get_connection()
+
     def _read_dump(self) -> str | None:
         if not self.dump_path.exists():
             return None
