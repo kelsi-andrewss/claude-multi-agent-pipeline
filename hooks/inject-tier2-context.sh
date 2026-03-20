@@ -56,6 +56,9 @@ fi
 if echo "$PROMPT" | grep -iqE 'skill'; then
   MATCHED_CATEGORIES+=("infra_skills")
 fi
+if echo "$PROMPT" | grep -iqE '\bship\b'; then
+  MATCHED_CATEGORIES+=("remind_ship_skill")
+fi
 
 if [[ ${#MATCHED_CATEGORIES[@]} -eq 0 ]]; then
   exit 0
@@ -107,6 +110,9 @@ PYEOF
       ;;
     infra_skills)
       FRAGMENTS+=("Skills: ~/.claude/skills/*.md. Invoked via /skill-name. Telemetry logged to .claude/tracking/skill-telemetry.jsonl by log-skill-invocation.sh hook.")
+      ;;
+    remind_ship_skill)
+      FRAGMENTS+=("REMINDER: User said 'ship'. Invoke the /ship skill via the Skill tool. Do NOT plan or code manually — /ship orchestrates the full pipeline (quickfix, plan-stories, draft-plans, critique, env-preflight, run-stories, verify).")
       ;;
   esac
 done
