@@ -331,6 +331,10 @@ json.dump(holds, open(f, 'w'))
 - `epic_id` (may be null)
 - `title`: display name for commit message
 
+```bash
+bash ~/.claude/scripts/emit-event.sh "skill.merge.started" "claude" "${story_id:-unknown}" '{"branch":"'"$STORY_BRANCH"'"}'
+```
+
 > **Note:** If `branch` is null in the DB, compute the story branch from the worktree list — this is normal for stories created via `/todo` before a worktree was set up.
 
 ### Step 1.5: Commit verification (test_files stories only)
@@ -450,7 +454,10 @@ fi
    ```bash
    git worktree remove --force "$TEMP"
    ```
-3. Stop and report:
+3. Emit merge failure event and stop:
+   ```bash
+   bash ~/.claude/scripts/emit-event.sh "story.merge_failed" "claude" "${story_id:-unknown}" '{"branch":"'"$STORY_BRANCH"'","reason":"conflict"}'
+   ```
    > "Merge conflict while merging `<story-branch>` into `<dev-branch>`. The story worktree has NOT been removed. Resolve the conflict manually and re-run."
 
 **If the merge succeeds (temp worktree path):**
@@ -464,6 +471,10 @@ HASH=$(git -C "$TEMP" rev-parse --short HEAD)
 
 # Clean up temp worktree
 git worktree remove --force "$TEMP"
+```
+
+```bash
+bash ~/.claude/scripts/emit-event.sh "story.merged" "claude" "${story_id:-unknown}" '{"branch":"'"$STORY_BRANCH"'","commit":"'"$HASH"'"}'
 ```
 
 ---
