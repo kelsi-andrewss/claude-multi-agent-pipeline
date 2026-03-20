@@ -80,7 +80,7 @@ done
 # Resolve base if not provided
 if [[ -z "$BASE" ]]; then
   set +e
-  BASE=$(git -C "$PROJECT_ROOT" merge-base "$BRANCH_A" "$BRANCH_B" 2>&1)
+  BASE=$(git -C "$PROJECT_ROOT" merge-base -- "$BRANCH_A" "$BRANCH_B" 2>&1)
   MB_EXIT=$?
   set -e
   if [[ $MB_EXIT -ne 0 ]]; then
@@ -102,7 +102,7 @@ fi
 
 # --- Tier 1: git merge-tree simulation ---
 set +e
-MERGE_OUTPUT=$(git -C "$PROJECT_ROOT" merge-tree --write-tree --name-only --no-messages "$BRANCH_A" "$BRANCH_B" 2>&1)
+MERGE_OUTPUT=$(git -C "$PROJECT_ROOT" merge-tree --write-tree --name-only --no-messages -- "$BRANCH_A" "$BRANCH_B" 2>&1)
 MERGE_EXIT=$?
 set -e
 
