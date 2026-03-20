@@ -106,9 +106,11 @@ if os.path.exists(run_state_path):
     except Exception:
         pass
 
-def one_line(text):
+def one_line(text, max_len=120):
     first = text.split(". ")[0].split(" — ")[-1].strip()
-    if not first.endswith("."):
+    if len(first) > max_len - 3:
+        first = first[:max_len - 3] + "..."
+    elif not first.endswith("."):
         first += "."
     return first
 
@@ -117,7 +119,7 @@ for did, content in rows:
     if staleness is None or staleness < 0.3:
         print(f"[decision-{did}] {content}")
     elif staleness <= 0.7:
-        print(f"[decision-{did}] {one_line(content)}")
+        print(f"[decision-{did}] {one_line(content)} (Use get_decision({did}) for full details)")
     else:
         print(f"[STALE] [decision-{did}] {one_line(content)}")
 PYEOF
