@@ -56,6 +56,10 @@ Parse `{{args}}` to extract inputs and flags.
      /draft-plans .ship-manifest.json --briefing presearch/my-feature.md
    ```
 
+```bash
+bash ~/.claude/scripts/emit-event.sh "skill.draft-plans.started" "claude" "draft-plans" '{"story_count":"'"$STORY_COUNT"'"}'
+```
+
 ---
 
 ## Step 2: Resolve stories
@@ -614,6 +618,10 @@ After the subagent returns:
 ---
 
 ## Step 5: Report results
+
+```bash
+bash ~/.claude/scripts/emit-event.sh "skill.draft-plans.completed" "claude" "draft-plans" '{"plans_written":"'"$PLANS_WRITTEN"'"}'
+```
 
 Print summary:
 

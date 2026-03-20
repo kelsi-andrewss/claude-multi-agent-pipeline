@@ -27,6 +27,10 @@ Parse `{{args}}` to extract:
    > "Description required: /quickfix <description>"
 3. **Derive slug**: Lowercase the description, replace spaces and non-alphanumeric characters with `-`, collapse consecutive `-`, truncate to max 5 words (e.g., `fix-canvas-zoom-reset`).
 
+```bash
+bash ~/.claude/scripts/emit-event.sh "skill.quickfix.started" "claude" "quickfix/${SLUG}" '{"slug":"'"$SLUG"'"}'
+```
+
 ---
 
 ## Step 2: Load artifact chain (only when `context_path` is set)
@@ -239,6 +243,10 @@ Invoke `/merge-worktree` to diff gate, review, and merge to dev.
 ---
 
 ## Step 9: Report
+
+```bash
+bash ~/.claude/scripts/emit-event.sh "skill.quickfix.completed" "claude" "quickfix/${SLUG}" '{"slug":"'"$SLUG"'"}'
+```
 
 On success:
 > "Quickfix shipped: quickfix/<slug> -> dev"
