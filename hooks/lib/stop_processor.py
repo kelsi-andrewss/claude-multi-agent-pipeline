@@ -8,7 +8,8 @@ session summary, auto-distillation, and compliance hook generation.
 Usage:
     stop_processor.py --transcript <path> --db <path> --session <id> --project <path> --cwd <path>
 """
-import argparse, fcntl, json, os, signal, sqlite3, sys, time
+import argparse, fcntl, json, os, re, signal, sqlite3, sys, time
+from collections import Counter
 
 
 LOCKFILE_TEMPLATE = "/tmp/stop-processor-{session}.lock"
@@ -198,8 +199,7 @@ def stage_auto_distillation(db_file, project_root):
             # Use existing rule text if signal_processor already generated it
             if existing_text and existing_text.startswith("RULE:"):
                 # Strip any "(Auto-generated from N corrections)" suffix to avoid duplication
-                import re as _re
-                rule_core = _re.sub(r'\s*\(Auto-generated from \d+ corrections\)\s*$', '', existing_text)
+                rule_core = re.sub(r'\s*\(Auto-generated from \d+ corrections\)\s*$', '', existing_text)
                 pref_text = f"{rule_core} (from {count} corrections, last: {last_date})"
             else:
                 rule = generate_rule(theme)
@@ -381,6 +381,123 @@ def stage_staleness_gardening(project_root):
     print(f"Stage 6 complete: {len(entries)} stale decisions written to sidecar", file=sys.stderr)
 
 
+def _jaccard_similarity(words_a, words_b):
+    if not words_a and not words_b:
+        return 0.0
+    return len(words_a & words_b) / len(words_a | words_b)
+
+
+def _cluster_failures(entries):
+    clusters = []  # each: (representative_words, [(story_id, what_failed), ...])
+    for story_id, text in entries:
+        words = set(re.findall(r'[a-z]{3,}', text.lower()))
+        placed = False
+        for rep_words, members in clusters:
+            if _jaccard_similarity(words, rep_words) > 0.3:
+                members.append((story_id, text))
+                placed = True
+                break
+        if not placed:
+            clusters.append((words, [(story_id, text)]))
+    return [members for _, members in clusters if len(members) >= 3]
+
+
+def _format_proposal(cluster, domain, today):
+    all_words = Counter()
+    for _, text in cluster:
+        all_words.update(re.findall(r'[a-z]{3,}', text.lower()))
+    top_words = " ".join(w for w, _ in all_words.most_common(5))
+    story_ids = ", ".join(sid for sid, _ in cluster)
+    return (
+        f"## Proposed decision (auto-discovered, {today})\n\n"
+        f"**Pattern:** {top_words}\n"
+        f"**Evidence:** {len(cluster)} stories failed similarly: {story_ids}\n"
+        f"**Domain:** {domain}\n"
+        f"**Status:** pending review\n"
+    )
+
+
+# -- Stage 7: Pattern mining --
+
+def stage_pattern_mining(project_root):
+    print("Stage 7: Pattern mining", file=sys.stderr)
+
+    run_state_path = os.path.join(project_root, ".claude", "run-state.db")
+    if not os.path.isfile(run_state_path):
+        print("Stage 7: skipped (run-state.db missing)", file=sys.stderr)
+        return
+
+    conn = _connect_db(run_state_path)
+    try:
+        rows = conn.execute(
+            "SELECT story_id, domain_tags, what_failed FROM merge_outcomes "
+            "WHERE what_failed IS NOT NULL AND what_failed != '' AND what_failed != 'none'"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        conn.close()
+        print("Stage 7: skipped (merge_outcomes table missing)", file=sys.stderr)
+        return
+    conn.close()
+
+    if not rows:
+        print("Stage 7 complete: 0 new proposals (0 clusters found)", file=sys.stderr)
+        return
+
+    # Group by primary domain
+    by_domain = {}
+    for story_id, domain_tags, what_failed in rows:
+        domain = (domain_tags or "").split(",")[0].strip() or "unknown"
+        by_domain.setdefault(domain, []).append((story_id, what_failed))
+
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    proposals = []
+    total_clusters = 0
+    for domain, entries in by_domain.items():
+        if len(entries) < 3:
+            continue
+        clusters = _cluster_failures(entries)
+        total_clusters += len(clusters)
+        for cluster in clusters:
+            proposals.append(_format_proposal(cluster, domain, today))
+
+    if not proposals:
+        print(f"Stage 7 complete: 0 new proposals ({total_clusters} clusters found)", file=sys.stderr)
+        return
+
+    sidecar_path = os.path.join(project_root, ".claude", "proposed-decisions.md")
+    existing = ""
+    if os.path.isfile(sidecar_path):
+        with open(sidecar_path) as f:
+            existing = f.read()
+
+    # Dedup by sorted story-ID list
+    new_proposals = []
+    for proposal in proposals:
+        evidence_line = [l for l in proposal.splitlines() if l.startswith("**Evidence:**")]
+        if evidence_line:
+            ids_part = evidence_line[0].split(":", 2)[-1].strip()
+            # Extract story IDs from "N stories failed similarly: id1, id2, id3"
+            after_colon = ids_part.split(":", 1)[-1].strip() if ":" in ids_part else ids_part
+            sorted_ids = ", ".join(sorted(s.strip() for s in after_colon.split(",")))
+            if sorted_ids in existing:
+                continue
+        new_proposals.append(proposal)
+
+    if not new_proposals:
+        print(f"Stage 7 complete: 0 new proposals ({total_clusters} clusters found)", file=sys.stderr)
+        return
+
+    with open(sidecar_path, "a" if existing else "w") as f:
+        if not existing:
+            f.write("# Proposed Decisions\n\n")
+        for proposal in new_proposals:
+            f.write(proposal + "\n")
+
+    print(f"Stage 7 complete: {len(new_proposals)} new proposals ({total_clusters} clusters found)", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Background Stop hook processor")
     parser.add_argument("--transcript", required=True)
@@ -448,6 +565,12 @@ def main():
         stage_staleness_gardening(args.project)
     except Exception as e:
         print(f"Stage 6 FAILED: {e}", file=sys.stderr)
+
+    # Stage 7: Pattern mining
+    try:
+        stage_pattern_mining(args.project)
+    except Exception as e:
+        print(f"Stage 7 FAILED: {e}", file=sys.stderr)
 
     print("stop_processor complete", file=sys.stderr)
 
