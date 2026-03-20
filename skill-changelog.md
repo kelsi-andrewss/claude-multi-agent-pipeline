@@ -190,3 +190,36 @@ these dates to compare friction rates before and after skill changes.
 - 2026-03-18 modified /spec — Interactive spec builder: takes a product name + natural language description an
 - 2026-03-19 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
 - 2026-03-19 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-20 modified /skill-health — Friction and skill health dashboard: friction events by category and trend, skil
+- 2026-03-20 modified /verify — Integrated review + build + test + acceptance criteria verification for a dev br
+- 2026-03-20 modified /hook-profile — Switch the active hook profile (minimal, standard, strict) or show the current one. Use when the user says "/hook-profile", "/hook-profile strict", "/hook-profile minimal", "/hook-profile standard", "change hook profile", or "show hook profile".
+- 2026-03-20 modified /hook-profile — Switch the active hook profile (minimal, standard, strict) or show the current one. Use when the user says "/hook-profile", "/hook-profile strict", "/hook-profile minimal", "/hook-profile standard", "change hook profile", or "show hook profile".
+- 2026-03-20 modified /verify — Integrated review + build + test + acceptance criteria verification for a dev br
+- 2026-03-20 modified /verify — Integrated review + build + test + acceptance criteria verification for a dev br
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /roadmap — Bird's-eye roadmap view with milestone progress, at-risk detection, and quick ac
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /prefs — View, add, edit, remove, export, and import behavioral preferences stored in cor
+- 2026-03-20 modified /ship — Thin orchestrator: routes user intent to child skills (/quickfix, /plan-stories, /draft-plans, /critique, /env-preflight, /run-stories, /verify) in sequence. Parses args, detects mode, and dispatches — never performs planning, critique, review, build, or test logic directly.
+- 2026-03-20 modified /ship — Thin orchestrator: routes user intent to child skills (/quickfix, /plan-stories, /draft-plans, /critique, /env-preflight, /run-stories, /verify) in sequence. Parses args, detects mode, and dispatches — never performs planning, critique, review, build, or test logic directly.
+- 2026-03-20 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-20 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-20 modified /merge-worktree — Merge a story worktree branch into its dev branch, push, clean up the worktree a
+- 2026-03-20 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
+- 2026-03-20 modified /draft-plans — Graph-node skill: reads .ship-manifest.json (or story/epic IDs), launches one ba
+- 2026-03-20 modified /quickfix — Standalone quickfix pipeline: validates criteria, writes plan, launches coder in
+- 2026-03-20 modified /quickfix — Standalone quickfix pipeline: validates criteria, writes plan, launches coder in
+- 2026-03-20 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-20 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-20 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-20 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-20 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-20 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-20 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
+- 2026-03-20 modified /run-stories — Execute stories in parallel (where safe) using background agents, each working i
