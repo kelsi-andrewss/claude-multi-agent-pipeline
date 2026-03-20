@@ -97,7 +97,9 @@ class DecisionStore:
         try:
             dump_content = self._read_dump()
             if dump_content:
+                conn.execute("PRAGMA foreign_keys=OFF")
                 conn.executescript(dump_content)
+                conn.execute("PRAGMA foreign_keys=ON")
 
             self._init_schema(conn)
 
