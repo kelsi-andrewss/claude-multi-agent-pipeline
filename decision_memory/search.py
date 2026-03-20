@@ -150,12 +150,25 @@ class SearchEngine:
 
         return results
 
+    @staticmethod
+    def _sanitize_fts_query(query: str) -> str:
+        _FTS5_KEYWORDS = {"and", "or", "not", "near"}
+        stripped = query.replace('"', "").replace("*", "").replace("(", "").replace(")", "")
+        tokens = stripped.split()
+        tokens = [t for t in tokens if t.lower() not in _FTS5_KEYWORDS]
+        if not tokens:
+            return ""
+        return " ".join(f'"{t}"' for t in tokens)
+
     def keyword_search(self, query: str, limit: int = 15) -> list[SearchResult]:
+        sanitized = self._sanitize_fts_query(query)
+        if not sanitized:
+            return []
         try:
             rows = self._conn.execute(
                 "SELECT rowid, rank FROM decisions_fts "
                 "WHERE decisions_fts MATCH ? ORDER BY rank LIMIT ?",
-                (query, limit),
+                (sanitized, limit),
             ).fetchall()
         except sqlite3.OperationalError as e:
             log.warning("FTS5 search failed (bad syntax?): %s", e)
