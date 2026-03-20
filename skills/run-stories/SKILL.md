@@ -845,9 +845,9 @@ For each story that passes validation (diff gate + testing), invoke `/merge-work
 After merge completes, update any decision review artifacts created during this run:
 ```bash
 for artifact in decisions/reviews/decision-*.md; do
-  if grep -q "story-<story_id>" "$artifact" && grep -q "Status: pending" "$artifact"; then
-    sed -i '' 's/Status: pending/Status: success/' "$artifact"
-    sed -i '' "s|Merge result:.*|Merge result: merged to dev at $(git rev-parse --short dev)|" "$artifact"
+  if grep -q "story-<story_id>" "$artifact" && grep -q "Status:.*pending" "$artifact"; then
+    sed -i '' 's/\*\*Status:\*\* pending/**Status:** success/' "$artifact"
+    sed -i '' "s|\*\*Merge result:\*\*.*|**Merge result:** merged to dev at $(git rev-parse --short dev)|" "$artifact"
   fi
 done
 ```
