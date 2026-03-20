@@ -241,10 +241,12 @@ def stage_hook_generation(db_file, project_root):
     schema_sql = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='correction_groups'"
     ).fetchone()
-    if schema_sql and "'dismissed'" not in schema_sql[0]:
-        conn.executescript("""
-            ALTER TABLE correction_groups RENAME TO correction_groups_old;
-            CREATE TABLE correction_groups (
+    needs_migration = schema_sql and 'dismissed' not in schema_sql[0].lower()
+    if needs_migration:
+        try:
+            conn.execute("BEGIN")
+            conn.execute("ALTER TABLE correction_groups RENAME TO correction_groups_old")
+            conn.execute("""CREATE TABLE correction_groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 theme TEXT NOT NULL,
                 status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')),
@@ -256,11 +258,14 @@ def stage_hook_generation(db_file, project_root):
                 updated_at INTEGER,
                 source TEXT DEFAULT 'auto',
                 text TEXT DEFAULT ''
-            );
-            INSERT INTO correction_groups SELECT * FROM correction_groups_old;
-            DROP TABLE correction_groups_old;
-            CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status);
-        """)
+            )""")
+            conn.execute("INSERT INTO correction_groups SELECT * FROM correction_groups_old")
+            conn.execute("DROP TABLE correction_groups_old")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)")
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Migration failed: {e}", file=sys.stderr)
 
     rows = conn.execute(
         "SELECT theme FROM correction_groups WHERE status='promoted' AND date(promoted_at) = date('now', 'localtime')"
