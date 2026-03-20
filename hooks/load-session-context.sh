@@ -123,6 +123,12 @@ except Exception:
 COUNTFIXEOF
   fi
 
+  # TTL cleanup: remove event log files older than 30 days
+  EVENTS_DIR="$HOME/.claude/tracking/events"
+  if [[ -d "$EVENTS_DIR" ]]; then
+    find "$EVENTS_DIR" -name "*.jsonl" -mtime +30 -delete 2>/dev/null || true
+  fi
+
   # Render behavioral preferences from DB to sidecar file
   RENDERED_PREFS="$HOME/.claude/.claude/rendered-prefs.md"
   if [[ -f "$DB_FILE_PREFS" ]]; then
