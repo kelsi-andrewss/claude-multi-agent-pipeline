@@ -171,7 +171,7 @@ def record_project_decision(
     new_patterns = {s.scope_value for s in scopes}
     if new_patterns:
         existing = store.list_all(status="active")
-        conn = store._get_connection()
+        conn = store.get_connection()
         try:
             now = datetime.now(timezone.utc).isoformat()
             for existing_d in existing:
@@ -211,7 +211,7 @@ def record_project_decision(
 
     provider = _get_provider()
     if provider.available():
-        conn = store._get_connection()
+        conn = store.get_connection()
         try:
             engine = SearchEngine(conn, provider)
             engine.rebuild_index()
@@ -247,7 +247,7 @@ def query_project_decisions(
 
     if query_text:
         provider = _get_provider()
-        conn = store._get_connection()
+        conn = store.get_connection()
         try:
             engine = SearchEngine(conn, provider)
             results = engine.hybrid_search(query_text, limit=limit)
@@ -319,7 +319,7 @@ def sync_decision_store() -> str:
 
     provider = _get_provider()
     if provider.available():
-        conn = store._get_connection()
+        conn = store.get_connection()
         try:
             engine = SearchEngine(conn, provider)
             count = engine.rebuild_index()
@@ -381,7 +381,7 @@ def query_decisions_by_domain(domain: str, limit: int = 50) -> str:
         limit: Maximum results to return (default 50).
     """
     store = _get_store()
-    conn = store._get_connection()
+    conn = store.get_connection()
     try:
         columns = conn.execute("PRAGMA table_info(decisions)").fetchall()
         has_domain = any(col[1] == "domain" for col in columns)
