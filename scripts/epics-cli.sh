@@ -29,9 +29,10 @@ case "$COMMAND" in
       exit 1
     fi
     sqlite3 -json "$DB_PATH" \
+      -cmd ".parameter set :branch \"$BRANCH\"" \
       "SELECT s.id, s.epic_id AS epicId, s.title, s.branch, s.write_files AS writeFiles
        FROM stories s
-       WHERE s.branch = '$BRANCH' AND s.archived = 0
+       WHERE s.branch = :branch AND s.archived = 0
        LIMIT 1;"
     ;;
 
