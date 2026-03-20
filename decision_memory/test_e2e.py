@@ -1154,46 +1154,42 @@ class TestFTS5Sanitization:
 
     def test_strips_double_quotes(self):
         result = SearchEngine._sanitize_fts_query('find "exact phrase"')
-        assert '"' not in result.replace('"', '').join('') or True
-        # The sanitizer wraps tokens in quotes, but the INPUT quotes are stripped first.
-        # So the original user-supplied " are gone; only the sanitizer's wrapping quotes remain.
-        stripped = SearchEngine._sanitize_fts_query('find "exact phrase"')
-        # Input quotes removed, tokens become: find, exact, phrase
-        assert stripped == '"find" "exact" "phrase"'
+        assert '"' not in result
+        assert result == 'find OR exact OR phrase'
 
     def test_strips_asterisk_glob(self):
         result = SearchEngine._sanitize_fts_query('hooks*')
-        assert result == '"hooks"'
+        assert result == 'hooks'
 
     def test_strips_parentheses(self):
         result = SearchEngine._sanitize_fts_query('(nested) grouping')
-        assert result == '"nested" "grouping"'
+        assert result == 'nested OR grouping'
 
-    def test_preserves_caret(self):
-        # Caret is not an FTS5 operator that _sanitize_fts_query strips
+    def test_strips_caret(self):
         result = SearchEngine._sanitize_fts_query('^prefix')
-        assert result == '"^prefix"'
+        assert '^' not in result
+        assert result == 'prefix'
 
-    def test_preserves_colon(self):
-        # Colon is not stripped by the sanitizer -- it stays in the token
+    def test_strips_colon(self):
         result = SearchEngine._sanitize_fts_query('scope:file')
-        assert result == '"scope:file"'
+        assert ':' not in result
+        assert result == 'scopefile'
 
     def test_drops_fts5_keyword_AND(self):
         result = SearchEngine._sanitize_fts_query('foo AND bar')
-        assert result == '"foo" "bar"'
+        assert result == 'foo OR bar'
 
     def test_drops_fts5_keyword_OR(self):
         result = SearchEngine._sanitize_fts_query('foo OR bar')
-        assert result == '"foo" "bar"'
+        assert result == 'foo OR bar'
 
     def test_drops_fts5_keyword_NOT(self):
         result = SearchEngine._sanitize_fts_query('NOT bad')
-        assert result == '"bad"'
+        assert result == 'bad'
 
     def test_drops_fts5_keyword_NEAR(self):
         result = SearchEngine._sanitize_fts_query('NEAR something')
-        assert result == '"something"'
+        assert result == 'something'
 
     def test_all_special_returns_empty(self):
         result = SearchEngine._sanitize_fts_query('"***"')
@@ -1205,7 +1201,7 @@ class TestFTS5Sanitization:
 
     def test_mixed_special_and_normal(self):
         result = SearchEngine._sanitize_fts_query('valid "quoted" token*')
-        assert result == '"valid" "quoted" "token"'
+        assert result == 'valid OR quoted OR token'
 
     def test_empty_input(self):
         assert SearchEngine._sanitize_fts_query('') == ''
@@ -1215,15 +1211,13 @@ class TestFTS5Sanitization:
 
     def test_real_attack_string(self):
         result = SearchEngine._sanitize_fts_query('"NEAR/3 (drop table)" OR 1=1--')
-        # All FTS5 operators stripped: quotes, parens gone; NEAR and OR are keywords
-        # Remaining tokens after stripping: NEAR/3, drop, table, 1=1--
-        # NEAR is a keyword (case-insensitive) -- but "NEAR/3" is not exactly "near"
-        # Let's verify no raw FTS5 operators remain
-        for op in [' AND ', ' OR ', ' NOT ', ' NEAR ']:
-            assert op not in f' {result} '
+        # NEAR/3 dropped (NEAR keyword with /N suffix), OR dropped, parens+quotes stripped
+        # Remaining: drop, table, 1=1--
+        assert 'NEAR' not in result
         assert '(' not in result
         assert ')' not in result
-        assert '*' not in result
+        assert '"' not in result
+        assert result == 'drop OR table OR 1=1--'
 
     def test_sanitized_query_executes_in_fts5(self, store):
         """Attack string fed through keyword_search must not raise OperationalError."""
