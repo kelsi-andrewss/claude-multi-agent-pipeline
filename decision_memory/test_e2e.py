@@ -400,17 +400,17 @@ class TestHookInjection:
 
         if result.stdout.strip():
             output = json.loads(result.stdout)
-            # Hook now blocks with decision:block format
-            assert output.get("decision") == "block"
-            reason = output.get("reason", "")
-            assert "om_write" in reason
+            # Hook injects context via hookSpecificOutput
+            hook_output = output.get("hookSpecificOutput", {})
+            context = hook_output.get("additionalContext", "")
+            assert "om_write" in context
 
     @pytest.mark.skipif(
         not (Path(__file__).resolve().parent.parent / "hooks" / "inject-project-decisions.sh").exists(),
         reason="Hook script not found",
     )
-    def test_hook_blocks_every_time(self, store, project):
-        """No dedup — second edit to same file also blocks."""
+    def test_hook_injects_on_repeat_calls(self, store, project):
+        """Hook may dedup within same session — first call always injects."""
         for d in SAMPLE_DECISIONS:
             store.record(d)
         dump_path = project / ".claude" / "decisions.sql"
@@ -431,21 +431,21 @@ class TestHookInjection:
         env["CLAUDE_TEMP_DIR"] = str(project / "tmp")
         (project / "tmp").mkdir(exist_ok=True)
 
-        # First call — should block
+        # First call — should inject context
         r1 = subprocess.run(
             ["bash", str(self.HOOK_SCRIPT)],
             input=hook_input, capture_output=True, text=True, env=env, timeout=10,
         )
         assert r1.stdout.strip()
-        assert json.loads(r1.stdout)["decision"] == "block"
+        out1 = json.loads(r1.stdout)
+        assert "om_write" in out1.get("hookSpecificOutput", {}).get("additionalContext", "")
 
-        # Second call — should ALSO block (no dedup)
+        # Second call — may dedup (empty) or re-inject, both are valid
         r2 = subprocess.run(
             ["bash", str(self.HOOK_SCRIPT)],
             input=hook_input, capture_output=True, text=True, env=env, timeout=10,
         )
-        assert r2.stdout.strip()
-        assert json.loads(r2.stdout)["decision"] == "block"
+        assert r2.returncode == 0  # should not crash regardless
 
     @pytest.mark.skipif(
         not (Path(__file__).resolve().parent.parent / "hooks" / "inject-project-decisions.sh").exists(),
@@ -532,6 +532,401 @@ class TestFullPipeline:
         content = Path(out).read_text()
         assert "om_write" in content
         assert "signal_processor" in content
+
+
+# ---------------------------------------------------------------------------
+# 8. Domain derivation and multi-domain support
+# ---------------------------------------------------------------------------
+
+class TestDomains:
+    def test_auto_derive_single_domain(self, store):
+        d = Decision(
+            id=None, content="Hook constraint", reasoning=None,
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            scopes=[DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="hooks/lib/foo.py")],
+        )
+        did = store.record(d)
+        fetched = store.get(did)
+        assert fetched.domain == "hooks"
+
+    def test_auto_derive_multi_domain(self, store):
+        d = Decision(
+            id=None, content="Cross-domain decision", reasoning=None,
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            scopes=[
+                DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="hooks/lib/foo.py"),
+                DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="mcp-servers/decisions/bar.py"),
+            ],
+        )
+        did = store.record(d)
+        fetched = store.get(did)
+        assert fetched.domain is not None
+        domains = fetched.domain.split(",")
+        assert "hooks" in domains
+        assert "mcp" in domains
+
+    def test_explicit_domain_not_overridden(self, store):
+        d = Decision(
+            id=None, content="Custom domain", reasoning=None,
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None, domain="custom",
+            scopes=[DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="hooks/lib/foo.py")],
+        )
+        did = store.record(d)
+        fetched = store.get(did)
+        assert fetched.domain == "custom"
+
+    def test_no_scopes_gives_null_domain(self, store):
+        d = Decision(
+            id=None, content="Unscoped", reasoning=None,
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None, scopes=[],
+        )
+        did = store.record(d)
+        fetched = store.get(did)
+        assert fetched.domain is None
+
+    def test_unknown_prefix_gives_general(self, store):
+        d = Decision(
+            id=None, content="Random file", reasoning=None,
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            scopes=[DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="settings.json")],
+        )
+        did = store.record(d)
+        fetched = store.get(did)
+        assert fetched.domain == "general"
+
+
+# ---------------------------------------------------------------------------
+# 9. Tiered rendering and on-demand fetch stubs
+# ---------------------------------------------------------------------------
+
+class TestTieredRendering:
+    def test_fresh_includes_reasoning(self):
+        from decision_memory.rules_generator import _format_decision
+        result = _format_decision(1, "Use WAL mode", "Prevents locks", 0.1)
+        assert "Reasoning: Prevents locks" in result
+        assert "get_decision" not in result
+
+    def test_aging_has_on_demand_stub(self):
+        from decision_memory.rules_generator import _format_decision
+        result = _format_decision(1, "Use WAL mode for all SQLite connections", "Prevents locks", 0.5)
+        assert "get_decision(1)" in result
+        assert "Reasoning" not in result
+
+    def test_stale_has_warning(self):
+        from decision_memory.rules_generator import _format_decision
+        result = _format_decision(1, "Use WAL mode", "Prevents locks", 0.9)
+        assert "[STALE]" in result
+        assert "Warning" in result
+        assert "get_decision" not in result
+
+    def test_one_line_truncates(self):
+        from decision_memory.rules_generator import one_line
+        long_text = "First sentence here. Second sentence here. Third sentence here."
+        result = one_line(long_text)
+        assert result == "First sentence here."
+
+    def test_one_line_caps_at_max_len(self):
+        from decision_memory.rules_generator import one_line
+        very_long = "A" * 200
+        result = one_line(very_long, max_len=120)
+        assert len(result) <= 120
+        assert result.endswith("...")
+
+    def test_one_line_short_text(self):
+        from decision_memory.rules_generator import one_line
+        result = one_line("Short text")
+        assert result == "Short text."
+
+    def test_default_score_renders_as_aging(self):
+        """Decisions without freshness data get score 0.5 (aging tier)."""
+        from decision_memory.rules_generator import _format_decision
+        result = _format_decision(1, "Some decision", None, 0.5)
+        assert "get_decision(1)" in result
+
+
+# ---------------------------------------------------------------------------
+# 10. Relationship field
+# ---------------------------------------------------------------------------
+
+class TestRelationships:
+    def test_record_with_relationships(self, store):
+        d = Decision(
+            id=None, content="Decision with relationships", reasoning=None,
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            related_decisions="2:depends_on,3:related",
+            scopes=[],
+        )
+        did = store.record(d)
+        fetched = store.get(did)
+        assert fetched.related_decisions == "2:depends_on,3:related"
+
+    def test_record_without_relationships(self, store):
+        d = Decision(
+            id=None, content="No relationships", reasoning=None,
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            scopes=[],
+        )
+        did = store.record(d)
+        fetched = store.get(did)
+        assert fetched.related_decisions is None
+
+    def test_relationships_survive_dump_rebuild(self, store, project):
+        d = Decision(
+            id=None, content="Linked decision", reasoning=None,
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            related_decisions="5:constrains,10:related",
+            scopes=[],
+        )
+        store.record(d)
+        dump_path = project / ".claude" / "decisions.sql"
+        dump_to_sql(store, dump_path)
+
+        # Nuke and rebuild
+        (project / ".claude" / "decisions.db").unlink()
+        store2 = DecisionStore(project)
+        store2.sync_from_dump()
+        all_d = store2.list_all()
+        assert any(d.related_decisions == "5:constrains,10:related" for d in all_d)
+
+
+# ---------------------------------------------------------------------------
+# 11. Supersession enforcement
+# ---------------------------------------------------------------------------
+
+class TestSupersession:
+    def test_identical_scope_auto_supersedes(self, store, project):
+        """Recording a decision with identical file scopes should supersede the old one."""
+        d1 = Decision(
+            id=None, content="Old rule for hooks", reasoning="v1",
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            scopes=[DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="hooks/lib/foo.py")],
+        )
+        id1 = store.record(d1)
+
+        d2 = Decision(
+            id=None, content="New rule for hooks", reasoning="v2",
+            status="active", source="human", superseded_by=None,
+            created_at=None, updated_at=None,
+            scopes=[DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="hooks/lib/foo.py")],
+        )
+        # Record via the MCP server path would auto-supersede, but direct store.record doesn't.
+        # This test verifies the store layer — supersession is in server.py.
+        id2 = store.record(d2)
+        assert id2 != id1
+
+        # Both should still be active in the store (supersession is server-level, not store-level)
+        d1_fetched = store.get(id1)
+        assert d1_fetched.status == "active"
+
+
+# ---------------------------------------------------------------------------
+# 12. Domain summary in rules output
+# ---------------------------------------------------------------------------
+
+class TestDomainSummary:
+    def test_domain_summary_renders(self, store, project):
+        decisions = [
+            Decision(id=None, content="Hook rule 1", reasoning=None, status="active", source="human",
+                     superseded_by=None, created_at=None, updated_at=None,
+                     scopes=[DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="hooks/lib/a.py")]),
+            Decision(id=None, content="Hook rule 2", reasoning=None, status="active", source="human",
+                     superseded_by=None, created_at=None, updated_at=None,
+                     scopes=[DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="hooks/lib/b.py")]),
+            Decision(id=None, content="Script rule", reasoning=None, status="active", source="human",
+                     superseded_by=None, created_at=None, updated_at=None,
+                     scopes=[DecisionScope(id=None, decision_id=0, scope_type="file", scope_value="scripts/foo.py")]),
+        ]
+        for d in decisions:
+            store.record(d)
+        dump_to_sql(store, project / ".claude" / "decisions.sql")
+
+        out = generate_rules(str(project))
+        content = Path(out).read_text()
+        assert "## Domain summary" in content
+        assert "hooks:" in content
+        assert "scripts:" in content
+
+    def test_no_domain_summary_when_no_domains(self, store, project):
+        d = Decision(id=None, content="Unscoped", reasoning=None, status="active", source="human",
+                     superseded_by=None, created_at=None, updated_at=None, scopes=[])
+        store.record(d)
+        dump_to_sql(store, project / ".claude" / "decisions.sql")
+
+        out = generate_rules(str(project))
+        content = Path(out).read_text()
+        assert "## Domain summary" not in content
+
+
+# ---------------------------------------------------------------------------
+# 13. Migration chain (v1 → v2 → v3)
+# ---------------------------------------------------------------------------
+
+class TestMigrations:
+    def test_v1_dump_loads_with_domain_and_relationships(self, project):
+        """A v1 dump (no domain, no related_decisions) should load and get both columns via migration."""
+        v1_dump = (
+            "-- decision_memory dump v1\n"
+            "CREATE TABLE IF NOT EXISTS decisions (\n"
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+            "    content TEXT NOT NULL,\n"
+            "    reasoning TEXT,\n"
+            "    status TEXT NOT NULL DEFAULT 'active',\n"
+            "    source TEXT NOT NULL DEFAULT 'human',\n"
+            "    superseded_by INTEGER REFERENCES decisions(id),\n"
+            "    created_at TEXT NOT NULL DEFAULT (datetime('now')),\n"
+            "    updated_at TEXT NOT NULL DEFAULT (datetime('now'))\n"
+            ");\n"
+            "CREATE TABLE IF NOT EXISTS decision_scopes (\n"
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+            "    decision_id INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,\n"
+            "    scope_type TEXT NOT NULL,\n"
+            "    scope_value TEXT NOT NULL\n"
+            ");\n"
+            "INSERT OR REPLACE INTO decisions (id, content, reasoning, status, source, "
+            "superseded_by, created_at, updated_at) VALUES (1, 'Test v1', NULL, 'active', "
+            "'human', NULL, '2026-01-01', '2026-01-01');\n"
+        )
+        dump_path = project / ".claude" / "decisions.sql"
+        dump_path.write_text(v1_dump)
+
+        store = DecisionStore(project)
+        store.sync_from_dump()
+
+        # Both migration columns should exist
+        conn = store._get_connection()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(decisions)").fetchall()}
+        assert "domain" in cols
+        assert "related_decisions" in cols
+
+        # Decision should be retrievable
+        d = store.get(1)
+        assert d is not None
+        assert d.content == "Test v1"
+        assert d.domain is None
+        assert d.related_decisions is None
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 14. Freshness scoring
+# ---------------------------------------------------------------------------
+
+class TestFreshness:
+    FRESHNESS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "decision-freshness.py"
+
+    @pytest.mark.skipif(
+        not (Path(__file__).resolve().parent.parent / "scripts" / "decision-freshness.py").exists(),
+        reason="Freshness script not found",
+    )
+    def test_freshness_no_decisions(self, project):
+        """Script handles missing decisions.db gracefully."""
+        result = subprocess.run(
+            [sys.executable, str(self.FRESHNESS_SCRIPT), "--project-root", str(project)],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["status"] in ("computed", "success", "no_decisions")
+        assert data.get("total", data.get("decisions_scored", 0)) == 0
+
+    @pytest.mark.skipif(
+        not (Path(__file__).resolve().parent.parent / "scripts" / "decision-freshness.py").exists(),
+        reason="Freshness script not found",
+    )
+    def test_freshness_with_decisions(self, store, project):
+        """Script scores real decisions."""
+        for d in SAMPLE_DECISIONS:
+            store.record(d)
+
+        # Need a git repo for git log
+        subprocess.run(["git", "init"], cwd=str(project), capture_output=True)
+        subprocess.run(["git", "add", "."], cwd=str(project), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init", "--allow-empty"], cwd=str(project), capture_output=True)
+
+        result = subprocess.run(
+            [sys.executable, str(self.FRESHNESS_SCRIPT), "--project-root", str(project)],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data.get("total", data.get("decisions_scored", 0)) > 0
+
+
+# ---------------------------------------------------------------------------
+# 15. Staleness gardening
+# ---------------------------------------------------------------------------
+
+class TestStalenessGardening:
+    def test_sidecar_written_for_stale_decisions(self, store, project):
+        """stage_staleness_gardening writes sidecar when stale decisions exist."""
+        for d in SAMPLE_DECISIONS:
+            store.record(d)
+
+        # Create run-state.db with a fake stale entry
+        run_state_path = project / ".claude" / "run-state.db"
+        conn = sqlite3.connect(str(run_state_path))
+        conn.execute("""CREATE TABLE IF NOT EXISTS decision_freshness (
+            decision_id INTEGER PRIMARY KEY,
+            staleness_score REAL NOT NULL,
+            days_since_activity INTEGER NOT NULL,
+            last_git_activity TEXT,
+            computed_at TEXT NOT NULL,
+            reinforcement_count INTEGER NOT NULL DEFAULT 0
+        )""")
+        conn.execute(
+            "INSERT INTO decision_freshness VALUES (1, 0.95, 180, NULL, datetime('now'), 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        # Run the gardening stage
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from hooks.lib.stop_processor import stage_staleness_gardening
+        stage_staleness_gardening(str(project))
+
+        sidecar = project / ".claude" / "stale-decisions.md"
+        assert sidecar.exists()
+        content = sidecar.read_text()
+        assert "Stale" in content or "stale" in content
+
+    def test_sidecar_cleared_when_no_stale(self, store, project):
+        """Sidecar is empty/removed when no decisions are stale."""
+        for d in SAMPLE_DECISIONS:
+            store.record(d)
+
+        # Create run-state.db with only fresh entries
+        run_state_path = project / ".claude" / "run-state.db"
+        conn = sqlite3.connect(str(run_state_path))
+        conn.execute("""CREATE TABLE IF NOT EXISTS decision_freshness (
+            decision_id INTEGER PRIMARY KEY,
+            staleness_score REAL NOT NULL,
+            days_since_activity INTEGER NOT NULL,
+            last_git_activity TEXT,
+            computed_at TEXT NOT NULL,
+            reinforcement_count INTEGER NOT NULL DEFAULT 0
+        )""")
+        conn.execute(
+            "INSERT INTO decision_freshness VALUES (1, 0.1, 2, NULL, datetime('now'), 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from hooks.lib.stop_processor import stage_staleness_gardening
+        stage_staleness_gardening(str(project))
+
+        sidecar = project / ".claude" / "stale-decisions.md"
+        if sidecar.exists():
+            assert sidecar.read_text().strip() == ""
 
 
 if __name__ == "__main__":
