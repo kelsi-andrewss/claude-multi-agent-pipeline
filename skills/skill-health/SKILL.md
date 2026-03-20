@@ -21,7 +21,7 @@ User has requested: `/skill-health {{args}}`
 ## Step 1: Parse args
 
 Parse `{{args}}` for:
-- `since_date`: if args contains `since YYYY-MM-DD`, extract the date. Default: no filter (all time).
+- `since_date`: if args contains `since YYYY-MM-DD`, extract the date and validate it matches `^\d{4}-\d{2}-\d{2}$`. If the extracted value fails validation, discard it and use the default. Default: no filter (all time).
 - `focus_skill`: if args is a single skill name (not "since", not "friction"), set it. Default: null.
 - `friction_only`: if args is exactly "friction", set true. Default: false.
 
