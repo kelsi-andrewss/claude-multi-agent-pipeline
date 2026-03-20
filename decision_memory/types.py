@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 _VALID_STATUSES = frozenset({"active", "deprecated", "superseded", "violated"})
 _VALID_SOURCES = frozenset({"human", "ai-discovered", "ai-proposed"})
+_VALID_SCOPE_TYPES = frozenset({"file", "pattern", "tech"})
 
 
 @dataclass
@@ -12,6 +13,12 @@ class DecisionScope:
     decision_id: int
     scope_type: str  # 'file' | 'pattern' | 'tech'
     scope_value: str
+
+    def __post_init__(self):
+        if self.scope_type not in _VALID_SCOPE_TYPES:
+            raise ValueError(
+                f"Invalid scope_type {self.scope_type!r}, must be one of {sorted(_VALID_SCOPE_TYPES)}"
+            )
 
 
 @dataclass
