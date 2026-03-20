@@ -74,7 +74,7 @@ if row:
     new_count = old_count + 1
     old_dates = json.loads(old_dates_str) if old_dates_str else []
     old_dates.append(date)
-    new_status = 'pending_promotion' if new_count >= 3 else old_status
+    new_status = 'pending_promotion' if new_count >= 3 else old_status  # Must match PROMOTION_THRESHOLD in hooks/lib/signal_processor.py
 
     cursor.execute(
         "UPDATE correction_groups SET count=?, correction_dates=?, status=?, updated_at=? WHERE id=?",
