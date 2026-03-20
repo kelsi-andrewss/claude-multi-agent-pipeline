@@ -336,6 +336,11 @@ After each batch's stories complete and merge via Step 5c, run **Step 4.1 Batch 
 
 Launch all stories in the batch in **a single message** as `general-purpose` agents with `run_in_background: true`.
 
+**Lifecycle event**: After dispatching each coder agent, emit:
+```bash
+bash ~/.claude/scripts/emit-event.sh "story.launched" "claude" '{"story_id":"<story_id>","batch":<batch_num>,"agent":"<agent-type>","branch":"<story-branch>"}'
+```
+
 Compute for each story:
 - `story-slug`: lowercase title, replace spaces/special chars with `-`, collapse consecutive `-`, truncate to 40 chars, then append `-<NNN>` where NNN is the numeric part of the story ID (e.g., story-352 → `-352`)
 - `epic-slug`: the `epic_slug` from the `pm_dev_branch` detail file in Step 3
@@ -412,6 +417,8 @@ You MUST emit NEED_DECISION with "CRITICAL:" prefix for:
 - Data migration: schema changes, data transformation
 - Breaking changes: removing or renaming public APIs
 
+**Format requirement**: All NEED_DECISION emissions must use the structured block format shown in step 9. Include the Level field and at least 2 numbered options with tradeoff descriptions.
+
 ## Pitfalls
 
 <pitfalls from pm_list_patterns, or "No pitfalls for this story's file types.">
@@ -464,7 +471,15 @@ You MUST emit NEED_DECISION with "CRITICAL:" prefix for:
 
 9. Return exactly one of:
    - Success: "DONE: <story-branch> pushed. Commit: <short-hash>. State: done. Files changed: <list of files staged>. Notes: <any relevant notes or 'none'>"
-   - Decision needed (max 1 per story): "NEED_DECISION: <blocker>\nOption A: <option>\nOption B: <option>\n[Option C: <option>]"
+   - Decision needed (max 1 strategic per story; critical always escalates):
+     ```
+     NEED_DECISION: <one-line question>
+     Level: strategic | critical
+     Option 1: <title> — <description with tradeoffs>
+     Option 2: <title> — <description with tradeoffs>
+     Option 3: <title> — <description with tradeoffs> (if applicable)
+     Context: <what you're doing and why this matters for the story>
+     ```
    - Research needed: "NEED_RESEARCH: <specific question>\nContext: <what you've tried>"
    - Failure: "BLOCKED: <clear reason why the story could not be completed>"
 ```
@@ -629,9 +644,23 @@ If the agent result doesn't include usage metadata, skip — merge-worktree hand
 1. Parse blocker description and options from the response.
 2. Log a friction event: category `decision`, type automatic, skill `run-stories`.
 3. Claude picks the best option (with one-line reasoning).
-4. Resume the agent using its agent ID: "Decision: Option <X>. Continue from where you left off."
-5. Wait for the resumed agent to return DONE or BLOCKED.
-6. If DONE, add to the merge list. If BLOCKED, add to blocked list.
+4. Create the decision review artifact:
+   ```bash
+   mkdir -p decisions/reviews/
+   DECISION_NUM=$(ls decisions/reviews/ 2>/dev/null | grep -c '^decision-' || echo 0)
+   DECISION_NUM=$((DECISION_NUM + 1))
+   ```
+   Write the artifact to `decisions/reviews/decision-${DECISION_NUM}.md` using the format from ORCHESTRATION.md section 7. Populate Context from the coder's NEED_DECISION context field, Options from the numbered options, Resolution from Claude's pick.
+5. Emit lifecycle event:
+   ```bash
+   bash ~/.claude/scripts/emit-event.sh "decision.made" "claude" '{"story_id":"<story_id>","decision_id":"decision-<N>","level":"<strategic|critical>","chosen_option":<N>,"artifact":"decisions/reviews/decision-<N>.md"}'
+   ```
+6. Resume the agent using its agent ID: "Decision: Option <X>. Continue from where you left off."
+7. Wait for the resumed agent to return DONE or BLOCKED.
+8. If DONE, add to the merge list. If BLOCKED, add to blocked list. When adding to blocked list, emit:
+   ```bash
+   bash ~/.claude/scripts/emit-event.sh "story.blocked" "claude" '{"story_id":"<story_id>","reason":"<blocked reason>","batch":<batch_num>}'
+   ```
 
 **NEED_RESEARCH handling:** If any agent returns NEED_RESEARCH:
 1. Parse the research question and context from the response.
@@ -670,7 +699,11 @@ Invoke `/fix-loop` with:
 Parse fix-loop's return per the subagent contract (ORCHESTRATION section 15):
 - **DONE**: Proceed to Step 5a (diff gate). Fix-loop's termination gate guarantees all validation layers (compile, lint, tests) pass. Do NOT re-run `build-verify.sh` — fix-loop already validated.
 - **NEED_DECISION**: Surface to main session for resolution, then resume fix-loop.
-- **BLOCKED**: Mark story BLOCKED with fix-loop's reason. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "fix-loop exhausted: <reason>"`. Skip Steps 5a and 5b.
+- **BLOCKED**: Mark story BLOCKED with fix-loop's reason. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "fix-loop exhausted: <reason>"`. Emit:
+   ```bash
+   bash ~/.claude/scripts/emit-event.sh "story.blocked" "claude" '{"story_id":"<story_id>","reason":"fix-loop exhausted: <reason>","batch":<batch_num>}'
+   ```
+   Skip Steps 5a and 5b.
 
 #### Dual-exit gate
 
@@ -770,7 +803,10 @@ For each DONE story that has `test_files` and both the coder and test agent retu
    Fix-loop handles error hashing, circuit breakers, and model escalation internally.
    The `compile_error` classification retains its existing inline test-agent retry — it's a test agent fix, not a coder fix, so fix-loop doesn't apply.
 
-4. **After retry**: re-run merge-gate.py from step 1. If second attempt also fails, mark story BLOCKED with the failure output. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
+4. **After retry**: re-run merge-gate.py from step 1. If second attempt also fails, mark story BLOCKED with the failure output. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`. Emit:
+   ```bash
+   bash ~/.claude/scripts/emit-event.sh "story.blocked" "claude" '{"story_id":"<story_id>","reason":"Merge gate failed after retry: <last error summary>","batch":<batch_num>}'
+   ```
 
 5. **On pass** — before cleanup, merge test commits into the code worktree and push:
    ```bash
@@ -805,6 +841,17 @@ For each DONE story that passes the diff gate and has no `test_files`:
 ### Step 5c: Merge
 
 For each story that passes validation (diff gate + testing), invoke `/merge-worktree` (pass all validated story IDs space-separated as args).
+
+After merge completes, update any decision review artifacts created during this run:
+```bash
+for artifact in decisions/reviews/decision-*.md; do
+  if grep -q "story-<story_id>" "$artifact" && grep -q "Status: pending" "$artifact"; then
+    sed -i '' 's/Status: pending/Status: success/' "$artifact"
+    sed -i '' "s|Merge result:.*|Merge result: merged to dev at $(git rev-parse --short dev)|" "$artifact"
+  fi
+done
+```
+For BLOCKED stories, update matching artifacts with `Status: failure` and the block reason.
 
 ---
 

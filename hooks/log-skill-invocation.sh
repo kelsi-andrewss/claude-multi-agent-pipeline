@@ -49,6 +49,8 @@ print(json.dumps(entry))
 if [[ -n "$ENTRY" ]]; then
   echo "$ENTRY" >> "$HOME/.claude/.claude/tracking/skill-telemetry.jsonl"
   rotate_log "$HOME/.claude/.claude/tracking/skill-telemetry.jsonl" 500 jsonl
+  SKILL_NAME=$(echo "$ENTRY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('skill','unknown'))" 2>/dev/null)
+  bash "$HOME/.claude/scripts/emit-event.sh" "hook.log-skill-invocation" "hook" "${SKILL_NAME:-unknown}" "{\"result\":\"logged\"}" || true
 fi
 
 exit 0

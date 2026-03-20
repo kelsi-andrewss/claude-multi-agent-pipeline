@@ -59,6 +59,10 @@ Parse `{{args}}` to determine the mode:
 
 4. **No args**: Ask the user: "Describe what to build (features or file path):" and stop.
 
+```bash
+bash ~/.claude/scripts/emit-event.sh "skill.ship.started" "claude" "ship" '{"mode":"'"$MODE"'"}'
+```
+
 ---
 
 ## Step 0b: Quickfix dispatch
@@ -192,6 +196,10 @@ Store verify output for the Step 6 report.
 ---
 
 ## Step 6: Final report
+
+```bash
+bash ~/.claude/scripts/emit-event.sh "skill.ship.completed" "claude" "ship" '{"epic_id":"'"$EPIC_ID"'"}'
+```
 
 Print final summary synthesized from child skill outputs:
 

@@ -146,12 +146,14 @@ PYEOF
       echo "BLOCKED: Direct edits to project source files are not allowed from the main session." >&2
       echo "This file is in the story's writeFiles, but edits must go through the coder in the worktree." >&2
       echo "File attempted: $FILE_PATH" >&2
+      bash "$HOME/.claude/scripts/emit-event.sh" "hook.guard-direct-edit" "hook" "$FILE_PATH" "{\"reason\":\"in-write-files-but-main-session\",\"result\":\"blocked\"}" || true
       exit 2
       ;;
     "OUT_OF_SCOPE")
       echo "BLOCKED: $FILE_PATH is not in any running story's writeFiles." >&2
       echo "Add it to the plan or edit in the correct worktree." >&2
       echo "File attempted: $FILE_PATH" >&2
+      bash "$HOME/.claude/scripts/emit-event.sh" "hook.guard-direct-edit" "hook" "$FILE_PATH" "{\"reason\":\"out-of-scope\",\"result\":\"blocked\"}" || true
       exit 2
       ;;
     "NO_RUNNING_STORY"|"EPICS_UNAVAILABLE"|"")
@@ -159,6 +161,7 @@ PYEOF
       echo "BLOCKED: Direct edits to project source files are not allowed from the main session." >&2
       echo "Use /todo \"description\" to route the change through the pipeline." >&2
       echo "File attempted: $FILE_PATH" >&2
+      bash "$HOME/.claude/scripts/emit-event.sh" "hook.guard-direct-edit" "hook" "$FILE_PATH" "{\"reason\":\"no-running-story\",\"result\":\"blocked\"}" || true
       exit 2
       ;;
   esac
@@ -168,4 +171,5 @@ fi
 echo "BLOCKED: Direct edits to project source files are not allowed from the main session." >&2
 echo "Use /todo \"description\" to route the change through the pipeline." >&2
 echo "File attempted: $FILE_PATH" >&2
+bash "$HOME/.claude/scripts/emit-event.sh" "hook.guard-direct-edit" "hook" "${FILE_PATH:-unknown}" "{\"reason\":\"direct-edit-blocked\",\"result\":\"blocked\"}" || true
 exit 2

@@ -121,7 +121,7 @@ This maximizes parallel execution — stories with non-overlapping write targets
 
 Full template: run-stories/SKILL.md Step 4. Must include: story title, plan file, write-targets (absolute worktree paths), read-only context, agent approach, pitfalls, OpenMemory learnings, worktree enforcement block.
 
-**NEED_DECISION**: once per story for strategic decisions; critical decisions always escalate regardless of count. Does not count toward escalation. Second strategic NEED_DECISION → BLOCKED.
+**NEED_DECISION**: once per story for strategic decisions; critical decisions always escalate regardless of count. Does not count toward escalation. Second strategic NEED_DECISION → BLOCKED. Coders must use the structured format defined in the coder prompt template (run-stories/SKILL.md Step 4). Main session creates a decision review artifact per section 7 "Decision review artifacts" before resolving.
 **Size ceiling**: >5 files or >200 lines → split. **Conflict check**: no shared write targets with in-progress stories.
 
 ### Decision autonomy levels
@@ -144,11 +144,61 @@ Context: <what the coder has tried/found so far>
 
 NEED_RESEARCH does not count toward the BLOCKING escalation counter. It is not a failure — it is a request for information.
 
+### Decision review artifacts
+
+When a coder emits NEED_DECISION at strategic or critical level, the main session creates a review artifact before resolving the decision.
+
+**Artifact location:** `decisions/reviews/decision-<NNN>.md` where NNN is a monotonically increasing integer (next available in the directory).
+
+**Creation rules:**
+
+| Level | Artifact created? | Approval required? |
+|---|---|---|
+| Tactical | No | No |
+| Strategic | Yes | Main session resolves |
+| Critical | Yes | User confirmation required |
+
+**Directory bootstrapping:** The main session runs `mkdir -p decisions/reviews/` before writing the first artifact in a session. No pre-existing directory structure is required.
+
+**Artifact format:**
+
+```markdown
+# Decision Review: decision-NNN
+
+**Story:** story-NNN
+**Date:** YYYY-MM-DD
+**Level:** strategic | critical
+**Decider:** user | claude
+
+## Context
+<What the coder was doing when the decision was needed>
+
+## Options
+### Option 1: <title>
+<Detailed description with tradeoffs>
+
+### Option 2: <title>
+<Detailed description with tradeoffs>
+
+### Option 3: <title> (if applicable)
+<Detailed description with tradeoffs>
+
+## Resolution
+**Chosen:** Option <N>
+**Rationale:** <Why this option was selected>
+
+## Outcome
+**Status:** pending
+**Merge result:** <updated post-merge by section 8 flow>
+```
+
 ---
 
 ## 8. MERGE & ESCALATION
 
-Procedures: merge-worktree/SKILL.md. After coder: NEED_DECISION → pick, resume. NEED_RESEARCH → dispatch targeted Gemini research (web_search with the specific question + coder's context), resume coder with the answer. DONE → diff gate → test → review → merge. Auto-launch unblocked stories after merge.
+Procedures: merge-worktree/SKILL.md. After coder: NEED_DECISION → create decision review artifact (section 7), pick option, resume. NEED_RESEARCH → dispatch targeted Gemini research (web_search with the specific question + coder's context), resume coder with the answer. DONE → diff gate → test → review → merge. Auto-launch unblocked stories after merge.
+
+**Post-merge artifact update**: After a successful merge, update any decision review artifacts created during that story's execution. Set `## Outcome` → `Status: success` and `Merge result: merged to dev at <commit-hash>`. On merge failure or story BLOCKED, set `Status: failure` and `Merge result: <failure reason>`.
 
 **Escalation**: 2 BLOCKING → Opus (architect only). Still BLOCKING → `blocked`. **Restart**: plan was wrong (not coder) → new plan, same model, max 1. **Outcome logging**: every terminal transition → `merge_outcomes` table in run-state.db (merge-worktree Step 5.5). **Parallel**: no write-target overlap required; first merges, second rebases.
 
