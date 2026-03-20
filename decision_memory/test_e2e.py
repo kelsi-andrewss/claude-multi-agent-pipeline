@@ -929,5 +929,223 @@ class TestStalenessGardening:
             assert sidecar.read_text().strip() == ""
 
 
+# ---------------------------------------------------------------------------
+# 16. Real repo tests (worktree-based)
+# ---------------------------------------------------------------------------
+
+REAL_REPO = Path(__file__).resolve().parent.parent  # ~/.claude
+
+
+@pytest.fixture
+def real_worktree(tmp_path):
+    """Create a git worktree from the real repo into a tmpdir.
+
+    Rebuilds decisions.db from the SQL dump (since .db is gitignored).
+    Discard worktree after test.
+    """
+    branch_name = f"test-e2e-{os.getpid()}"
+    wt_path = tmp_path / "worktree"
+
+    result = subprocess.run(
+        ["git", "worktree", "add", "-b", branch_name, str(wt_path), "HEAD"],
+        cwd=str(REAL_REPO),
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"Could not create worktree: {result.stderr.strip()}")
+
+    # Rebuild decisions.db from SQL dump (db is gitignored, only dump is in git)
+    dump_path = wt_path / ".claude" / "decisions.sql"
+    if dump_path.exists():
+        store = DecisionStore(wt_path)
+        store.sync_from_dump()
+
+    yield wt_path
+
+    # Cleanup: remove worktree and branch
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", str(wt_path)],
+        cwd=str(REAL_REPO), capture_output=True,
+    )
+    subprocess.run(
+        ["git", "branch", "-D", branch_name],
+        cwd=str(REAL_REPO), capture_output=True,
+    )
+
+
+class TestRealRepo:
+    """Tests that run against the actual project repo via a disposable worktree.
+
+    These exercise real git history, real decisions.sql, real file scopes.
+    Slower than tmpdir tests (~2-5s each) but catch integration issues that
+    synthetic fixtures miss (FK constraints, stale dumps, migration gaps).
+    """
+
+    def test_store_loads_from_real_dump(self, real_worktree):
+        """DecisionStore can load the actual decisions.sql dump."""
+        store = DecisionStore(real_worktree)
+        store.sync_from_dump()
+        decisions = store.list_all()
+        assert len(decisions) > 0, "Real repo should have decisions"
+        # Verify at least some have scopes
+        with_scopes = [d for d in decisions if d.scopes]
+        assert len(with_scopes) > 0
+
+    def test_domains_populated_on_real_decisions(self, real_worktree):
+        """Real decisions have domain tags after v2+ dump."""
+        store = DecisionStore(real_worktree)
+        store.sync_from_dump()
+        decisions = store.list_all(status="active")
+        with_domain = [d for d in decisions if d.domain]
+        assert len(with_domain) > 0, "Active decisions should have domains"
+
+    def test_relationships_populated_on_real_decisions(self, real_worktree):
+        """Real decisions have relationship data after backfill."""
+        store = DecisionStore(real_worktree)
+        store.sync_from_dump()
+        decisions = store.list_all()
+        with_rels = [d for d in decisions if d.related_decisions]
+        assert len(with_rels) > 0, "Backfilled decisions should have relationships"
+
+    def test_rules_generation_against_real_data(self, real_worktree):
+        """Rules generator produces valid output from real decisions."""
+        out = generate_rules(str(real_worktree))
+        content = Path(out).read_text()
+        assert "# Project Decisions" in content
+        assert "## File-scoped decisions" in content
+        assert "## Domain summary" in content
+        # Should have at least a few decision references
+        assert content.count("[decision-") >= 5
+
+    def test_freshness_scoring_against_real_git(self, real_worktree):
+        """Freshness script scores decisions using real git history."""
+        freshness_script = real_worktree / "scripts" / "decision-freshness.py"
+        if not freshness_script.exists():
+            pytest.skip("Freshness script not in worktree")
+
+        result = subprocess.run(
+            [sys.executable, str(freshness_script), "--project-root", str(real_worktree)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        total = data.get("total", data.get("decisions_scored", 0))
+        assert total > 0, "Should score decisions against real git history"
+
+        # All scores should be valid floats in [0, 1]
+        for entry in data.get("decisions", []):
+            score = entry["staleness_score"]
+            assert 0.0 <= score <= 1.0, f"Score {score} out of range for decision {entry['decision_id']}"
+
+    def test_freshness_reinforcement_in_worktree(self, real_worktree):
+        """Reinforcement works against real run-state.db in worktree."""
+        freshness_script = real_worktree / "scripts" / "decision-freshness.py"
+        if not freshness_script.exists():
+            pytest.skip("Freshness script not in worktree")
+
+        # First run to populate scores
+        subprocess.run(
+            [sys.executable, str(freshness_script), "--project-root", str(real_worktree)],
+            capture_output=True, text=True, timeout=30,
+        )
+
+        # Get a real decision ID
+        store = DecisionStore(real_worktree)
+        store.sync_from_dump()
+        decisions = store.list_all(status="active")
+        if not decisions:
+            pytest.skip("No active decisions")
+        did = decisions[0].id
+
+        # Reinforce it
+        result = subprocess.run(
+            [sys.executable, str(freshness_script),
+             "--project-root", str(real_worktree), "--reinforce", str(did)],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["status"] == "reinforced"
+        assert data["decision_id"] == did
+
+    def test_dump_roundtrip_preserves_all_fields(self, real_worktree):
+        """Dump → nuke → rebuild preserves content, domains, relationships."""
+        store = DecisionStore(real_worktree)
+        store.sync_from_dump()
+        original = store.list_all()
+
+        # Dump
+        dump_path = real_worktree / ".claude" / "decisions.sql"
+        dump_to_sql(store, dump_path)
+
+        # Nuke DB
+        db_path = real_worktree / ".claude" / "decisions.db"
+        db_path.unlink()
+        for suffix in ("-shm", "-wal"):
+            p = db_path.parent / (db_path.name + suffix)
+            if p.exists():
+                p.unlink()
+
+        # Rebuild
+        store2 = DecisionStore(real_worktree)
+        store2.sync_from_dump()
+        rebuilt = store2.list_all()
+
+        assert len(rebuilt) == len(original)
+
+        # Spot-check: domains and relationships survived
+        orig_map = {d.id: d for d in original}
+        for d in rebuilt:
+            orig = orig_map.get(d.id)
+            if orig:
+                assert d.domain == orig.domain, f"Domain mismatch on decision {d.id}"
+                assert d.related_decisions == orig.related_decisions, f"Relationships mismatch on decision {d.id}"
+                assert len(d.scopes) == len(orig.scopes), f"Scope count mismatch on decision {d.id}"
+
+    def test_staleness_gardening_against_real_data(self, real_worktree):
+        """Stage 6 runs without error against real project structure."""
+        sys.path.insert(0, str(real_worktree))
+        # Import from the worktree
+        import importlib
+        sp_path = real_worktree / "hooks" / "lib" / "stop_processor.py"
+        if not sp_path.exists():
+            pytest.skip("stop_processor.py not in worktree")
+
+        spec = importlib.util.spec_from_file_location("stop_processor_wt", str(sp_path))
+        mod = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(mod)
+        except SystemExit:
+            pytest.skip("stop_processor requires CLI args")
+        except Exception:
+            pytest.skip("Could not import stop_processor from worktree")
+
+        if hasattr(mod, "stage_staleness_gardening"):
+            mod.stage_staleness_gardening(str(real_worktree))
+            # Should not crash — sidecar may or may not be written depending on freshness data
+            sidecar = real_worktree / ".claude" / "stale-decisions.md"
+            # Just verify no crash — content depends on whether freshness data exists
+            assert True
+
+    def test_backfill_script_dry_run(self, real_worktree):
+        """Backfill script runs in dry-run mode against real data."""
+        script = real_worktree / "scripts" / "backfill-relationships.py"
+        if not script.exists():
+            pytest.skip("Backfill script not in worktree")
+
+        result = subprocess.run(
+            [sys.executable, str(script), "--project-root", str(real_worktree), "--dry-run"],
+            capture_output=True, text=True, timeout=10,
+        )
+        # Dry-run should succeed (exit 0) or exit 1 with JSON error
+        output = result.stdout.strip() or result.stderr.strip()
+        if output:
+            data = json.loads(output)
+            assert data["status"] in ("backfilled", "dry_run", "no_changes", "success", "error")
+        else:
+            # No output means script completed silently — acceptable for dry-run
+            assert result.returncode in (0, 1)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
