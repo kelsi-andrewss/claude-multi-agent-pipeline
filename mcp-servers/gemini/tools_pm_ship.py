@@ -26,6 +26,7 @@ def register(mcp):
         project_root: str | None = None,
         auto_commit: bool = True,
         proposal_id: str | None = None,
+        test_files: list[str] | None = None,
     ) -> str:
         """Create epic and group items into stories/tasks in the DB. Does NOT run Gemini planning — call pm_plan_stories separately for that.
 
@@ -38,6 +39,7 @@ def register(mcp):
             project_root: Absolute path to project root for codebase context.
             auto_commit: If False, store proposal in pending_proposals and return for review. Re-call with proposal_id and auto_commit=True to commit.
             proposal_id: Commit a previously stored proposal. Requires auto_commit=True.
+            test_files: List of test files for parallel test agent execution. Applied to all stories created in this call.
         """
         with _db_op() as conn:
             # --- Resume from pending proposal ---
@@ -69,7 +71,7 @@ def register(mcp):
                     "epic_id": epic_id,
                     "epic_title": dict(epic)["title"],
                     "stories": [
-                        {"id": s["id"], "title": s["title"], "agent": s.get("agent"), "write_files": s.get("write_files", [])}
+                        {"id": s["id"], "title": s["title"], "agent": s.get("agent"), "write_files": s.get("write_files", []), "test_files": s.get("test_files", [])}
                         for s in story_list
                     ],
                 })
@@ -113,6 +115,7 @@ def register(mcp):
                     "epic_title": epic_title,
                     "proposed_stories": proposed_stories,
                     "target_date": target_date,
+                    "test_files": test_files,
                 }
                 pid = f"prop-{int(time.time())}"
                 conn.execute(
@@ -138,6 +141,7 @@ def register(mcp):
                     "epic_id": epic_id,
                     "epic_title": epic_title,
                     "proposed_stories": proposed_stories,
+                    "test_files": test_files,
                 },
             )
 
@@ -146,6 +150,7 @@ def register(mcp):
         epic_id = proposal["epic_id"]
         epic_title = proposal.get("epic_title", "")
         proposed_stories = proposal["proposed_stories"]
+        test_files = proposal.get("test_files")
 
         epic_exists = conn.execute("SELECT id FROM epics WHERE id = ?", (epic_id,)).fetchone()
         if not epic_exists:
@@ -158,12 +163,13 @@ def register(mcp):
         for s in proposed_stories:
             sid = _next_id(conn, "stories", "story-")
             conn.execute(
-                """INSERT INTO stories (id, epic_id, title, state, write_files, agent, model,
+                """INSERT INTO stories (id, epic_id, title, state, write_files, test_files, agent, model,
                    depends_on, needs_testing, needs_review)
-                   VALUES (?, ?, ?, 'draft', ?, ?, NULL, '[]', 0, 0)""",
+                   VALUES (?, ?, ?, 'draft', ?, ?, ?, NULL, '[]', 0, 0)""",
                 (
                     sid, epic_id, s["title"],
                     json.dumps(s.get("write_files") or []),
+                    json.dumps(s.get("test_files") or test_files or []),
                     s.get("agent"),
                 )
             )
@@ -174,6 +180,7 @@ def register(mcp):
                 "title": s["title"],
                 "agent": s.get("agent"),
                 "write_files": s.get("write_files", []),
+                "test_files": s.get("test_files") or test_files or [],
                 "tasks": s.get("tasks", []),
             })
 
