@@ -1,10 +1,11 @@
 #!/bin/bash
 # Hook profile gate — sourced by every hook.
 # Three levels: minimal (1), standard (2, default), strict (3).
-# Reads from $CLAUDE_TEMP_DIR/claude-hook-profile, then $CLAUDE_HOOK_PROFILE, then defaults to standard.
+# Reads from $HOOK_PROFILE_FILE, then $CLAUDE_HOOK_PROFILE, then defaults to standard.
 
 export CLAUDE_TEMP_DIR="$HOME/.claude/tmp"
 mkdir -p "$CLAUDE_TEMP_DIR"
+HOOK_PROFILE_FILE="$HOME/.claude/hook-profile"
 
 _raw_session="${CLAUDE_SESSION_ID:-${PPID:-$$}}"
 export SESSION_ID=$(echo "$_raw_session" | tr -dc 'a-zA-Z0-9')
@@ -19,8 +20,8 @@ _profile_to_level() {
 
 get_profile_level() {
   local profile=""
-  if [[ -f "$CLAUDE_TEMP_DIR/claude-hook-profile" ]]; then
-    profile=$(cat "$CLAUDE_TEMP_DIR/claude-hook-profile" 2>/dev/null)
+  if [[ -f "$HOOK_PROFILE_FILE" ]]; then
+    profile=$(cat "$HOOK_PROFILE_FILE" 2>/dev/null)
   fi
   if [[ -z "$profile" ]]; then
     profile="${CLAUDE_HOOK_PROFILE:-standard}"
