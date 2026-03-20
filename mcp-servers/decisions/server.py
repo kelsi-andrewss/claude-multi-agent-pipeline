@@ -66,6 +66,14 @@ def _format_decision(d: Decision) -> str:
     return "\n".join(parts)
 
 
+def _compute_scope_overlap(new_patterns: set[str], existing_patterns: set[str]) -> float:
+    """Return overlap ratio: len(intersection) / max(len(a), len(b)). 0.0 when both empty."""
+    if not new_patterns and not existing_patterns:
+        return 0.0
+    intersection = new_patterns & existing_patterns
+    return len(intersection) / max(len(new_patterns), len(existing_patterns))
+
+
 def _staleness_tier(created_at: str | None) -> str:
     """Return 'fresh' (<7d), 'aging' (7-30d), 'stale' (>30d), or 'unknown'."""
     if not created_at:
@@ -121,6 +129,35 @@ def record_project_decision(
 
     decision_id = store.record(decision)
 
+    superseded_ids = []
+    warnings = []
+    new_patterns = {s.scope_value for s in scopes}
+    if new_patterns:
+        existing = store.list_all(status="active")
+        conn = store._get_connection()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            for existing_d in existing:
+                if existing_d.id == decision_id:
+                    continue
+                existing_patterns = {
+                    s.scope_value for s in existing_d.scopes if s.scope_type == "file"
+                }
+                overlap = _compute_scope_overlap(new_patterns, existing_patterns)
+                if overlap > 0.5:
+                    conn.execute(
+                        "UPDATE decisions SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?",
+                        (decision_id, now, existing_d.id),
+                    )
+                    superseded_ids.append(existing_d.id)
+                elif overlap > 0:
+                    warnings.append(
+                        f"decision-{existing_d.id} has partial scope overlap ({overlap:.0%})"
+                    )
+            conn.commit()
+        finally:
+            conn.close()
+
     provider = _get_provider()
     if provider.available():
         conn = store._get_connection()
@@ -133,7 +170,13 @@ def record_project_decision(
 
     dump_to_sql(store, store.dump_path)
 
-    return f"Recorded decision #{decision_id}: {content}"
+    parts = [f"Recorded decision #{decision_id}: {content}"]
+    if superseded_ids:
+        ids_str = ", ".join(f"#{d}" for d in superseded_ids)
+        parts.append(f"Auto-superseded: {ids_str}")
+    for w in warnings:
+        parts.append(f"Warning: {w}")
+    return "\n".join(parts)
 
 
 @mcp.tool()
