@@ -599,7 +599,7 @@ conn.close()
 2. For the just-merged story, invoke the regression check script:
 
    ```bash
-   REGRESS_RESULT=$(python3 ~/.claude/.claude/scripts/regression-check.py \
+   REGRESS_RESULT=$(python3 ~/.claude/scripts/regression-check.py \
      --epic-id <epic_id> \
      --just-merged-story-id <story_id> \
      --just-merged-write-files "<comma-separated write_files>" \
