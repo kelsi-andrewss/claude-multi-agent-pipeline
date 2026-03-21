@@ -36,6 +36,8 @@ def _acquire_lock(session_id):
         fd = os.open(path, os.O_CREAT | os.O_RDWR)
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         _lock_fd = fd
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
         os.write(fd, str(os.getpid()).encode())
         return True
     except (BlockingIOError, OSError):
@@ -152,7 +154,8 @@ def stage_session_summary(transcript_path, project_root):
     topic = ", ".join(sorted(edited_files)[:5]) if edited_files else "discussion"
     today = datetime.now().strftime("%Y-%m-%d")
 
-    sys.path.insert(0, project_root)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from hooks.lib.om_write import om_write
     om_write(
         content=f"Session {today}: {duration_min}min, {user_turns} turns. Topic: {topic}.",
@@ -180,7 +183,8 @@ def stage_auto_distillation(db_file, project_root):
         print("Stage 4: skipped (no pending_promotion entries)", file=sys.stderr)
         return
 
-    sys.path.insert(0, project_root)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from hooks.lib.om_write import om_write
     from hooks.lib.signal_processor import generate_rule, RULE_THRESHOLD
 
@@ -293,7 +297,8 @@ def stage_hook_generation(db_file, project_root):
     # Ensure compliance directory exists before generating hooks
     os.makedirs(os.path.join(project_root, 'hooks', 'compliance'), exist_ok=True)
 
-    sys.path.insert(0, project_root)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from hooks.lib.hook_generator import generate_hook
 
     generated = 0
