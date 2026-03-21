@@ -596,16 +596,18 @@ After each batch's stories are merged into dev via Step 5c, verify the dev branc
 ### Procedure
 
 1. Checkout the dev branch (post-merge state).
-2. Run build verification:
+2. Run the full validation pyramid:
    ```bash
-   RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <project-root>)
+   RESULT=$(bash ~/.claude/scripts/validation-runner.sh --project-root <project-root> --layer all)
    ```
-3. Parse JSON result and apply the same pass/fail/skip logic as Step 2c.
+3. Parse the JSON result. Check `overall_status`:
+   - `"pass"` → all layers passed
+   - `"fail"` → at least one layer failed (check `layers` array for details)
+   - `"skip"` → no recognized project type
 4. Results:
-   - **PASS**: Log `"Batch N verification: PASS"`. Continue to the next batch.
-   - **PASS with lint warnings**: Log `"Batch N verification: PASS (warnings: <count from lint_warnings>)"`. Continue. Include warning summary in Step 6 report.
-   - **FAIL**: Log `"Batch N verification: FAIL — <build output from JSON>"`. Mark ALL stories in subsequent batches as BLOCKED with reason `"Blocked: batch N verification failed"`. Stop executing further batches.
-   - **SKIP**: Log `"Batch N verification: SKIP (no build system)"`. Continue.
+   - **PASS** (`overall_status` is `"pass"`): Log `"Batch N verification: PASS"`. Continue to the next batch. If any layer has non-zero `error_count` with `status: "pass"`, log as warnings.
+   - **FAIL** (`overall_status` is `"fail"`): Find the first failed layer in the `layers` array. Log `"Batch N verification: FAIL — <layer.name>: <layer.output>"`. Mark ALL stories in subsequent batches as BLOCKED with reason `"Blocked: batch N verification failed"`. Stop executing further batches.
+   - **SKIP** (`overall_status` is `"skip"`): Log `"Batch N verification: SKIP (no build system)"`. Continue.
 
 ---
 
@@ -697,11 +699,12 @@ A story must pass Step 5.0 before entering Step 5a. If Step 5.0 marks a story BL
 For each DONE story, verify only expected files changed:
 
 ```bash
-DIFF_RESULT=$(bash ~/.claude/scripts/diff-gate.sh --worktree-path <worktree-path> --dev-branch <dev-branch> --write-files "<comma-separated write_files>")
+DIFF_RESULT=$(bash ~/.claude/scripts/diff-gate.sh --worktree-path <worktree-path> --dev-branch <dev-branch> --write-files "<comma-separated write_files>" --blocking)
 ```
 
 Parse the JSON result:
-- If `unexpected_files` is non-empty: log the unexpected files as a warning, but continue (non-blocking). The coder may have legitimately needed adjacent files.
+- If `blocked` is `true`: mark the story BLOCKED with reason `"Scope violation: unexpected files changed: <unexpected_files list>"`. Log a friction event: `category: blocked, type: automatic, skill: run-stories, detail: "diff-gate blocked: <unexpected_files>"`. Skip Steps 5b and 5c for this story.
+- If `blocked` is `false` and `unexpected_files` is non-empty: log the unexpected files as a warning, but continue (non-blocking). The coder may have legitimately needed adjacent files.
 - If `status` is `"error"`: log the error, continue (non-blocking).
 
 ### Step 5b: Per-story testing
@@ -789,18 +792,55 @@ For each DONE story that has `test_files` and both the coder and test agent retu
    git worktree remove --force "$MERGE_CANDIDATE"
    ```
 
-#### Stories WITHOUT `test_files` (existing behavior)
+#### Stories WITHOUT `test_files` (unified merge-gate path)
 
 For each DONE story that passes the diff gate and has no `test_files`:
 
-1. Check if test infrastructure exists in the project (look for test directories, test configs, `jest.config`, `pytest.ini`, `_test.go` files, etc.). If none exists, skip testing for this story.
+1. Check if test infrastructure exists in the project (look for test directories, test configs, `jest.config`, `pytest.ini`, `_test.go` files, etc.). If none exists, skip testing for this story — proceed directly to merge.
+
 2. Launch unit-tester agent (background, **Sonnet**) in the worktree. The unit-tester writes tests from the plan file's **acceptance criteria**, not from the implementation.
-3. Results:
-   - PASS → story proceeds to merge.
-   - FAIL trivial → log a friction event (category `retry`, type automatic, skill `run-stories`),
-     resume coder with failures, wait for fix. If fix succeeds, proceed to merge.
-   - FAIL non-trivial → log a friction event (category `blocked`, type automatic, skill `run-stories`),
-     story marked BLOCKED.
+
+3. After the unit-tester completes, commit tests to a test branch in the worktree:
+   ```bash
+   git -C <worktree-path> checkout -b <story-branch>--test
+   git -C <worktree-path> add <test-files>
+   git -C <worktree-path> commit -m "tests: unit-tester generated tests for <story-id>"
+   git -C <worktree-path> push -u origin <story-branch>--test
+   git -C <worktree-path> checkout <story-branch>
+   ```
+
+4. Run merge-gate.py with the test branch — same as the `test_files` path:
+   ```bash
+   MERGE_GATE_RESULT=$(python3 ~/.claude/scripts/merge-gate.py \
+     --merge-candidate <merge-candidate-path> \
+     --story-branch <story-branch> \
+     --test-branch <story-branch>--test \
+     --dev-branch dev \
+     --test-cmd "<detected test command>" \
+     --test-files "<unit-tester-generated test files>" \
+     --session-id "$SESSION_ID" \
+     --story-id <story_id>)
+   ```
+
+5. Parse the JSON result. If `test_passed` is false, use `classification` to decide retry strategy — same as the `test_files` path:
+
+   | `classification` | Attribution | Action |
+   |---|---|---|
+   | `compile_error` | **Unit-tester** — wrong interface | Log friction. Re-launch unit-tester with error output + actual exports. Max 1 retry. |
+   | `logic_failure` | **Coder** — implementation wrong | Log friction. Delegate to `/fix-loop` with `--skip-compile` and the error context. |
+   | `ambiguous` | **Coder** (default) | Same as logic_failure path. |
+
+   After retry, re-run merge-gate.py. If second attempt also fails, mark story BLOCKED. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
+
+6. On pass — merge test commits into the code worktree (same as `test_files` path step 5):
+   ```bash
+   git -C <worktree-path> fetch origin <story-branch>--test
+   git -C <worktree-path> checkout origin/<story-branch>--test -- <test-files>
+   git -C <worktree-path> add <test-files>
+   git -C <worktree-path> commit -m "<story_id>: add spec tests (validated)"
+   git -C <worktree-path> push origin <story-branch>
+   ```
+   Story proceeds to merge (Step 5c).
 
 ### Step 5c: Merge
 
