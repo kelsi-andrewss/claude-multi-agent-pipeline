@@ -5,6 +5,7 @@
 
 source "$(dirname "$0")/lib/profile.sh"
 require_profile 1
+[[ -z "$SESSION_ID" ]] && SESSION_ID="fallback-$$"
 
 INPUT=$(cat)
 
