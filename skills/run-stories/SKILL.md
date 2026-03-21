@@ -777,6 +777,7 @@ For each DONE story that has `test_files` and both the coder and test agent retu
    | `compile_error` | **Test agent** — wrong interface | Log friction. Re-launch test agent with error output + actual exports. Max 1 retry. |
    | `logic_failure` | **Coder** — implementation wrong | Log friction. Re-launch coder with failing tests as read-only context. Max 1 retry. |
    | `ambiguous` | **Coder** (default) | Same as logic_failure path. |
+   | `low_coverage` | **Coder** — insufficient test coverage | Log friction. Delegate to `/fix-loop` — coder adds covered code paths or more tests. |
 
    Use `error_output` from the JSON result to construct the retry prompt.
 
@@ -874,6 +875,7 @@ For each DONE story that passes the diff gate and has no `test_files`:
    | `compile_error` | **Unit-tester** — wrong interface | Log friction. Re-launch unit-tester with error output + actual exports. Max 1 retry. |
    | `logic_failure` | **Coder** — implementation wrong | Log friction. Delegate to `/fix-loop` with `--skip-compile` and the error context. |
    | `ambiguous` | **Coder** (default) | Same as logic_failure path. |
+   | `low_coverage` | **Coder** — insufficient test coverage | Log friction. Delegate to `/fix-loop` — coder adds covered code paths or more tests. |
 
    After retry, re-run merge-gate.py. If second attempt also fails, mark story BLOCKED. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
 

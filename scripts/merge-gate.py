@@ -321,9 +321,42 @@ def main():
                     result["coverage_pct"] = cov_pct
                     db_extras["coverage_pct"] = cov_pct
                     if cov_pct is not None and cov_pct < 60.0:
-                        result["coverage_warning"] = f"Coverage {cov_pct:.1f}% below 60% threshold"
+                        # Coverage is blocking — low coverage fails the gate
+                        result["test_passed"] = False
+                        result["error_type"] = "coverage_failure"
+                        result["classification"] = "low_coverage"
+                        result["error_output"] = f"Coverage {cov_pct:.1f}% below 60% threshold"
+                        result["coverage_blocked"] = True
+                        db_extras["coverage_pct"] = cov_pct
+                        if args.session_id and args.story_id:
+                            record_merge_result(args.session_id, args.story_id, False,
+                                                "low_coverage", result["error_output"], **db_extras)
+                        emit(result)
+                        sys.exit(1)
+                    else:
+                        result["coverage_blocked"] = False
                 except subprocess.TimeoutExpired:
                     print("merge-gate: coverage collection timed out", file=sys.stderr)
+                    result["coverage_blocked"] = False
+            else:
+                result["coverage_blocked"] = False
+        else:
+            result["coverage_blocked"] = False
+
+        # Assertion density check (non-blocking warning)
+        if args.test_file_names:
+            try:
+                ad_script = os.path.join(os.path.dirname(__file__), "assertion-density.py")
+                ad_result = subprocess.run(
+                    [sys.executable, ad_script, "--test-files", args.test_file_names],
+                    capture_output=True, text=True, timeout=30, cwd=mc_path,
+                )
+                if ad_result.returncode == 1:
+                    ad_output = json.loads(ad_result.stdout) if ad_result.stdout.strip() else {}
+                    vacuous = ad_output.get("summary", {}).get("vacuous", 0)
+                    result["assertion_warning"] = f"{vacuous} vacuous test(s) detected"
+            except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+                pass  # assertion density is advisory, never blocks
 
         if args.session_id and args.story_id:
             record_merge_result(args.session_id, args.story_id, True, None, None, **db_extras)
