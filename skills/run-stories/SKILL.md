@@ -436,6 +436,17 @@ You MUST emit NEED_DECISION with "CRITICAL:" prefix for:
 
 <openmemory results formatted as bullet points, or omit section if none>
 
+## Test file requirements
+
+This story has test_files: <test_files list, or "N/A">
+<If test_files is a list of paths:>
+You MUST create or modify these test files as part of your implementation. Tests must:
+- Cover the behavioral changes specified in the plan's acceptance criteria
+- Be runnable with the project's test framework
+- Pass when run against your implementation
+<If test_files is "N/A":>
+No test files required for this story.
+
 ## Steps
 
 1. Verify the story worktree (pre-created by the resolution subagent):
