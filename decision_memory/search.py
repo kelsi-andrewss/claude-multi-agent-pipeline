@@ -53,11 +53,11 @@ class SearchEngine:
         now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
             "INSERT OR REPLACE INTO _metadata(key, value) VALUES (?, ?)",
-            ("model_name", self._provider._model_name),
+            ("model_name", self._provider.model_name),
         )
         self._conn.execute(
             "INSERT OR REPLACE INTO _metadata(key, value) VALUES (?, ?)",
-            ("embedding_dim", str(self._provider._dim)),
+            ("embedding_dim", str(self._provider.dim)),
         )
         self._conn.execute(
             "INSERT OR REPLACE INTO _metadata(key, value) VALUES (?, ?)",
