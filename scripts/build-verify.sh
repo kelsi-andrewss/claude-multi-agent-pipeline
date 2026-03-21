@@ -172,7 +172,8 @@ print(json.dumps({
     'project_type': sys.argv[1],
     'build_cmd': sys.argv[2],
     'lint_cmd': sys.argv[3],
-    'build_result': 'fail',
+    'build_result': 'pass',
+    'lint_result': 'fail',
     'lint_output': sys.argv[4],
     'lint_warnings': 0
 }))
@@ -201,7 +202,8 @@ print(json.dumps({
     'build_cmd': sys.argv[2],
     'lint_cmd': sys.argv[3] if sys.argv[3] else None,
     'test_cmd': sys.argv[4],
-    'build_result': 'fail',
+    'build_result': 'pass',
+    'test_result': 'fail',
     'test_output': sys.argv[5],
     'lint_warnings': 0
 }))

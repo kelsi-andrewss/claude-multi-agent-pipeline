@@ -101,8 +101,10 @@ run_compile_layer() {
     set -e
 
     # Parse build-verify.sh JSON result
+    # build-verify.sh may report lint_result/test_result separately from build_result
+    # For the compile layer, we only care about build_result (not lint or test)
     local build_result
-    build_result=$(echo "$output" | python3 -c "import json,sys; print(json.load(sys.stdin).get('build_result','fail'))" 2>/dev/null || echo "fail")
+    build_result=$(echo "$output" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('build_result','fail'))" 2>/dev/null || echo "fail")
 
     if [[ "$build_result" == "pass" ]] || [[ "$build_result" == "skip" ]]; then
       LAYER_STATUS="pass"
