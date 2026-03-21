@@ -1,10 +1,10 @@
 ---
 name: quickfix
+user_invocable: false
 description: >
   Standalone quickfix pipeline: validates criteria, writes plan, launches coder in worktree,
   merges via /merge-worktree. Accepts optional --context flag for artifact chain ingestion
   (upstream clarify/research findings enrich the plan).
-  Use when the user says "/quickfix <description>" or "/quickfix --context path/to/artifact.json <description>".
 args:
   - name: args
     type: string
