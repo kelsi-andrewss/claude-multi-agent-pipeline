@@ -446,12 +446,10 @@ def test_mutation_warning_below_threshold(tmp_path):
             fixture.mc_dir,
             extra_args=["--mutation", "--mutation-threshold", "0.99"],
         )
-        assert result.returncode == 0
+        assert result.returncode == 1
         output = json.loads(result.stdout.strip())
-        assert output["test_passed"] is True
-        # With a trivial test, mutation score should be low, triggering the warning
-        if output.get("mutation_score") is not None and output["mutation_score"] < 0.99:
-            assert "mutation_warning" in output
+        assert output["test_passed"] is False
+        assert output["classification"] == "low_mutation_score"
     finally:
         fixture.cleanup()
 
@@ -472,15 +470,16 @@ def test_mutation_timeout_skips_gracefully(tmp_path):
             fixture.mc_dir,
             extra_args=["--mutation", "--mutation-timeout", "1"],
         )
-        # Gate still passes even if mutation times out
-        assert result.returncode == 0
+        # Mutation runs within timeout, scores 0.0, blocks gate
+        assert result.returncode == 1
         output = json.loads(result.stdout.strip())
-        assert output["test_passed"] is True
+        assert output["test_passed"] is False
+        assert output["classification"] == "low_mutation_score"
     finally:
         fixture.cleanup()
 
 
-def test_mutation_never_blocks_gate(tmp_path):
+def test_mutation_blocks_below_threshold(tmp_path):
     source = (
         "def hello():\n"
         "    x = 1\n"
@@ -496,9 +495,10 @@ def test_mutation_never_blocks_gate(tmp_path):
             fixture.mc_dir,
             extra_args=["--mutation", "--mutation-threshold", "1.0"],
         )
-        # Even with threshold=1.0 and a trivial test, gate must pass
-        assert result.returncode == 0
+        # Threshold=1.0 with trivial test: mutation blocks gate
+        assert result.returncode == 1
         output = json.loads(result.stdout.strip())
-        assert output["test_passed"] is True
+        assert output["test_passed"] is False
+        assert output["classification"] == "low_mutation_score"
     finally:
         fixture.cleanup()

@@ -327,8 +327,8 @@ class TestDecisionStorePublicMethod:
         content = read_file("mcp-servers/decisions/server.py")
         assert "._get_connection()" not in content, \
             "server.py should use .get_connection(), not ._get_connection()"
-        assert ".get_connection()" in content, \
-            "server.py should call the public get_connection method"
+        assert "_get_store()" in content, \
+            "server.py should delegate to _get_store() factory"
 
     def test_get_connection_returns_working_connection(self):
         """Verify get_connection actually returns a usable SQLite connection."""

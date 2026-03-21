@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "..", "scripts", "init-run-db.py")
+SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "init-run-db.py")
 
 
 @pytest.fixture
