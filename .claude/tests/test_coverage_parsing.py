@@ -1,4 +1,4 @@
-"""Unit tests for merge-gate.py pure functions: classify_failure, truncate_output."""
+"""Unit tests for merge-gate.py pure functions: classify_failure, truncate_output, parse_coverage_pct."""
 import os
 from importlib.util import spec_from_file_location, module_from_spec
 
@@ -9,6 +9,7 @@ spec.loader.exec_module(mg)
 
 classify_failure = mg.classify_failure
 truncate_output = mg.truncate_output
+parse_coverage_pct = mg.parse_coverage_pct
 
 
 class TestClassifyFailure:
@@ -98,3 +99,52 @@ class TestTruncateOutput:
         assert len(result_lines) == 5
         assert result_lines[0] == "line 15"
         assert result_lines[-1] == "line 19"
+
+
+class TestParseCoveragePct:
+    """Test coverage percentage parsing against real tool output formats."""
+
+    def test_nyc_c8_all_files(self):
+        output = "All files  |   78.5  |    72.3  |    85.1  |    76.2  |"
+        assert parse_coverage_pct(output) == 78.5
+
+    def test_pytest_cov_total(self):
+        output = "TOTAL                        500    400    80%"
+        assert parse_coverage_pct(output) == 80.0
+
+    def test_go_coverage(self):
+        output = "coverage: 65.2% of statements"
+        assert parse_coverage_pct(output) == 65.2
+
+    def test_istanbul_statements(self):
+        output = "Statements   : 85.71% ( 120/140 )"
+        assert parse_coverage_pct(output) == 85.71
+
+    def test_generic_pct_coverage(self):
+        output = "78.5% coverage"
+        assert parse_coverage_pct(output) == 78.5
+
+    def test_zero_percent(self):
+        output = "0.0% coverage"
+        assert parse_coverage_pct(output) == 0.0
+
+    def test_hundred_percent(self):
+        output = "100% coverage"
+        assert parse_coverage_pct(output) == 100.0
+
+    def test_no_match_returns_none(self):
+        assert parse_coverage_pct("no coverage data here") is None
+
+    def test_empty_string_returns_none(self):
+        assert parse_coverage_pct("") is None
+
+    def test_multiline_output_last_match(self):
+        output = "file1.py   50%\nfile2.py   60%\nTOTAL 100 75 75%"
+        result = parse_coverage_pct(output)
+        assert result is not None
+        # Should match TOTAL line pattern first (75%)
+        assert result == 75.0
+
+    def test_flutter_coverage_format(self):
+        output = "72.1% coverage of package:my_app"
+        assert parse_coverage_pct(output) == 72.1

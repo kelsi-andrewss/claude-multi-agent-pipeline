@@ -157,6 +157,169 @@ class TestMergeGateCustomTestCmd:
             fixture.cleanup()
 
 
+class TestMergeGateNewArgs:
+    """Tests for --coverage, --acceptance-criteria, --test-file-names args."""
+
+    def test_coverage_pct_in_output_on_pass(self, tmp_path):
+        """--coverage flag should add coverage_pct to JSON output."""
+        # Test that outputs fake coverage data and passes
+        test_code = "import sys\nprint('TOTAL 100 80 80%')\nsys.exit(0)\n"
+        fixture = GitFixture(tmp_path, test_content=test_code)
+        try:
+            args = [
+                sys.executable, SCRIPT_PATH,
+                "--merge-candidate", fixture.mc_dir,
+                "--story-branch", "story-branch",
+                "--test-branch", "story-branch--test",
+                "--dev-branch", "dev",
+                "--test-cmd", sys.executable,
+                "--test-files", "test_src.py",
+                "--coverage",
+            ]
+            result = subprocess.run(args, capture_output=True, text=True)
+            assert result.returncode == 0
+            output = json.loads(result.stdout.strip())
+            assert output["test_passed"] is True
+            assert "coverage_pct" in output
+        finally:
+            fixture.cleanup()
+
+    def test_no_coverage_flag_has_null_coverage(self, tmp_path):
+        """Without --coverage, coverage_pct should be null."""
+        fixture = GitFixture(tmp_path)
+        try:
+            result = run_merge_gate(fixture.mc_dir)
+            assert result.returncode == 0
+            output = json.loads(result.stdout.strip())
+            assert output.get("coverage_pct") is None
+        finally:
+            fixture.cleanup()
+
+    def test_acceptance_criteria_hash_in_db(self, tmp_path):
+        """--acceptance-criteria should produce SHA-256 hash persisted in DB."""
+        import hashlib
+        db_home = str(tmp_path / "dbhome")
+        os.makedirs(os.path.join(db_home, ".claude", ".claude"), exist_ok=True)
+        db_path = os.path.join(db_home, ".claude", ".claude", "run-state.db")
+
+        env = os.environ.copy()
+        env["HOME"] = db_home
+        subprocess.run(
+            [sys.executable, INIT_SCRIPT, "--session-id", "cov-sess", "--dev-branch", "dev"],
+            capture_output=True, text=True, env=env,
+        )
+
+        criteria = "User can log in with valid credentials"
+        expected_hash = hashlib.sha256(criteria.encode()).hexdigest()
+
+        fixture = GitFixture(tmp_path)
+        try:
+            args = [
+                sys.executable, SCRIPT_PATH,
+                "--merge-candidate", fixture.mc_dir,
+                "--story-branch", "story-branch",
+                "--test-branch", "story-branch--test",
+                "--dev-branch", "dev",
+                "--test-cmd", sys.executable,
+                "--test-files", "test_src.py",
+                "--session-id", "cov-sess",
+                "--story-id", "story-ac",
+                "--acceptance-criteria", criteria,
+            ]
+            result = subprocess.run(args, capture_output=True, text=True, env=env)
+            assert result.returncode == 0
+
+            conn = sqlite3.connect(db_path)
+            row = conn.execute(
+                "SELECT acceptance_criteria_hash FROM merge_results WHERE story_id='story-ac'"
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            assert row[0] == expected_hash
+        finally:
+            fixture.cleanup()
+
+    def test_test_file_names_persisted_in_db(self, tmp_path):
+        """--test-file-names should be persisted in DB."""
+        db_home = str(tmp_path / "dbhome")
+        os.makedirs(os.path.join(db_home, ".claude", ".claude"), exist_ok=True)
+        db_path = os.path.join(db_home, ".claude", ".claude", "run-state.db")
+
+        env = os.environ.copy()
+        env["HOME"] = db_home
+        subprocess.run(
+            [sys.executable, INIT_SCRIPT, "--session-id", "tfn-sess", "--dev-branch", "dev"],
+            capture_output=True, text=True, env=env,
+        )
+
+        fixture = GitFixture(tmp_path)
+        try:
+            args = [
+                sys.executable, SCRIPT_PATH,
+                "--merge-candidate", fixture.mc_dir,
+                "--story-branch", "story-branch",
+                "--test-branch", "story-branch--test",
+                "--dev-branch", "dev",
+                "--test-cmd", sys.executable,
+                "--test-files", "test_src.py",
+                "--session-id", "tfn-sess",
+                "--story-id", "story-tfn",
+                "--test-file-names", "test_api.py,test_auth.py",
+            ]
+            result = subprocess.run(args, capture_output=True, text=True, env=env)
+            assert result.returncode == 0
+
+            conn = sqlite3.connect(db_path)
+            row = conn.execute(
+                "SELECT test_file_names FROM merge_results WHERE story_id='story-tfn'"
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            assert row[0] == "test_api.py,test_auth.py"
+        finally:
+            fixture.cleanup()
+
+    def test_new_db_columns_exist(self, tmp_path):
+        """Idempotent ALTER TABLE should create new columns."""
+        db_home = str(tmp_path / "dbhome")
+        os.makedirs(os.path.join(db_home, ".claude", ".claude"), exist_ok=True)
+        db_path = os.path.join(db_home, ".claude", ".claude", "run-state.db")
+
+        env = os.environ.copy()
+        env["HOME"] = db_home
+        subprocess.run(
+            [sys.executable, INIT_SCRIPT, "--session-id", "col-sess", "--dev-branch", "dev"],
+            capture_output=True, text=True, env=env,
+        )
+
+        fixture = GitFixture(tmp_path)
+        try:
+            args = [
+                sys.executable, SCRIPT_PATH,
+                "--merge-candidate", fixture.mc_dir,
+                "--story-branch", "story-branch",
+                "--test-branch", "story-branch--test",
+                "--dev-branch", "dev",
+                "--test-cmd", sys.executable,
+                "--test-files", "test_src.py",
+                "--session-id", "col-sess",
+                "--story-id", "story-col",
+            ]
+            subprocess.run(args, capture_output=True, text=True, env=env)
+
+            conn = sqlite3.connect(db_path)
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(merge_results)").fetchall()]
+            conn.close()
+
+            assert "test_file_names" in cols
+            assert "acceptance_criteria_hash" in cols
+            assert "coverage_pct" in cols
+        finally:
+            fixture.cleanup()
+
+
 class TestMergeGateNonexistentPath:
     def test_bad_merge_candidate_path(self, tmp_path):
         fake_path = str(tmp_path / "nonexistent")

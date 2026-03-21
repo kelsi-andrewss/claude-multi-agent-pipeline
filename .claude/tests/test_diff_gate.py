@@ -141,3 +141,50 @@ class TestDiffGateEdgeCases:
         result = run_diff_gate(git_worktree["worktree"], "dev", "src.py,src.py:bar,extra.py")
         output = json.loads(result.stdout.strip())
         assert output["expected_files"].count("src.py") == 1
+
+
+def run_diff_gate_blocking(worktree_path, dev_branch, write_files):
+    result = subprocess.run(
+        ["bash", SCRIPT_PATH,
+         "--worktree-path", worktree_path,
+         "--dev-branch", dev_branch,
+         "--write-files", write_files,
+         "--blocking"],
+        capture_output=True, text=True,
+    )
+    return result
+
+
+class TestDiffGateBlockingMode:
+    """Tests for the --blocking flag added in the pipeline hardening quickfix."""
+
+    def test_blocking_no_unexpected_exits_0(self, git_worktree):
+        result = run_diff_gate_blocking(git_worktree["worktree"], "dev", "src.py,extra.py")
+        assert result.returncode == 0
+        output = json.loads(result.stdout.strip())
+        assert output["blocking"] is True
+        assert output["blocked"] is False
+
+    def test_blocking_unexpected_exits_1(self, git_worktree):
+        result = run_diff_gate_blocking(git_worktree["worktree"], "dev", "src.py")
+        assert result.returncode == 1
+        output = json.loads(result.stdout.strip())
+        assert output["blocking"] is True
+        assert output["blocked"] is True
+        assert "extra.py" in output["unexpected_files"]
+
+    def test_no_blocking_flag_exits_0_even_with_unexpected(self, git_worktree):
+        result = run_diff_gate(git_worktree["worktree"], "dev", "src.py")
+        assert result.returncode == 0
+        output = json.loads(result.stdout.strip())
+        assert output["blocking"] is False
+        assert output["blocked"] is False
+        assert "extra.py" in output["unexpected_files"]
+
+    def test_blocking_fields_present_without_flag(self, git_worktree):
+        result = run_diff_gate(git_worktree["worktree"], "dev", "src.py,extra.py")
+        output = json.loads(result.stdout.strip())
+        assert "blocking" in output
+        assert "blocked" in output
+        assert output["blocking"] is False
+        assert output["blocked"] is False
