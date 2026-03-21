@@ -1,6 +1,6 @@
 ---
 name: ship
-description: "Thin orchestrator: routes user intent to child skills (/quickfix, /plan-stories, /draft-plans, /critique, /env-preflight, /run-stories, /verify) in sequence. Parses args, detects mode, and dispatches — never performs planning, critique, review, build, or test logic directly."
+description: "Universal entry point for all code changes — from 1-file fixes to multi-story epics. Auto-classifies scope and routes internally (quickfix for <=5 files, full pipeline otherwise). Never skip /ship — it handles everything."
 args:
   - name: args
     type: string
