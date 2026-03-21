@@ -16,6 +16,10 @@ args:
 
 User has requested: `/quickfix {{args}}`
 
+## Flow control
+
+**Continuous execution.** Steps 1 through 9 execute as one uninterrupted flow. Do not pause, narrate, summarize, or ask for confirmation between steps. The only legitimate stop is an error that prevents the next step from running. Parse → validate → read → plan → branch → coder → merge → report — no commentary in between.
+
 ---
 
 ## Step 1: Parse args
