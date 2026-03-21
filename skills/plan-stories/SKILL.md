@@ -180,7 +180,7 @@ Write to `.ship-manifest.json` in the project root.
 
 ## Step 4: Report
 
-Print the manifest path and a summary:
+**If invoked standalone** (not from within /ship): print the manifest summary and prompt:
 
 ```
 Manifest written: .ship-manifest.json
@@ -188,11 +188,8 @@ Manifest written: .ship-manifest.json
   Stories: <count> (<complexity>)
   story-NNN: <title> — <agent>
   ...
-```
 
-**If invoked standalone** (not from within /ship): prompt the user:
-```
 Draft plans? (/draft-plans .ship-manifest.json)
 ```
 
-**If invoked from within /ship**: the orchestrator reads the manifest and proceeds automatically -- no prompt needed.
+**If invoked from within /ship**: do not print a summary or prompt. The manifest is a machine-readable artifact — the orchestrator reads it and proceeds automatically. Any output here causes a false pause.
