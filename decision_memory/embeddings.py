@@ -53,20 +53,16 @@ class EmbeddingProvider:
             self._ensure_model()
         return self._available
 
-    def get_embedding(self, text: str) -> EmbeddingResult | None:
-        if not self._ensure_model():
-            return None
+    @property
+    def model_name(self) -> str:
+        return self._model_name
 
-        try:
-            results = list(self._model.query_embed(text))
-            vector = results[0].tolist()
-            vector = vector[: self._dim]
-            return EmbeddingResult(
-                vector=vector, model=self._model_name, dim=self._dim
-            )
-        except Exception as e:
-            log.warning("Embedding generation failed: %s", e)
-            return None
+    @property
+    def dim(self) -> int:
+        return self._dim
+
+    def get_embedding(self, text: str) -> EmbeddingResult | None:
+        return self.get_embeddings_batch([text])[0]
 
     def get_embeddings_batch(self, texts: list[str]) -> list[EmbeddingResult | None]:
         if not self._ensure_model():
