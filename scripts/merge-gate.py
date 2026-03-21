@@ -16,6 +16,7 @@ Exit codes: 0 = test passed, 1 = test failed, 2 = system error.
 Emits a single JSON object on stdout. Debug logging on stderr.
 """
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -73,8 +74,97 @@ def classify_failure(output):
     return "ambiguous"
 
 
+def get_changed_python_functions(mc_path, dev_branch):
+    try:
+        diff_result = subprocess.run(
+            ["git", "-C", mc_path, "diff", f"origin/{dev_branch}...HEAD", "--unified=0", "--", "*.py"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if diff_result.returncode != 0:
+            return []
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+
+    file_lines = {}
+    current_file = None
+    for line in diff_result.stdout.splitlines():
+        if line.startswith("+++ b/"):
+            current_file = line[6:]
+        elif line.startswith("@@ ") and current_file:
+            m = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            if m:
+                start = int(m.group(1))
+                count = int(m.group(2)) if m.group(2) else 1
+                file_lines.setdefault(current_file, set()).update(range(start, start + count))
+
+    result = []
+    for filepath, changed_lines in file_lines.items():
+        full_path = os.path.join(mc_path, filepath)
+        if not os.path.isfile(full_path):
+            continue
+        try:
+            with open(full_path) as f:
+                tree = ast.parse(f.read(), filename=filepath)
+        except (SyntaxError, OSError):
+            continue
+
+        functions = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                func_lines = set(range(node.lineno, node.end_lineno + 1))
+                if func_lines & changed_lines:
+                    functions.add(node.name)
+
+        if functions:
+            result.append({"file": filepath, "functions": sorted(functions)})
+
+    return result
+
+
+def run_mutation_testing(mc_path, changed_functions, test_cmd, test_files, timeout):
+    mt_script = os.path.join(os.path.dirname(__file__), "mutation-test.py")
+    if not os.path.isfile(mt_script):
+        return None
+
+    total = 0
+    killed = 0
+    survived = 0
+
+    for entry in changed_functions:
+        target = os.path.join(mc_path, entry["file"])
+        if not os.path.isfile(target):
+            continue
+        try:
+            mt_result = subprocess.run(
+                [sys.executable, mt_script,
+                 "--target", target,
+                 "--functions", ",".join(entry["functions"]),
+                 "--test-cmd", test_cmd,
+                 "--test-files", test_files,
+                 "--max-mutants", "20"],
+                capture_output=True, text=True, timeout=timeout, cwd=mc_path,
+            )
+            mt_output = json.loads(mt_result.stdout.strip())
+            total += mt_output.get("total_mutants", 0)
+            killed += mt_output.get("killed", 0)
+            survived += mt_output.get("survived", 0)
+        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError, KeyError):
+            return None
+
+    if total == 0:
+        return {"score": 1.0, "total": 0, "killed": 0, "survived": 0}
+
+    return {
+        "score": round(killed / total, 3),
+        "total": total,
+        "killed": killed,
+        "survived": survived,
+    }
+
+
 def record_merge_result(session_id, story_id, test_passed, classification, test_output,
-                        test_file_names=None, acceptance_criteria_hash=None, coverage_pct=None):
+                        test_file_names=None, acceptance_criteria_hash=None, coverage_pct=None,
+                        mutation_score=None):
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10)
         cursor = conn.cursor()
@@ -85,6 +175,7 @@ def record_merge_result(session_id, story_id, test_passed, classification, test_
             ("test_file_names", "TEXT"),
             ("acceptance_criteria_hash", "TEXT"),
             ("coverage_pct", "REAL"),
+            ("mutation_score", "REAL"),
         ]:
             try:
                 cursor.execute(f"ALTER TABLE merge_results ADD COLUMN {col} {col_type}")
@@ -100,19 +191,19 @@ def record_merge_result(session_id, story_id, test_passed, classification, test_
             cursor.execute(
                 "UPDATE merge_results SET test_passed=?, error_classification=?, "
                 "test_output=?, retry_count=retry_count+1, test_file_names=?, "
-                "acceptance_criteria_hash=?, coverage_pct=? "
+                "acceptance_criteria_hash=?, coverage_pct=?, mutation_score=? "
                 "WHERE session_id=? AND story_id=?",
                 (1 if test_passed else 0, classification, test_output,
-                 test_file_names, acceptance_criteria_hash, coverage_pct,
+                 test_file_names, acceptance_criteria_hash, coverage_pct, mutation_score,
                  session_id, story_id),
             )
         else:
             cursor.execute(
                 "INSERT INTO merge_results (session_id, story_id, test_passed, error_classification, "
-                "test_output, retry_count, test_file_names, acceptance_criteria_hash, coverage_pct) "
-                "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                "test_output, retry_count, test_file_names, acceptance_criteria_hash, coverage_pct, "
+                "mutation_score) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
                 (session_id, story_id, 1 if test_passed else 0, classification, test_output,
-                 test_file_names, acceptance_criteria_hash, coverage_pct),
+                 test_file_names, acceptance_criteria_hash, coverage_pct, mutation_score),
             )
 
         if test_passed:
@@ -193,6 +284,9 @@ def main():
     parser.add_argument("--coverage", action="store_true", help="Run coverage after tests pass")
     parser.add_argument("--acceptance-criteria", default=None, help="Acceptance criteria text for hashing")
     parser.add_argument("--test-file-names", default=None, help="Test file names for persistence")
+    parser.add_argument("--mutation", action="store_true", help="Run mutation testing after tests pass")
+    parser.add_argument("--mutation-threshold", type=float, default=0.5, help="Mutation score warning threshold")
+    parser.add_argument("--mutation-timeout", type=int, default=60, help="Mutation testing timeout in seconds")
     args = parser.parse_args()
 
     mc_path = args.merge_candidate
@@ -205,6 +299,7 @@ def main():
         "test_file_names": args.test_file_names,
         "acceptance_criteria_hash": ac_hash,
         "coverage_pct": None,
+        "mutation_score": None,
     }
 
     if not os.path.isdir(mc_path):
@@ -357,6 +452,29 @@ def main():
                     result["assertion_warning"] = f"{vacuous} vacuous test(s) detected"
             except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
                 pass  # assertion density is advisory, never blocks
+
+        # Mutation testing (non-blocking warning)
+        result["mutation_score"] = None
+        if args.mutation:
+            changed_fns = get_changed_python_functions(mc_path, args.dev_branch)
+            if changed_fns:
+                print(f"merge-gate: running mutation testing on {len(changed_fns)} file(s)", file=sys.stderr)
+                test_files_str = ",".join(test_file_list)
+                mt_result = run_mutation_testing(
+                    mc_path, changed_fns, args.test_cmd, test_files_str, args.mutation_timeout,
+                )
+                if mt_result is not None:
+                    result["mutation_score"] = mt_result["score"]
+                    db_extras["mutation_score"] = mt_result["score"]
+                    result["mutation_details"] = mt_result
+                    if mt_result["score"] < args.mutation_threshold:
+                        result["mutation_warning"] = (
+                            f"Mutation score {mt_result['score']:.3f} below "
+                            f"{args.mutation_threshold} threshold"
+                        )
+                        print(f"merge-gate: {result['mutation_warning']}", file=sys.stderr)
+                else:
+                    print("merge-gate: mutation testing skipped (timeout/error)", file=sys.stderr)
 
         if args.session_id and args.story_id:
             record_merge_result(args.session_id, args.story_id, True, None, None, **db_extras)

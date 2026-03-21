@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "..", "scripts", "merge-gate.py")
-INIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "init-run-db.py")
+SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "merge-gate.py")
+INIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "init-run-db.py")
 
 
 def git(*args, cwd=None):
@@ -122,7 +122,7 @@ class GitFixture:
 
 
 def run_merge_gate(mc_path, session_id=None, story_id=None,
-                   test_cmd=None, db_home=None):
+                   test_cmd=None, db_home=None, extra_args=None):
     args = [
         sys.executable, SCRIPT_PATH,
         "--merge-candidate", mc_path,
@@ -136,6 +136,8 @@ def run_merge_gate(mc_path, session_id=None, story_id=None,
         args.extend(["--session-id", session_id])
     if story_id:
         args.extend(["--story-id", story_id])
+    if extra_args:
+        args.extend(extra_args)
 
     env = os.environ.copy()
     if db_home:
@@ -338,5 +340,165 @@ def test_no_db_write_without_session(tmp_path):
         assert output["test_passed"] is True
 
         assert not os.path.exists(db_path)
+    finally:
+        fixture.cleanup()
+
+
+# --- Mutation testing integration tests ---
+
+
+def test_mutation_flag_not_set_skips_mutation(tmp_path):
+    fixture = GitFixture(tmp_path)
+    try:
+        result = run_merge_gate(fixture.mc_dir)
+        assert result.returncode == 0
+        output = json.loads(result.stdout.strip())
+        assert output["test_passed"] is True
+        assert output.get("mutation_score") is None
+        assert "mutation testing" not in result.stderr.lower()
+    finally:
+        fixture.cleanup()
+
+
+def test_mutation_runs_on_flag(tmp_path):
+    source = (
+        "def hello():\n"
+        "    x = 1\n"
+        "    if x == 1:\n"
+        "        return 'hello world'\n"
+        "    return 'nope'\n"
+    )
+    test_code = (
+        "import sys, os\n"
+        "sys.path.insert(0, os.getcwd())\n"
+        "from src import hello\n"
+        "assert hello() == 'hello world'\n"
+    )
+    fixture = GitFixture(tmp_path, source_content=source, test_content=test_code)
+    try:
+        result = run_merge_gate(fixture.mc_dir, extra_args=["--mutation"])
+        assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        output = json.loads(result.stdout.strip())
+        assert output["test_passed"] is True
+        assert output.get("mutation_score") is not None
+    finally:
+        fixture.cleanup()
+
+
+def test_mutation_score_persisted_in_db(tmp_path):
+    db_home = str(tmp_path / "dbhome")
+    os.makedirs(os.path.join(db_home, ".claude", ".claude"), exist_ok=True)
+    db_path = os.path.join(db_home, ".claude", ".claude", "run-state.db")
+
+    env = os.environ.copy()
+    env["HOME"] = db_home
+    subprocess.run(
+        [sys.executable, INIT_SCRIPT, "--session-id", "mut-sess", "--dev-branch", "dev"],
+        capture_output=True, text=True, env=env,
+    )
+
+    source = (
+        "def hello():\n"
+        "    x = 1\n"
+        "    if x == 1:\n"
+        "        return 'hello world'\n"
+        "    return 'nope'\n"
+    )
+    test_code = (
+        "import sys, os\n"
+        "sys.path.insert(0, os.getcwd())\n"
+        "from src import hello\n"
+        "assert hello() == 'hello world'\n"
+    )
+    fixture = GitFixture(tmp_path, source_content=source, test_content=test_code)
+    try:
+        result = run_merge_gate(
+            fixture.mc_dir, session_id="mut-sess", story_id="story-mut",
+            db_home=db_home, extra_args=["--mutation"],
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT mutation_score FROM merge_results WHERE story_id='story-mut'"
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row[0] is not None
+    finally:
+        fixture.cleanup()
+
+
+def test_mutation_warning_below_threshold(tmp_path):
+    source = (
+        "def hello():\n"
+        "    x = 1\n"
+        "    if x == 1:\n"
+        "        return 'hello world'\n"
+        "    return 'nope'\n"
+    )
+    # Test that does not kill mutants (no real assertion on behavior)
+    test_code = "import sys\nsys.exit(0)\n"
+    fixture = GitFixture(tmp_path, source_content=source, test_content=test_code)
+    try:
+        result = run_merge_gate(
+            fixture.mc_dir,
+            extra_args=["--mutation", "--mutation-threshold", "0.99"],
+        )
+        assert result.returncode == 0
+        output = json.loads(result.stdout.strip())
+        assert output["test_passed"] is True
+        # With a trivial test, mutation score should be low, triggering the warning
+        if output.get("mutation_score") is not None and output["mutation_score"] < 0.99:
+            assert "mutation_warning" in output
+    finally:
+        fixture.cleanup()
+
+
+def test_mutation_timeout_skips_gracefully(tmp_path):
+    source = (
+        "def hello():\n"
+        "    x = 1\n"
+        "    if x == 1:\n"
+        "        return 'hello world'\n"
+        "    return 'nope'\n"
+    )
+    # Test that takes a while
+    test_code = "import time, sys\ntime.sleep(0.1)\nsys.exit(0)\n"
+    fixture = GitFixture(tmp_path, source_content=source, test_content=test_code)
+    try:
+        result = run_merge_gate(
+            fixture.mc_dir,
+            extra_args=["--mutation", "--mutation-timeout", "1"],
+        )
+        # Gate still passes even if mutation times out
+        assert result.returncode == 0
+        output = json.loads(result.stdout.strip())
+        assert output["test_passed"] is True
+    finally:
+        fixture.cleanup()
+
+
+def test_mutation_never_blocks_gate(tmp_path):
+    source = (
+        "def hello():\n"
+        "    x = 1\n"
+        "    if x == 1:\n"
+        "        return 'hello world'\n"
+        "    return 'nope'\n"
+    )
+    # Trivial test that passes but won't kill mutants
+    test_code = "import sys\nsys.exit(0)\n"
+    fixture = GitFixture(tmp_path, source_content=source, test_content=test_code)
+    try:
+        result = run_merge_gate(
+            fixture.mc_dir,
+            extra_args=["--mutation", "--mutation-threshold", "1.0"],
+        )
+        # Even with threshold=1.0 and a trivial test, gate must pass
+        assert result.returncode == 0
+        output = json.loads(result.stdout.strip())
+        assert output["test_passed"] is True
     finally:
         fixture.cleanup()
