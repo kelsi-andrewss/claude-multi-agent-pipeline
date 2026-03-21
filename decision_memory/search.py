@@ -152,13 +152,22 @@ class SearchEngine:
 
     @staticmethod
     def _sanitize_fts_query(query: str) -> str:
+        import re
         _FTS5_KEYWORDS = {"and", "or", "not", "near"}
-        stripped = query.replace('"', "").replace("*", "").replace("(", "").replace(")", "")
-        tokens = stripped.split()
-        tokens = [t for t in tokens if t.lower() not in _FTS5_KEYWORDS]
-        if not tokens:
+        _FTS5_SPECIAL = re.compile(r'[":*()^:{}]')
+        tokens = query.split()
+        safe: list[str] = []
+        for t in tokens:
+            cleaned = _FTS5_SPECIAL.sub("", t)
+            # Strip NEAR/N patterns and bare keywords
+            base = cleaned.split("/")[0].lower()
+            if base in _FTS5_KEYWORDS:
+                continue
+            if cleaned:
+                safe.append(cleaned)
+        if not safe:
             return ""
-        return " ".join(f'"{t}"' for t in tokens)
+        return " OR ".join(safe)
 
     def keyword_search(self, query: str, limit: int = 15) -> list[SearchResult]:
         sanitized = self._sanitize_fts_query(query)

@@ -6,7 +6,7 @@
 # Protected files:
 #   BoardCanvas.jsx, StickyNote.jsx, Frame.jsx, Shape.jsx, LineShape.jsx, Cursors.jsx
 #
-# Permission signal: $CLAUDE_TEMP_DIR/konva-permission-<basename>
+# Permission signal: $CLAUDE_TEMP_DIR/konva-permission-<session>-<basename>
 # Grant permission: main session writes that file when user says "I grant permission to edit X"
 #
 # Exit 0 = allow
@@ -44,8 +44,9 @@ if [[ "$IS_PROTECTED" == "0" ]]; then
   exit 0
 fi
 
-# Check for permission sentinel file
-PERMISSION_FILE="$CLAUDE_TEMP_DIR/konva-permission-${PROTECTED_NAME}"
+# Check for permission sentinel file (session-scoped)
+SESSION_TAG="${CLAUDE_SESSION_ID:-$$}"
+PERMISSION_FILE="$CLAUDE_TEMP_DIR/konva-permission-${SESSION_TAG}-${PROTECTED_NAME}"
 
 if [[ -f "$PERMISSION_FILE" ]]; then
   # Permission granted for this session
@@ -55,6 +56,6 @@ fi
 # Block — no permission
 echo "BLOCKED: $PROTECTED_NAME is a protected Konva file." >&2
 echo "Grant explicit permission first by saying: \"I grant permission to edit $PROTECTED_NAME\"" >&2
-echo "This causes the main session to write: $CLAUDE_TEMP_DIR/konva-permission-${PROTECTED_NAME}" >&2
+echo "This causes the main session to write: $CLAUDE_TEMP_DIR/konva-permission-${SESSION_TAG}-${PROTECTED_NAME}" >&2
 bash "$HOME/.claude/scripts/emit-event.sh" "hook.guard-protected-files" "hook" "$FILE_PATH" "{\"protected_file\":\"$PROTECTED_NAME\",\"result\":\"blocked\"}" || true
 exit 2
