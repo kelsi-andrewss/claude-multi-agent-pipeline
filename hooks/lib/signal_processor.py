@@ -124,10 +124,8 @@ def extract_corrections(turns):
     embedding_calls = 0
 
     for i, turn in enumerate(turns):
-        if turn["role"] == "assistant":
-            prev_assistant_had_tool_use = turn.get("has_tool_use", False)
-            continue
         if turn["role"] != "user":
+            prev_assistant_had_tool_use = turn.get("has_tool_use", False)
             continue
 
         msg = turn["content"]
@@ -468,6 +466,7 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
     if not db_file or not os.path.isfile(db_file):
         return all_corrections
 
+    conn = None
     try:
         conn = sqlite3.connect(db_file, timeout=10)
         cursor = conn.cursor()
@@ -547,9 +546,11 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 )
 
         conn.commit()
-        conn.close()
     except Exception as e:
         print(f"process_session_corrections DB error: {e}", file=sys.stderr)
+    finally:
+        if conn is not None:
+            conn.close()
 
     return all_corrections
 
@@ -647,19 +648,25 @@ def feed_outcomes_to_scoring(db_path):
     if os.path.isfile(db_path):
         try:
             conn = sqlite3.connect(db_path, timeout=5)
-            rows = conn.execute(
-                "SELECT model, COUNT(*) as total, SUM(CASE WHEN success THEN 1 ELSE 0 END) as successes "
-                "FROM merge_outcomes WHERE success IS NOT NULL AND model IS NOT NULL "
-                "GROUP BY model"
-            ).fetchall()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='merge_outcomes'"
+            )
+            if cursor.fetchone():
+                rows = cursor.execute(
+                    "SELECT model, COUNT(*) as total FROM merge_outcomes "
+                    "WHERE success IS NOT NULL AND model IS NOT NULL "
+                    "GROUP BY model HAVING COUNT(*) >= 5"
+                ).fetchall()
+                for model, total in rows:
+                    rate = model_rates.get(model, 0.0)
+                    if rate < 0.7:
+                        print(
+                            f"Warning: model '{model}' success rate {rate:.1%} "
+                            f"({int(rate * total)}/{total}) below 0.7 threshold",
+                            file=sys.stderr,
+                        )
             conn.close()
-            for model, total, successes in rows:
-                if total >= 5 and (successes / total) < 0.7:
-                    print(
-                        f"Warning: model '{model}' success rate {successes/total:.1%} "
-                        f"({successes}/{total}) below 0.7 threshold",
-                        file=sys.stderr,
-                    )
         except sqlite3.Error:
             pass
 
