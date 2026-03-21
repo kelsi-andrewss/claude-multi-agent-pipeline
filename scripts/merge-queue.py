@@ -17,7 +17,8 @@ import os
 import sqlite3
 import sys
 
-DB_PATH = os.path.expanduser("~/.claude/.claude/run-state.db")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.db import open_run_state_db
 
 
 def emit(obj):
@@ -26,14 +27,12 @@ def emit(obj):
 
 def connect():
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn = open_run_state_db()
     except sqlite3.Error as e:
         emit({"status": "error", "error": f"Cannot open run-state.db: {e}"})
         sys.exit(2)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=5000")
     return conn, cursor
 
 
