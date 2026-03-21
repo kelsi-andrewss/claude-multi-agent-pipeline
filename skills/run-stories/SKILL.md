@@ -395,9 +395,18 @@ Do not edit any protected files. <If protected-files.md exists: "Protected files
 
 ## Tool constraints
 You are the coder. Write all code yourself.
-Do NOT call any mcp__gemini__* tools (gemini_generate, analyze, audit, find_bug, plan, test, etc.).
+Do NOT call any mcp__gemini__* tools (gemini_generate, analyze, audit, find_bug, plan, test, etc.) UNLESS `ui_codegen: true` — then `mcp__gemini__gemini_ui_code` is allowed and required for visual code.
 Do NOT call any pm_* tools except pm_update_story (for state transitions).
 Gemini is a research tool for the orchestrator — not available to coders.
+
+**UI codegen exception:** If the story has `ui_codegen: true` in its DB record:
+- You MUST call `mcp__gemini__gemini_ui_code` for all visual/layout component code.
+- Define the props contract first (what data the component receives, what callbacks it exposes).
+- Call the tool with component_name, props_contract, requirements, and exemplar_paths (1-2 similar components from the project).
+- Drop the returned code into the target file as-is. Do not modify Gemini's markup or styles.
+- Run build/lint. If errors, call `gemini_ui_code` again with `error_feedback` containing the error output. Repeat until clean.
+- NEED_DECISION only if Gemini returns the same error on consecutive attempts (stuck, not iterating).
+- You own: imports, exports, props wiring, state management, data fetching, integration with the rest of the app. Gemini owns: what renders on screen.
 
 ## Decision autonomy
 
