@@ -89,7 +89,7 @@ fi
 HOTFIX_SENTINEL="$CLAUDE_TEMP_DIR/hotfix-active"
 if [[ -f "$HOTFIX_SENTINEL" ]]; then
   ALLOWED_FILE=$(cat "$HOTFIX_SENTINEL")
-  if [[ "$FILE_PATH" == *"$ALLOWED_FILE"* || "$ALLOWED_FILE" == *"$FILE_PATH"* ]]; then
+  if [[ "$FILE_PATH" == "$ALLOWED_FILE" ]]; then
     exit 0
   fi
 fi
