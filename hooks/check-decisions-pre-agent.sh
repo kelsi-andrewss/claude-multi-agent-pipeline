@@ -82,7 +82,7 @@ try:
 
     for r in results:
         d = r.decision
-        text = d.positive_framing or d.content
+        text = d.content
         print(f"- [decision-{d.id}] {text}")
 except Exception:
     # Fallback: try raw SQLite FTS5
@@ -104,12 +104,11 @@ except Exception:
             sys.exit(0)
         for rowid, rank in rows:
             row = conn.execute(
-                "SELECT id, content, positive_framing FROM decisions WHERE id = ?",
+                "SELECT id, content FROM decisions WHERE id = ?",
                 (rowid,)
             ).fetchone()
             if row:
-                text = row[2] or row[1]
-                print(f"- [decision-{row[0]}] {text}")
+                print(f"- [decision-{row[0]}] {row[1]}")
         conn.close()
     except Exception:
         sys.exit(0)
