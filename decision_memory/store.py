@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +39,8 @@ def _derive_domain_from_scopes(scopes: list[DecisionScope]) -> str | None:
 
 
 class DecisionStore:
+    _vec_warned: bool = False
+
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.dump_path = project_root / ".claude" / "decisions.sql"
@@ -129,37 +132,17 @@ class DecisionStore:
         self.ensure_ready()
         conn = self._get_connection()
         try:
-            row = conn.execute(
-                "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
-                "FROM decisions WHERE id = ?",
-                (decision_id,),
-            ).fetchone()
-            if row is None:
-                return None
-
-            scope_rows = conn.execute(
-                "SELECT id, decision_id, scope_type, scope_value FROM decision_scopes WHERE decision_id = ?",
+            rows = conn.execute(
+                "SELECT d.id, d.content, d.reasoning, d.status, d.source, d.superseded_by, "
+                "d.created_at, d.updated_at, d.domain, d.related_decisions, "
+                "s.id, s.decision_id, s.scope_type, s.scope_value "
+                "FROM decisions d LEFT JOIN decision_scopes s ON s.decision_id = d.id "
+                "WHERE d.id = ? ORDER BY s.id",
                 (decision_id,),
             ).fetchall()
-
-            scopes = [
-                DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
-                for s in scope_rows
-            ]
-
-            return Decision(
-                id=row[0],
-                content=row[1],
-                reasoning=row[2],
-                status=row[3],
-                source=row[4],
-                superseded_by=row[5],
-                created_at=row[6],
-                updated_at=row[7],
-                domain=row[8],
-                related_decisions=row[9],
-                scopes=scopes,
-            )
+            if not rows:
+                return None
+            return self._rows_to_decisions(rows)[0]
         finally:
             conn.close()
 
@@ -167,44 +150,20 @@ class DecisionStore:
         self.ensure_ready()
         conn = self._get_connection()
         try:
+            query = (
+                "SELECT d.id, d.content, d.reasoning, d.status, d.source, d.superseded_by, "
+                "d.created_at, d.updated_at, d.domain, d.related_decisions, "
+                "s.id, s.decision_id, s.scope_type, s.scope_value "
+                "FROM decisions d LEFT JOIN decision_scopes s ON s.decision_id = d.id"
+            )
             if status is not None:
-                rows = conn.execute(
-                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
-                    "FROM decisions WHERE status = ? ORDER BY id",
-                    (status,),
-                ).fetchall()
+                query += " WHERE d.status = ?"
+                query += " ORDER BY d.id, s.id"
+                rows = conn.execute(query, (status,)).fetchall()
             else:
-                rows = conn.execute(
-                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
-                    "FROM decisions ORDER BY id"
-                ).fetchall()
-
-            decisions = []
-            for row in rows:
-                scope_rows = conn.execute(
-                    "SELECT id, decision_id, scope_type, scope_value FROM decision_scopes WHERE decision_id = ?",
-                    (row[0],),
-                ).fetchall()
-                scopes = [
-                    DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
-                    for s in scope_rows
-                ]
-                decisions.append(
-                    Decision(
-                        id=row[0],
-                        content=row[1],
-                        reasoning=row[2],
-                        status=row[3],
-                        source=row[4],
-                        superseded_by=row[5],
-                        created_at=row[6],
-                        updated_at=row[7],
-                        domain=row[8],
-                        related_decisions=row[9],
-                        scopes=scopes,
-                    )
-                )
-            return decisions
+                query += " ORDER BY d.id, s.id"
+                rows = conn.execute(query).fetchall()
+            return self._rows_to_decisions(rows)
         finally:
             conn.close()
 
@@ -242,6 +201,7 @@ class DecisionStore:
         conn.executescript(METADATA_DDL)
         conn.executescript(FTS_DDL)
         self._try_create_vec_table(conn)
+        self._check_vec_status()
 
     def _migrate_v1_to_v2(self, conn: sqlite3.Connection) -> None:
         try:
@@ -278,6 +238,44 @@ class DecisionStore:
         except (sqlite3.OperationalError, AttributeError) as e:
             log.warning("sqlite-vec unavailable: %s", e)
             self._vec_available = False
+
+    def _check_vec_status(self) -> None:
+        if self._vec_available is False and not DecisionStore._vec_warned:
+            print(
+                "decision_memory: sqlite-vec unavailable — vector search disabled",
+                file=sys.stderr,
+            )
+            DecisionStore._vec_warned = True
+
+    @staticmethod
+    def _rows_to_decisions(rows: list[tuple]) -> list[Decision]:
+        decisions: dict[int, Decision] = {}
+        for row in rows:
+            did = row[0]
+            if did not in decisions:
+                decisions[did] = Decision(
+                    id=row[0],
+                    content=row[1],
+                    reasoning=row[2],
+                    status=row[3],
+                    source=row[4],
+                    superseded_by=row[5],
+                    created_at=row[6],
+                    updated_at=row[7],
+                    domain=row[8],
+                    related_decisions=row[9],
+                    scopes=[],
+                )
+            if row[10] is not None:
+                decisions[did].scopes.append(
+                    DecisionScope(
+                        id=row[10],
+                        decision_id=row[11],
+                        scope_type=row[12],
+                        scope_value=row[13],
+                    )
+                )
+        return list(decisions.values())
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
