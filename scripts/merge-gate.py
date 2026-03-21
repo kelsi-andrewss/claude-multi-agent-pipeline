@@ -285,9 +285,16 @@ def main():
     parser.add_argument("--acceptance-criteria", default=None, help="Acceptance criteria text for hashing")
     parser.add_argument("--test-file-names", default=None, help="Test file names for persistence")
     parser.add_argument("--mutation", action="store_true", help="Run mutation testing after tests pass")
-    parser.add_argument("--mutation-threshold", type=float, default=0.5, help="Mutation score warning threshold")
+    parser.add_argument("--mutation-threshold", type=float, default=0.3, help="Mutation score failure threshold")
     parser.add_argument("--mutation-timeout", type=int, default=60, help="Mutation testing timeout in seconds")
+    parser.add_argument("--no-coverage", action="store_true", help="Skip coverage even if --coverage is set")
+    parser.add_argument("--no-mutation", action="store_true", help="Skip mutation testing even if --mutation is set")
     args = parser.parse_args()
+
+    if args.no_coverage:
+        args.coverage = False
+    if args.no_mutation:
+        args.mutation = False
 
     mc_path = args.merge_candidate
 
@@ -453,7 +460,7 @@ def main():
             except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
                 pass  # assertion density is advisory, never blocks
 
-        # Mutation testing (non-blocking warning)
+        # Mutation testing (blocking)
         result["mutation_score"] = None
         if args.mutation:
             changed_fns = get_changed_python_functions(mc_path, args.dev_branch)
@@ -468,11 +475,21 @@ def main():
                     db_extras["mutation_score"] = mt_result["score"]
                     result["mutation_details"] = mt_result
                     if mt_result["score"] < args.mutation_threshold:
-                        result["mutation_warning"] = (
+                        result["test_passed"] = False
+                        result["error_type"] = "mutation_failure"
+                        result["classification"] = "low_mutation_score"
+                        result["error_output"] = (
                             f"Mutation score {mt_result['score']:.3f} below "
-                            f"{args.mutation_threshold} threshold"
+                            f"{args.mutation_threshold} threshold "
+                            f"({mt_result['killed']}/{mt_result['total']} mutants killed)"
                         )
-                        print(f"merge-gate: {result['mutation_warning']}", file=sys.stderr)
+                        result["mutation_details"] = mt_result
+                        db_extras["mutation_score"] = mt_result["score"]
+                        if args.session_id and args.story_id:
+                            record_merge_result(args.session_id, args.story_id, False,
+                                                "low_mutation_score", result["error_output"], **db_extras)
+                        emit(result)
+                        sys.exit(1)
                 else:
                     print("merge-gate: mutation testing skipped (timeout/error)", file=sys.stderr)
 
