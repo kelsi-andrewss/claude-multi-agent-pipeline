@@ -11,6 +11,25 @@ from pathlib import Path
 
 from constants import EPICS_DB, PLAN_SYSTEM_INSTRUCTION
 
+ALLOWED_TABLES = frozenset({
+    "epics",
+    "stories",
+    "tasks",
+    "decisions",
+    "decision_scopes",
+    "patterns",
+    "id_sequences",
+    "schema_version",
+    "story_dependencies",
+    "pending_proposals",
+})
+
+
+def _validate_table_name(table: str) -> None:
+    """Raise ValueError if table name is not in the allowlist."""
+    if table not in ALLOWED_TABLES:
+        raise ValueError(f"Table name {table!r} is not in ALLOWED_TABLES")
+
 
 def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     """Open the epics SQLite database with WAL mode and row factory."""
@@ -200,6 +219,7 @@ def _next_id(conn: sqlite3.Connection, table: str, prefix: str) -> str:
     The `table` parameter is used for self-healing when the counter has
     drifted (e.g., from explicit-ID inserts that bypassed the counter).
     """
+    _validate_table_name(table)
     row = conn.execute(
         """INSERT INTO id_sequences (prefix, last_id) VALUES (?, 1)
            ON CONFLICT(prefix) DO UPDATE SET last_id = last_id + 1
@@ -375,6 +395,7 @@ def _set_story_deps(conn: sqlite3.Connection, story_id: str, depends_on: list[st
 
 def _ensure_column(conn, table, name, col_type, default=None):
     """Lazily add a column to a table if it doesn't exist yet."""
+    _validate_table_name(table)
     col_def = f"{name} {col_type}"
     if default is not None:
         col_def += f" DEFAULT {default}"
