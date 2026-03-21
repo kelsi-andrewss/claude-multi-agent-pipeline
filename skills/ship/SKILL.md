@@ -11,6 +11,15 @@ args:
 
 User has requested: `/ship {{args}}`
 
+## Flow control
+
+**Continuous execution.** Steps 0 through 6 execute as one uninterrupted flow. Do not pause, narrate, summarize, or ask for confirmation between steps. The only legitimate stops are:
+- An error that prevents the next step from running
+- The sufficiency check in Step 0 (pure prose, no structure — explicit user gate)
+- `No args` in Step 0 (nothing to work with)
+
+Everything else flows. Step 1 output feeds Step 2 input feeds Step 3 input — no commentary in between.
+
 ---
 
 ## Step 0: Parse args and detect mode
