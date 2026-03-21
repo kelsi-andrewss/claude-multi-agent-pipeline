@@ -401,7 +401,9 @@ for row in ready_rows:
 # --- Recently completed (last 48h, limit 5) ---
 cutoff_iso = datetime.fromtimestamp(now - RECENTLY_COMPLETED_HOURS * 3600, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 completed_rows = query_db(
-    f"SELECT id, title FROM stories WHERE state IN ('done','shipped') AND archived=0 AND completed_at >= '{cutoff_iso}' ORDER BY completed_at DESC LIMIT 5;"
+    "SELECT id, title FROM stories WHERE state IN ('done','shipped') AND archived=0 "
+    "AND completed_at >= ? ORDER BY completed_at DESC LIMIT 5;",
+    (cutoff_iso,)
 )
 
 # --- Print agenda ---
@@ -435,75 +437,48 @@ if has_content:
                 print(f"    [{row[0]}] {row[1]}")
     print("")
 
-PYEOF
-
-  # Correction patterns — from correction_groups DB table
-  if [[ -f "$DB_FILE" ]]; then
-  python3 - "$DB_FILE" <<'CORRPATTERNSEOF'
-import sqlite3, sys
-
-db_path = sys.argv[1]
-
-def query_db(sql, params=()):
-    try:
-        conn = sqlite3.connect(db_path, timeout=5)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=3000")
-        rows = conn.execute(sql, params).fetchall()
-        conn.close()
-        return rows
-    except Exception:
-        return []
-
-# Check if correction_groups table exists
-tables = query_db(
+# --- Correction patterns (from correction_groups DB table) ---
+corr_tables = query_db(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='correction_groups';"
 )
-if not tables:
-    sys.exit(0)
+if corr_tables:
+    corr_rows = query_db(
+        "SELECT theme, status, count, correction_dates, promoted_at "
+        "FROM correction_groups "
+        "WHERE status != 'dismissed' "
+        "ORDER BY CASE status WHEN 'pending_promotion' THEN 0 WHEN 'accumulating' THEN 1 WHEN 'promoted' THEN 2 END, count DESC;"
+    )
+    pending = [r for r in corr_rows if r[1] == "pending_promotion"]
+    accumulating = [r for r in corr_rows if r[1] == "accumulating"]
+    promoted = [r for r in corr_rows if r[1] == "promoted"]
 
-rows = query_db(
-    "SELECT theme, status, count, correction_dates, promoted_at "
-    "FROM correction_groups "
-    "WHERE status != 'dismissed' "
-    "ORDER BY CASE status WHEN 'pending_promotion' THEN 0 WHEN 'accumulating' THEN 1 WHEN 'promoted' THEN 2 END, count DESC;"
-)
-if not rows:
-    sys.exit(0)
+    if pending or accumulating:
+        print("")
+        print("=== CORRECTION PATTERNS (triaged) ===")
+        if pending:
+            print("  Pending promotion:")
+            for r in pending:
+                theme, status, count, dates = r[0], r[1], r[2], r[3]
+                promoted_at = r[4] if len(r) > 4 else ""
+                print(f'    [{count}x] "{theme}" (evidence: {dates})')
+            print("  Process pending promotions: use /prefs to review and promote")
+        if accumulating:
+            print("  Accumulating:")
+            for r in accumulating:
+                theme, status, count, dates = r[0], r[1], r[2], r[3]
+                needed = 3 - int(count)
+                if needed < 1:
+                    needed = 1
+                print(f'    [{count}x] "{theme}" (need {needed} more)')
+        if promoted and (pending or accumulating):
+            print("  Already promoted:")
+            for r in promoted:
+                theme, status, count, dates = r[0], r[1], r[2], r[3]
+                promoted_at = r[4] if len(r) > 4 else ""
+                print(f'    [{count}x] "{theme}" (promoted {promoted_at})')
+        print("=== END CORRECTION PATTERNS ===")
 
-pending = [r for r in rows if r[1] == "pending_promotion"]
-accumulating = [r for r in rows if r[1] == "accumulating"]
-promoted = [r for r in rows if r[1] == "promoted"]
-
-if not pending and not accumulating:
-    sys.exit(0)
-
-print("")
-print("=== CORRECTION PATTERNS (triaged) ===")
-if pending:
-    print("  Pending promotion:")
-    for r in pending:
-        theme, status, count, dates = r[0], r[1], r[2], r[3]
-        promoted_at = r[4] if len(r) > 4 else ""
-        print(f'    [{count}x] "{theme}" (evidence: {dates})')
-    print("  Process pending promotions: use /prefs to review and promote")
-if accumulating:
-    print("  Accumulating:")
-    for r in accumulating:
-        theme, status, count, dates = r[0], r[1], r[2], r[3]
-        needed = 3 - int(count)
-        if needed < 1:
-            needed = 1
-        print(f'    [{count}x] "{theme}" (need {needed} more)')
-if promoted and (pending or accumulating):
-    print("  Already promoted:")
-    for r in promoted:
-        theme, status, count, dates = r[0], r[1], r[2], r[3]
-        promoted_at = r[4] if len(r) > 4 else ""
-        print(f'    [{count}x] "{theme}" (promoted {promoted_at})')
-print("=== END CORRECTION PATTERNS ===")
-CORRPATTERNSEOF
-  fi
+PYEOF
 
   fi
 fi
