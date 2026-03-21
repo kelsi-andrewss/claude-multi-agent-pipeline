@@ -427,6 +427,36 @@ This gate prevents merging a story that bypassed run-stories validation (e.g., m
 
 ---
 
+## Step 2.6: Project test suite gate
+
+Run the project's existing test suite to catch regressions before merging. This prevents shipping code that breaks tests outside the story's scope.
+
+1. Detect test directory:
+   ```bash
+   TEST_DIR=""
+   for candidate in "<project-root>/.claude/.claude/tests" "<project-root>/tests" "<project-root>/test"; do
+     if [ -d "$candidate" ]; then
+       TEST_DIR="$candidate"
+       break
+     fi
+   done
+   ```
+
+2. If `TEST_DIR` is empty, skip this step silently.
+
+3. Run the test suite:
+   ```bash
+   python3 -m pytest "$TEST_DIR" -x -q --tb=short 2>&1
+   ```
+
+4. If pytest exits non-zero, STOP and report:
+   > "Project test suite failed. Fix the failures before merging."
+   Do NOT proceed to Step 3.
+
+5. If pytest exits zero, continue to Step 3.
+
+---
+
 ## Step 3: Merge story branch into dev
 
 ```bash
