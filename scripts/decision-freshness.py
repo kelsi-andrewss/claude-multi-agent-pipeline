@@ -21,7 +21,7 @@ import os
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 RUN_STATE_DB = os.path.expanduser("~/.claude/.claude/run-state.db")
@@ -176,7 +176,7 @@ def main() -> None:
         return
 
     now = datetime.now(timezone.utc)
-    since_date = now.replace(year=now.year - 1).strftime("%Y-%m-%d")
+    since_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
 
     # Group scopes by decision_id
     decision_scopes: dict[int, list[tuple[str, str]]] = {}
