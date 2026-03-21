@@ -389,7 +389,8 @@ VERIFY_RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <worktree-
 ```
 
 Parse the JSON result:
-- `project_type` is `"unknown"` → Set `test_result = "skipped (no infra)"`. Continue to Step 3.
+- `project_type` is `"unknown"` and `build_result` is `"skip"` (i.e., `--no-build` was passed) → Set `test_result = "skipped (--no-build)"`. Continue to Step 3.
+- `project_type` is `"unknown"` and `build_result` is `"fail"` → Set `test_result = "FAIL"`. Stop and report: "No recognized build system in worktree. Either add a build system or pass `--no-build` to `build-verify.sh`." Do NOT proceed to merge.
 - `build_result` is `"pass"` → Set `test_result = "pass"`. Continue to Step 3.
 - `build_result` is `"fail"` → Set `test_result = "FAIL"`. Display the failure output from JSON. Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging, or re-run with `--skip-tests` to bypass." Do NOT proceed to merge.
 

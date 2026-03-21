@@ -157,7 +157,7 @@ After collecting, validate each story and **skip with a warning** if any of the 
   - Wait for all agents to complete, then re-fetch each story to confirm `plan_file` is now set.
   - If still missing after auto-planning, skip with warning: "story-NNN: auto-planning failed — skipping."
 - `test_files` is null or empty AND `needs_testing` is not explicitly `false`:
-  - Skip with warning: "story-NNN has no test_files — add test_files or set needs_testing=false to opt out"
+  - BLOCK: "story-NNN has no test_files declared. Add test_files to the plan or set needs_testing=false to opt out." Story does not enter the execution plan.
 
 > **Note:** Stories in `ready` or `draft` state are the primary target. `in-progress` means another session claimed it — always skip.
 
@@ -277,8 +277,8 @@ RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <project-root>)
 Parse the JSON result:
 - `status: "success"` with `build_result: "pass"` → PASS
 - `status: "success"` with `build_result: "pass"` and `lint_warnings` > 0 → PASS with warnings (log warning count, do not block)
-- `status: "success"` with `build_result: "skip"` (project_type is `"unknown"`) → SKIP (no recognized build system). Log: "No recognized build system — skipping batch verification."
-- `status: "error"` with `build_result: "fail"` (exit code 1) → build FAIL (blocks downstream). Build output is in `build_output` field.
+- `status: "success"` with `build_result: "skip"` → SKIP. This only occurs when `--no-build` was explicitly passed to `build-verify.sh`. Log: "Build verification skipped (--no-build)."
+- `status: "error"` with `build_result: "fail"` (exit code 1) → build FAIL (blocks downstream). Build output is in `build_output` field. This includes unknown project types when `--no-build` was not passed.
 - `status: "error"` (exit code 2) → system error, treat as FAIL
 
 If JSON parse fails, log raw output and mark as FAIL.
@@ -721,7 +721,7 @@ VERIFY_RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <worktree-
 ```
 
 Parse the JSON result using the same logic as Step 2c:
-- **PASS** or **SKIP** (no build system): proceed to Step 5a (diff gate). No retry needed.
+- **PASS** or **SKIP** (only when `--no-build` was explicitly passed): proceed to Step 5a (diff gate). No retry needed.
 - **FAIL**: delegate to `/fix-loop` below.
 
 If the coder returned BLOCKED, skip build verification entirely (nothing to verify) — the story goes straight to the blocked list.
@@ -756,9 +756,9 @@ A coder's work is only considered complete when BOTH conditions are met:
 
 If the coder returned DONE but build verification fails, `/fix-loop` handles iterative correction and returns DONE (all layers pass) or BLOCKED (exhausted retries). If the coder returned BLOCKED, skip build verification entirely (nothing to verify).
 
-#### Stories without a build system
+#### Stories with `--no-build` opt-out
 
-When `build-verify.sh` returns `build_result: "skip"` (project_type is "unknown"), the dual-exit gate is satisfied by condition 1 alone. Fix-loop is never invoked. This preserves existing behavior for projects without lint/test infrastructure.
+When `build-verify.sh` returns `build_result: "skip"` (because `--no-build` was explicitly passed), the dual-exit gate is satisfied by condition 1 alone. Fix-loop is never invoked. Without `--no-build`, unknown project types return FAIL and enter the fix-loop like any other build failure.
 
 #### Interaction with existing steps
 
