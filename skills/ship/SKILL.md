@@ -204,6 +204,28 @@ Store verify output for the Step 6 report.
 
 ---
 
+## Step 5c: Enforcement gate
+
+**This gate runs before the final report. It cannot be bypassed.**
+
+Check whether required steps actually produced output:
+
+1. **Critique gate**: If `skip_validate` is false:
+   - Check if Step 3 stored critique output (any non-empty string).
+   - If missing: **STOP. Do not generate the final report.** Print:
+     > "BLOCKED: Critique (Step 3) was not run. This is required unless --quick flag is set. Run `/critique --plans <plan files>` now."
+   - Run `/critique --plans <plan files>` immediately, then continue.
+
+2. **Verify gate**: If `skip_verify` is false AND at least one story merged:
+   - Check if Step 5b stored verify output (any non-empty string).
+   - If missing: **STOP. Do not generate the final report.** Print:
+     > "BLOCKED: Verify (Step 5b) was not run. This is required unless --quick flag is set. Run `/verify .ship-manifest.json` now."
+   - Run `/verify .ship-manifest.json` immediately, then continue.
+
+If both gates pass (or steps were legitimately skipped via flags), proceed to Step 6.
+
+---
+
 ## Step 6: Final report
 
 ```bash
@@ -215,9 +237,11 @@ Print final summary synthesized from child skill outputs:
 ```
 Ship complete: <epic title> (<epic_id>)
   Stories: N merged, M blocked
-  Review: <from /verify output, or "skipped">
-  Integration: <from /verify output, or "skipped">
-  Acceptance: <from /verify output, or "skipped">
+  Critique: <from Step 3 output, or "skipped (--quick)">
+  Review: <from /verify output, or "skipped (--quick)">
+  Build: <from /verify output, or "skipped (--quick)">
+  Tests: <from /verify output, or "skipped (--quick)">
+  Acceptance: <from /verify output, or "skipped (--quick)">
 
 Use /roadmap to check status.
 ```
