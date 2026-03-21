@@ -337,11 +337,13 @@ bash ~/.claude/scripts/emit-event.sh "skill.merge.started" "claude" "${story_id:
 
 > **Note:** If `branch` is null in the DB, compute the story branch from the worktree list — this is normal for stories created via `/todo` before a worktree was set up.
 
-### Step 1.5: Commit verification (test_files stories only)
+### Step 1.5: test_files gate
 
-If `story_id` is non-null, call `pm_get_story(story_id)` and check the `test_files` field.
+If `story_id` is null, skip this step.
 
-If `test_files` is non-empty:
+Call `pm_get_story(story_id)` and check the `test_files` field.
+
+**If `test_files` is non-empty and not "N/A":**
 
 1. List commits on the story branch not on dev:
    ```bash
@@ -354,9 +356,10 @@ If `test_files` is non-empty:
    If no commits touch test files, emit a warning (non-blocking):
    > "Warning: story has test_files but no test file commits found on branch. The test agent may have determined no tests were needed."
 
-This is informational — the hard gate is the test execution in Step 2.5.
+**If `test_files` is "N/A":** skip this step.
 
-If `test_files` is empty/null or `story_id` is null, skip this step.
+**If `test_files` is empty or null:** Hard block — stop and report:
+> "BLOCKED: story <story_id> has no test_files set in its plan. Every story must declare test_files (explicit paths or N/A with justification) before merging. Update the plan file and re-run."
 
 ---
 
