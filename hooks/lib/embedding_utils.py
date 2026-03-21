@@ -20,16 +20,28 @@ def get_embedding(text):
         return None
 
 
-def cosine_similarity(vec_a, vec_b):
-    """Cosine similarity between two vectors."""
-    if len(vec_a) != len(vec_b):
-        return 0.0
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+try:
+    import numpy as np
+
+    def cosine_similarity(vec_a, vec_b):
+        """Cosine similarity between two vectors (numpy-accelerated)."""
+        a = np.array(vec_a, dtype=np.float32)
+        b = np.array(vec_b, dtype=np.float32)
+        norm = float(np.linalg.norm(a)) * float(np.linalg.norm(b))
+        return float(np.dot(a, b) / norm) if norm > 0 else 0.0
+
+except ImportError:
+
+    def cosine_similarity(vec_a, vec_b):
+        """Cosine similarity between two vectors."""
+        if len(vec_a) != len(vec_b):
+            return 0.0
+        dot = sum(a * b for a, b in zip(vec_a, vec_b))
+        norm_a = math.sqrt(sum(a * a for a in vec_a))
+        norm_b = math.sqrt(sum(b * b for b in vec_b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
 
 
 def embedding_to_blob(vec):
