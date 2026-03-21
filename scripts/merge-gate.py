@@ -156,10 +156,18 @@ def main():
             capture_output=True, text=True, timeout=120,
         )
     except subprocess.TimeoutExpired:
+        subprocess.run(
+            ["git", "-C", mc_path, "cherry-pick", "--abort"],
+            capture_output=True, timeout=30,
+        )
         emit({"status": "error", "error": "Timeout during cherry-pick"})
         sys.exit(2)
 
     if cp_result.returncode != 0:
+        subprocess.run(
+            ["git", "-C", mc_path, "cherry-pick", "--abort"],
+            capture_output=True, timeout=30,
+        )
         error_output = truncate_output(cp_result.stderr + cp_result.stdout)
         classification = "compile_error"
         result = {
