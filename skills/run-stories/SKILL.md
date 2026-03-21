@@ -752,11 +752,13 @@ A story must pass Step 5.0 before entering Step 5a. If Step 5.0 marks a story BL
 For each DONE story, verify only expected files changed:
 
 ```bash
-DIFF_RESULT=$(bash ~/.claude/scripts/diff-gate.sh --worktree-path <worktree-path> --dev-branch <dev-branch> --write-files "<comma-separated write_files>" --blocking)
+DIFF_RESULT=$(bash ~/.claude/scripts/diff-gate.sh --worktree-path <worktree-path> --dev-branch <dev-branch> --write-files "<comma-separated write_files>" --blocking --test-files "<comma-separated test_files>")
 ```
 
+When the story has `test_files`, include the `--test-files` flag with the comma-separated list. When no `test_files` exist, omit the flag entirely.
+
 Parse the JSON result:
-- If `blocked` is `true`: mark the story BLOCKED with reason `"Scope violation: unexpected files changed: <unexpected_files list>"`. Log a friction event: `category: blocked, type: automatic, skill: run-stories, detail: "diff-gate blocked: <unexpected_files>"`. Skip Steps 5b and 5c for this story.
+- If `blocked` is `true`: check `test_file_violations` first. If non-empty, mark the story BLOCKED with reason `"Test file scope violation: coder modified test files: <test_file_violations list>"`. Otherwise, mark BLOCKED with reason `"Scope violation: unexpected files changed: <unexpected_files list>"`. Log a friction event: `category: blocked, type: automatic, skill: run-stories, detail: "diff-gate blocked: <unexpected_files>"`. Skip Steps 5b and 5c for this story.
 - If `blocked` is `false` and `unexpected_files` is non-empty: log the unexpected files as a warning, but continue (non-blocking). The coder may have legitimately needed adjacent files.
 - If `status` is `"error"`: log the error, continue (non-blocking).
 
@@ -774,7 +776,8 @@ For each DONE story that has `test_files` and both the coder and test agent retu
      --test-branch <story-branch>--test \
      --dev-branch <dev-branch> \
      --test-cmd "<detected-test-command>" \
-     --test-files "<comma-separated test_files>")
+     --test-files "<comma-separated test_files>" \
+     --coverage --mutation)
    ```
 
    Parse the JSON result.
@@ -789,6 +792,7 @@ For each DONE story that has `test_files` and both the coder and test agent retu
    | `logic_failure` | **Coder** — implementation wrong | Log friction. Re-launch coder with failing tests as read-only context. Max 1 retry. |
    | `ambiguous` | **Coder** (default) | Same as logic_failure path. |
    | `low_coverage` | **Coder** — insufficient test coverage | Log friction. Delegate to `/fix-loop` — coder adds covered code paths or more tests. |
+   | `low_mutation_score` | **Coder** — weak test kill ratio | Log friction. Delegate to `/fix-loop` — coder strengthens implementation (remove dead branches, make code more testable). |
 
    Use `error_output` from the JSON result to construct the retry prompt.
 
@@ -876,7 +880,8 @@ For each DONE story that passes the diff gate and has no `test_files`:
      --test-cmd "<detected test command>" \
      --test-files "<unit-tester-generated test files>" \
      --session-id "$SESSION_ID" \
-     --story-id <story_id>)
+     --story-id <story_id> \
+     --coverage --mutation)
    ```
 
 5. Parse the JSON result. If `test_passed` is false, use `classification` to decide retry strategy — same as the `test_files` path:
@@ -887,8 +892,11 @@ For each DONE story that passes the diff gate and has no `test_files`:
    | `logic_failure` | **Coder** — implementation wrong | Log friction. Delegate to `/fix-loop` with `--skip-compile` and the error context. |
    | `ambiguous` | **Coder** (default) | Same as logic_failure path. |
    | `low_coverage` | **Coder** — insufficient test coverage | Log friction. Delegate to `/fix-loop` — coder adds covered code paths or more tests. |
+   | `low_mutation_score` | **Coder** — weak test kill ratio | Log friction. Delegate to `/fix-loop` — coder strengthens implementation (remove dead branches, make code more testable). |
 
    After retry, re-run merge-gate.py. If second attempt also fails, mark story BLOCKED. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
+
+   > **Opt-out**: Pass `--no-coverage` or `--no-mutation` to merge-gate.py to skip those checks. Use only when coverage/mutation infrastructure is unavailable for the target project.
 
 6. On pass — merge test commits into the code worktree (same as `test_files` path step 5):
    ```bash
