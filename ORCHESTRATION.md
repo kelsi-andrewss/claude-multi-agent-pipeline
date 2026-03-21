@@ -121,7 +121,7 @@ This maximizes parallel execution — stories with non-overlapping write targets
 
 Full template: run-stories/SKILL.md Step 4. Must include: story title, plan file, write-targets (absolute worktree paths), read-only context, agent approach, pitfalls, OpenMemory learnings, worktree enforcement block.
 
-**NEED_DECISION**: once per story for strategic decisions; critical decisions always escalate regardless of count. Does not count toward escalation. Second strategic NEED_DECISION → BLOCKED. Coders must use the structured format defined in the coder prompt template (run-stories/SKILL.md Step 4). Main session creates a decision review artifact per section 7 "Decision review artifacts" before resolving.
+**NEED_DECISION**: no count cap — coders emit it whenever they genuinely cannot proceed. Does not count toward the BLOCKING escalation counter. BLOCKED triggers only on: (a) coder re-emits NEED_DECISION on the same topic after receiving a resolution (communication failure), or (b) coder is fundamentally stuck (wrong plan, impossible constraint). Critical decisions (prefixed "CRITICAL:") always escalate to user regardless. Coders must use the structured format defined in the coder prompt template (run-stories/SKILL.md Step 4). Main session creates a decision review artifact per section 7 "Decision review artifacts" before resolving.
 **Size ceiling**: >5 files or >200 lines → split. **Conflict check**: no shared write targets with in-progress stories.
 **Script refs**: Any script path referenced in a SKILL.md (`bash ~/.claude/scripts/...` or `python3 ~/.claude/scripts/...`) is a write-target. If the script doesn't exist, the coder must create it as part of the story — not defer it.
 
