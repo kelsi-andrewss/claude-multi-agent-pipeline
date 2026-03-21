@@ -102,6 +102,8 @@ UI CODEGEN TAGGING: For each story, determine if it involves UI component creati
 Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
 redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infrastructure,
 or stories where UI is incidental (e.g., adding a field to an existing form).
+
+TEST_FILES RULE: For each story that creates or modifies functional code (logic, state transitions, data transforms, API handlers, business rules), set `test_files` to the corresponding test file paths using the project's convention (test_<file>.py, <file>.test.ts, <file>_test.dart, etc.). Stories that are pure docs, config (YAML/JSON/env), scaffold/boilerplate (project init, dependency install), or pure refactors that don't change observable behavior should set `needs_testing: false` instead. When in doubt, set test_files — the merge gate catches real bugs, skipping it hides them.
 """)
 ```
 
@@ -118,6 +120,8 @@ UI CODEGEN TAGGING: For each story, determine if it involves UI component creati
 Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
 redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infrastructure,
 or stories where UI is incidental (e.g., adding a field to an existing form).
+
+TEST_FILES RULE: For each story that creates or modifies functional code (logic, state transitions, data transforms, API handlers, business rules), set `test_files` to the corresponding test file paths using the project's convention (test_<file>.py, <file>.test.ts, <file>_test.dart, etc.). Stories that are pure docs, config (YAML/JSON/env), scaffold/boilerplate (project init, dependency install), or pure refactors that don't change observable behavior should set `needs_testing: false` instead. When in doubt, set test_files — the merge gate catches real bugs, skipping it hides them.
 """)
 ```
 

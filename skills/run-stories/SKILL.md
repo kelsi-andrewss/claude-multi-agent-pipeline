@@ -156,6 +156,8 @@ After collecting, validate each story and **skip with a warning** if any of the 
   - Launch one background `general-purpose` agent per unplanned story to write the plan file (same prompt as draft-plan Step 5).
   - Wait for all agents to complete, then re-fetch each story to confirm `plan_file` is now set.
   - If still missing after auto-planning, skip with warning: "story-NNN: auto-planning failed — skipping."
+- `test_files` is null or empty AND `needs_testing` is not explicitly `false`:
+  - Skip with warning: "story-NNN has no test_files — add test_files or set needs_testing=false to opt out"
 
 > **Note:** Stories in `ready` or `draft` state are the primary target. `in-progress` means another session claimed it — always skip.
 

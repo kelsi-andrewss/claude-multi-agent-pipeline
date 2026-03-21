@@ -105,6 +105,19 @@ Before writing a plan file, Claude independently reviews Gemini's output. Full c
 - **Story** — scoped deliverable, own branch/worktree. States: `draft` → `ready` → `in-progress` → `in-review` → `approved` → `done` → `shipped`. Also: `blocked`. Agent: `quick-fixer` | `architect` | `manual`. Must have `plan_file` to run.
 - **Task** — sub-item, no branch. States: `todo` → `in-progress` → `done`. Also: `blocked`, `skipped`.
 
+### Test requirements
+
+`test_files` is required for all stories that create or modify functional code. Stories without `test_files` are blocked at execution (`/run-stories` Step 1) unless `needs_testing` is explicitly set to `false`.
+
+**Exempt from testing** (`needs_testing: false`):
+- Docs-only changes (README, CLAUDE.md, comments)
+- Config-only changes (YAML, JSON, env files, CI pipelines)
+- Scaffold/boilerplate (project init, dependency install, file structure)
+- Pure refactors that don't change observable behavior (renames, moves, import reorganization)
+- Skill/orchestration definition changes (SKILL.md, ORCHESTRATION.md)
+
+When Gemini plans stories via `pm_plan_story`, it sets `test_files` for functional stories and `needs_testing: false` for exempt ones. The plan writer (`/draft-plans`) generates test-aware acceptance criteria when `test_files` is present.
+
 ### Story decomposition for parallelism
 
 When decomposing an epic into stories, minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns `quickfix/SKILL.md` implements ALL changes to that file across all tiers/features in the epic.
