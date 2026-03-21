@@ -173,7 +173,7 @@ git checkout dev && git checkout -b quickfix/<slug>
 
 ## Step 7: Launch quick-fixer
 
-Launch a `quick-fixer` background agent (model: Sonnet, always) in a worktree on `quickfix/<slug>` with the plan file (or inline plan from Step 4b) as input.
+Launch a `quick-fixer` background agent (model: Sonnet, always) with `run_in_background: true`. The coder prompt creates its own worktree — do NOT use `isolation: "worktree"` on the Agent call (that creates a second, unmanaged worktree that never gets cleaned up).
 
 Use the standard coder prompt from run-stories Step 4:
 
@@ -243,6 +243,26 @@ Gemini is a research tool for the orchestrator — not available to coders.
 ## Step 8: On completion
 
 Invoke `/merge-worktree` to diff gate, review, and merge to dev.
+
+### Step 8b: Worktree cleanup guarantee
+
+After Step 8 completes (whether /merge-worktree succeeded or failed), verify the coder's worktree is removed:
+
+```bash
+WORKTREE_PATH="<project-root>/.claude/worktrees/story/<slug>"
+if [ -d "$WORKTREE_PATH" ]; then
+  bash ~/.claude/scripts/worktree-cleanup.sh --worktree-path "$WORKTREE_PATH" --branch "quickfix/<slug>"
+fi
+```
+
+Also check for any stale agent isolation worktrees from this session:
+```bash
+for wt in .claude/worktrees/agent-*; do
+  [ -d "$wt" ] && git worktree remove --force "$wt" 2>/dev/null
+done
+```
+
+This catches worktrees left behind when /merge-worktree is bypassed or fails mid-cleanup.
 
 ---
 
