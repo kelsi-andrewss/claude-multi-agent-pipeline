@@ -420,10 +420,42 @@ This gate prevents merging a story that bypassed run-stories validation (e.g., m
       - Continue to Step 3.
 
    d. If tests fail:
-      - Set `test_result = "FAIL (spec tests)"`
-      - Display the failure output.
-      - Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging."
+      - Run test diagnosis to attribute the failure:
+        ```bash
+        DIAG_RESULT=$(bash ~/.claude/scripts/test-diagnosis.sh \
+          --worktree-path <worktree-path> \
+          --dev-branch <dev-branch> \
+          --test-cmd "<test-command>" \
+          --test-files "<test_files>" \
+          --story-branch <story-branch>)
+        ```
+      - Parse the JSON `diagnosis` field and set the failure message accordingly:
+        - `test_invalid` → Set `test_result = "FAIL (spec tests): test fails on dev too — test is invalid, relaunch test agent"`
+        - `code_regression` → Set `test_result = "FAIL (spec tests): test passes on dev, fails on story branch — code regression, fix implementation"`
+        - `inconclusive` → Set `test_result = "FAIL (spec tests): could not determine attribution — {detail from JSON}"`
+      - Display the failure output and diagnosis.
+      - Stop and report: "Tests failed in `<worktree-path>`. Diagnosis: {test_result}. Fix the failures before merging."
       - Do NOT proceed to merge.
+
+### Step 2.5c: Coverage delta check (advisory)
+
+This step runs only when `test_files` is non-empty AND spec tests passed in Step 2.5b. It is purely advisory — it never blocks the merge.
+
+1. Detect the project type (same detection logic as `merge-gate.py`'s `detect_project_type`):
+   - Check for `package.json` → Node/JS project
+   - Check for `pytest.ini`, `setup.py`, `pyproject.toml` → Python project
+   - Otherwise → unknown (skip silently)
+
+2. Run coverage against the story's test files targeting write_files:
+   - **Node/JS**: `cd <worktree-path> && npx c8 --reporter=text <test-command> <test_files> 2>&1 || true`
+   - **Python**: `cd <worktree-path> && python -m pytest --cov=<write_files_dirs> --cov-report=term <test_files> 2>&1 || true`
+
+3. Parse the coverage output for per-file percentages.
+
+4. For each file in `write_files` with 0% coverage, emit a non-blocking warning:
+   > "Warning: {file} has 0% test coverage"
+
+5. If the coverage command fails, the project type is unknown, or output can't be parsed — skip silently. No warning, no block.
 
 ---
 

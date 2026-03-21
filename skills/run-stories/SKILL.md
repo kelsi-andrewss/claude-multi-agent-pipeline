@@ -693,6 +693,25 @@ If the agent result doesn't include usage metadata, skip — merge-worktree hand
 4. Wait for the resumed agent to return DONE, NEED_DECISION, or BLOCKED.
 5. NEED_RESEARCH does not count toward the BLOCKING escalation counter.
 
+### Test agent BLOCKED retry
+
+When collecting results, if a **test agent** returns BLOCKED but the **coder agent** for the same story returned DONE:
+
+1. Relaunch the test agent **once** with additional context:
+   > "Previous attempt failed: {blocked_reason}. The coder's implementation is committed at {commit} on branch {story-branch}. Retry writing tests from the contract and acceptance criteria."
+
+2. The retry agent **still branches from dev** (NOT from the story branch) — the blindness constraint is preserved. Use the same test agent prompt from Step 4 with the BLOCKED reason appended as context.
+
+3. Wait for the retried test agent to return DONE or BLOCKED.
+
+4. If DONE: proceed normally — add both coder and test agent to the merge list.
+
+5. If second attempt also BLOCKED: mark the story BLOCKED with both attempts' reasons concatenated:
+   > "Test agent BLOCKED after retry. Attempt 1: {reason_1}. Attempt 2: {reason_2}."
+   Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "test agent BLOCKED after retry: {reason_2}"`.
+
+If the **coder** also returned BLOCKED, do not retry the test agent — the story is BLOCKED regardless.
+
 ### Step 5.0: Fix-loop auto-review (coder self-correction)
 
 After each coder agent returns DONE (and before the diff gate in Step 5a), run build verification against the coder's worktree to confirm the code actually works:
