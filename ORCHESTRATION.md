@@ -125,6 +125,8 @@ Full template: run-stories/SKILL.md Step 4. Must include: story title, plan file
 **Size ceiling**: >5 files or >200 lines → split. **Conflict check**: no shared write targets with in-progress stories.
 **Script refs**: Any script path referenced in a SKILL.md (`bash ~/.claude/scripts/...` or `python3 ~/.claude/scripts/...`) is a write-target. If the script doesn't exist, the coder must create it as part of the story — not defer it.
 
+**UI codegen**: Stories with `ui_codegen: true` allow coders to call `mcp__gemini__gemini_ui_code` for visual component code. The coder defines the props contract and drops Gemini's output copy-paste. Build errors loop back to Gemini (not Claude). NEED_DECISION only on same-error repeat.
+
 ### Decision autonomy levels
 
 | Level | Scope | Coder action |

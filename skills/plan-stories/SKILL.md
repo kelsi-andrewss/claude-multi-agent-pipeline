@@ -97,6 +97,11 @@ ITEMS: <items list>
 CONTEXT: <briefing_contents if briefing mode, otherwise omit>
 
 DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping.
+
+UI CODEGEN TAGGING: For each story, determine if it involves UI component creation or modification.
+Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
+redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infrastructure,
+or stories where UI is incidental (e.g., adding a field to an existing form).
 """)
 ```
 
@@ -108,6 +113,11 @@ MODE: ship
 EPIC_ID: epic-NNN
 
 DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping.
+
+UI CODEGEN TAGGING: For each story, determine if it involves UI component creation or modification.
+Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
+redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infrastructure,
+or stories where UI is incidental (e.g., adding a field to an existing form).
 """)
 ```
 

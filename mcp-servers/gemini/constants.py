@@ -68,6 +68,20 @@ DESIGN_SYSTEM_INSTRUCTION = (
     "For each design decision, state the rationale."
 )
 
+# ---------------------------------------------------------------------------
+# UI Codegen constants
+# ---------------------------------------------------------------------------
+UI_CODEGEN_SYSTEM_INSTRUCTION = (
+    "You are a senior frontend engineer. Generate production-ready UI component code. "
+    "Output ONLY markup and styles — no state management, no data fetching, no business logic. "
+    "Event handlers should call props (e.g., onClick={props.onSubmit}) — never define logic inline. "
+    "Match the project's framework, component library, and styling approach exactly. "
+    "Study the exemplar components provided and match their patterns: import style, export pattern, "
+    "naming conventions, file organization. "
+    "Accessibility: semantic HTML, WCAG AA contrast, aria labels where needed. "
+    "If you receive build/lint errors, fix ONLY the errors — do not restructure the component."
+)
+
 _KNOWN_DOCUMENTS: dict[str, dict[str, str]] = {
     "claude": {"path": "CLAUDE.md", "description": "Project implementation guide and conventions"},
     "requirements": {"path": "REQUIREMENTS.md", "description": "Full project requirements"},
