@@ -74,7 +74,9 @@ nohup python3 "$HOME/.claude/hooks/lib/stop_processor.py" \
   --project "$HOME/.claude" \
   --cwd "${CWD:-}" \
   > "$CLAUDE_TEMP_DIR/stop-processor-${SAFE_SESSION}.log" 2>&1 &
+SPAWNED_PID=$!
 disown
+echo "$SPAWNED_PID" > "$PIDFILE"
 bash "$HOME/.claude/scripts/emit-event.sh" "hook.session-learning-check" "hook" "${SESSION_ID_RAW:-unknown}" "{\"action\":\"processor-spawned\",\"result\":\"logged\"}" || true
 
 # Cleanup
