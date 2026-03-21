@@ -13,7 +13,8 @@ import sqlite3
 import sys
 import time
 
-DB_PATH = os.path.expanduser("~/.claude/.claude/run-state.db")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.db import open_run_state_db
 
 SCHEMA_DDL = [
     """CREATE TABLE IF NOT EXISTS run_sessions (
@@ -142,14 +143,12 @@ def main():
     args = parser.parse_args()
 
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn = open_run_state_db()
     except sqlite3.Error as e:
         emit({"status": "error", "error": f"Cannot open run-state.db: {e}"})
         sys.exit(2)
 
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=5000")
 
     for ddl in SCHEMA_DDL:
         cursor.execute(ddl)
