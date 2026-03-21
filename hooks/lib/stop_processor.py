@@ -8,7 +8,7 @@ session summary, auto-distillation, and compliance hook generation.
 Usage:
     stop_processor.py --transcript <path> --db <path> --session <id> --project <path> --cwd <path>
 """
-import argparse, fcntl, json, os, re, signal, sqlite3, sys, time
+import argparse, fcntl, hashlib, json, os, re, signal, sqlite3, sys, time
 from collections import Counter
 
 
@@ -238,10 +238,24 @@ def stage_hook_generation(db_file, project_root):
     conn = _connect_db(db_file)
 
     # Ensure dismissed status is supported (migration from older schema)
-    schema_sql = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='correction_groups'"
-    ).fetchone()
-    needs_migration = schema_sql and 'dismissed' not in schema_sql[0].lower()
+    # Probe the CHECK constraint directly instead of string-matching DDL text
+    needs_migration = False
+    try:
+        conn.execute("SAVEPOINT migration_check")
+        conn.execute("INSERT INTO correction_groups (theme, status) VALUES ('__migration_probe__', 'dismissed')")
+        conn.execute("DELETE FROM correction_groups WHERE theme = '__migration_probe__'")
+        conn.execute("RELEASE migration_check")
+    except sqlite3.IntegrityError:
+        conn.execute("ROLLBACK TO migration_check")
+        conn.execute("RELEASE migration_check")
+        needs_migration = True
+    except sqlite3.OperationalError:
+        # Table doesn't exist yet — nothing to migrate
+        try:
+            conn.execute("ROLLBACK TO migration_check")
+            conn.execute("RELEASE migration_check")
+        except sqlite3.OperationalError:
+            pass
     if needs_migration:
         try:
             conn.execute("BEGIN")
@@ -477,17 +491,18 @@ def stage_pattern_mining(project_root):
         with open(sidecar_path) as f:
             existing = f.read()
 
-    # Dedup by sorted story-ID list
+    # Dedup by hash of sorted story-ID list (whitespace/formatting-insensitive)
     new_proposals = []
     for proposal in proposals:
         evidence_line = [l for l in proposal.splitlines() if l.startswith("**Evidence:**")]
         if evidence_line:
             ids_part = evidence_line[0].split(":", 2)[-1].strip()
-            # Extract story IDs from "N stories failed similarly: id1, id2, id3"
             after_colon = ids_part.split(":", 1)[-1].strip() if ":" in ids_part else ids_part
             sorted_ids = ", ".join(sorted(s.strip() for s in after_colon.split(",")))
-            if sorted_ids in existing:
+            proposal_hash = hashlib.md5(sorted_ids.encode()).hexdigest()[:12]
+            if f"<!-- proposal-hash:{proposal_hash} -->" in existing:
                 continue
+            proposal = f"<!-- proposal-hash:{proposal_hash} -->\n{proposal}"
         new_proposals.append(proposal)
 
     if not new_proposals:
