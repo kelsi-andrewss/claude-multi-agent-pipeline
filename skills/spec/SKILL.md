@@ -48,20 +48,13 @@ Before entering the clarification loop, determine whether the input describes a 
 - Multiple data models that aren't related to a single entity (e.g., User, Fact, Conversation, WebhookEvent)
 - The description reads like a product brief, not a feature request
 
-**If product detected**, stop and redirect:
+**Set scope_type based on detection:**
 
-> "This describes a product with multiple features, not a single feature. /spec builds one feature spec at a time — it can't decompose a product.
->
-> Recommended path:
-> 1. `/presearch <product>` — research constraints and APIs
-> 2. `/plan-stories presearch/<slug>.md` — decompose into stories
-> 3. `/spec <product> <feature>` — spec individual features if needed
->
-> Want to narrow the scope to a single feature, or switch to /presearch?"
+- If product detected: set `scope_type = "product"` and inform the user:
+  > "This looks like a product spec (multiple features/services). I'll build a product-level spec — acceptance criteria, constraints, boundaries, and architecture overview. No FeatureSpec JSON (use /presearch + /plan-stories to decompose into stories)."
+- Otherwise: set `scope_type = "feature"`
 
-Wait for user response. If they narrow scope, continue. If they switch, stop.
-
-**If single feature confirmed**, proceed to the clarification loop below.
+**Proceed to Step 0.75** in either case.
 
 ---
 
@@ -83,7 +76,7 @@ Score each section as **covered** (description provides clear input or user conf
 | Integration points | Existing systems/models/APIs referenced, OR `--project-root` set for auto-discovery |
 | Out of scope | Explicit or inferable from description |
 | Boundaries | Sensitive data or auth implications clear |
-| FeatureSpec JSON | Pattern, entity, and field types determinable |
+| FeatureSpec JSON | Pattern, entity, and field types determinable. **N/A for product specs — skip this section.** |
 
 ### Clarification round
 
@@ -185,6 +178,8 @@ Infer from the feature description and project decisions. Sensitive fields get a
 
 ### 1i: FeatureSpec JSON
 
+Skip this section entirely when `scope_type = "product"`.
+
 Extract the machine-readable FeatureSpec from the sections above:
 
 - **product** — from args
@@ -283,8 +278,9 @@ Locate the target project's `decisions.sql`:
 - If not found, skip: `"No decisions.sql found — skipping conflict pre-check. Run /scout --bootstrap to enable."`
 
 If found, run conflict detection (same logic as `/factory` Step 0.75):
+- Skip FeatureSpec JSON conflict check when `scope_type = "product"`. Still check other constraints against decisions.
 - Parse decisions from SQL
-- Check FeatureSpec JSON against each decision
+- Check spec constraints against each decision
 - Classify as CONFLICT or WARNING
 
 **Report inline** (informational — don't block):
@@ -312,13 +308,16 @@ Conflicts found here are already included in the Constraints section. `/factory`
 
 Determine output path:
 - If `--edit` mode: overwrite the original file
-- If build mode: write to `specs/<entity-lowercase>.md` (relative to project root or cwd). Create `specs/` directory if needed.
+- If build mode and `scope_type = "product"`: write to `specs/<product-lowercase>-product.md` (relative to project root or cwd). Create `specs/` directory if needed.
+- If build mode and `scope_type = "feature"`: write to `specs/<entity-lowercase>.md` (relative to project root or cwd). Create `specs/` directory if needed.
 
 Write the full markdown document. The FeatureSpec JSON is embedded in the `## FeatureSpec` section — `/factory` can extract it from there, or the user can copy it to a standalone `.json` file.
 
 ---
 
 ## Step 5: Report
+
+**When `scope_type = "feature"`:**
 
 ```
 Spec saved: <output-path>
@@ -335,4 +334,20 @@ Spec saved: <output-path>
 
 Run: /factory specs/<entity>.md
   (or extract the FeatureSpec JSON and run /factory specs/<entity>.json)
+```
+
+**When `scope_type = "product"`:**
+
+```
+Spec saved: <output-path>
+
+  Scope: product
+  Objective: <one-line>
+  Features: <count> (high-level)
+  Acceptance criteria: <count>
+  Constraints: <count> (including <N> project decisions)
+  Out of scope: <count> items
+
+Next: /presearch specs/<product>-product.md
+  (or /plan-stories to decompose into stories)
 ```
