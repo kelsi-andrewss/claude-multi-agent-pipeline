@@ -76,6 +76,7 @@ def _content_hash(content):
 
 
 def dedup_check(content, primary_tag):
+    """Returns (existing_id or None, embedding or None)."""
     _ensure_primary_tag_column()
     embedding = get_embedding(content)
 
@@ -93,10 +94,10 @@ def dedup_check(content, primary_tag):
                     stored_vec = blob_to_embedding(blob)
                     sim = cosine_similarity(embedding, stored_vec)
                     if sim >= DEDUP_THRESHOLD:
-                        return row_id
+                        return row_id, embedding
         except sqlite3.Error:
             pass
-        return None
+        return None, embedding
 
     global _ollama_fallback_warned
     if not _ollama_fallback_warned:
@@ -112,11 +113,11 @@ def dedup_check(content, primary_tag):
             )
             row = cursor.fetchone()
             if row:
-                return row[0]
+                return row[0], None
     except sqlite3.Error:
         pass
 
-    return None
+    return None, None
 
 
 def enforce_budget(conn, primary_tag):
@@ -199,7 +200,7 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
     primary_tag = valid_tags[0]
 
     try:
-        existing_id = dedup_check(content, primary_tag)
+        existing_id, embedding = dedup_check(content, primary_tag)
         if existing_id is not None:
             now = int(time.time())
             with _db_connection() as conn:
@@ -212,7 +213,6 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
             print(f"om_write: dedup_fired — existing_id={existing_id} primary_tag={primary_tag}", file=sys.stderr)
             return existing_id
 
-        embedding = get_embedding(content)
         now = int(time.time())
         new_id = str(uuid.uuid4())
 
