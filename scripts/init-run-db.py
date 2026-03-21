@@ -55,6 +55,7 @@ SCHEMA_DDL = [
         test_output TEXT,
         retry_count INTEGER DEFAULT 0,
         merged_at INTEGER,
+        mutation_score REAL,
         PRIMARY KEY (session_id, story_id)
     )""",
     """CREATE TABLE IF NOT EXISTS merge_queue (
