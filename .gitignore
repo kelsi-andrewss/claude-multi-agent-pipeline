@@ -22,6 +22,14 @@ tracking/test.*
 history.jsonl
 stats-cache.json
 .gitignore.bak
+.claude/run-state.db
+.claude/run-state.db-shm
+.claude/run-state.db-wal
+run-state.db
+sessions/
+tmp/
+.claude/worktrees/
+templates/*.pdf
 
 # Runtime directories
 cache/

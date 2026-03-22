@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Self-Learning Pipeline — Workflow Chart</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0f1117; color: #e2e8f0; padding: 32px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 1.4rem; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
+  .subtitle { font-size: 0.8rem; color: #64748b; margin-bottom: 32px; }
+
+  /* Legend */
+  .legend {
+    display: flex; gap: 20px; flex-wrap: wrap;
+    margin-bottom: 28px; padding: 12px 16px;
+    background: #1e2330; border: 1px solid #2d3748; border-radius: 10px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #94a3b8; }
+  .legend-swatch {
+    width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0;
+  }
+
+  /* Flow container */
+  .flow {
+    display: flex; flex-direction: column; gap: 0; align-items: center;
+    position: relative;
+  }
+
+  /* Phase label */
+  .phase-label {
+    font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.12em; color: #475569; margin-bottom: 8px; margin-top: 24px;
+  }
+  .phase-label:first-child { margin-top: 0; }
+
+  /* Nodes */
+  .node {
+    position: relative;
+    border-radius: 12px; padding: 14px 20px;
+    min-width: 280px; max-width: 520px; text-align: center;
+    font-size: 0.82rem; line-height: 1.45;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .node:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+
+  .node-title { font-weight: 700; font-size: 0.85rem; margin-bottom: 3px; }
+  .node-detail { font-size: 0.72rem; color: #94a3b8; }
+  .node-file { font-size: 0.65rem; color: #64748b; font-family: "SF Mono", Menlo, monospace; margin-top: 4px; }
+
+  /* Node types */
+  .node.trigger { background: #1a2744; border: 1.5px solid #3b82f6; }
+  .node.trigger .node-title { color: #60a5fa; }
+
+  .node.process { background: #1e2330; border: 1.5px solid #6366f1; }
+  .node.process .node-title { color: #a78bfa; }
+
+  .node.store { background: #1a2d25; border: 1.5px solid #22c55e; }
+  .node.store .node-title { color: #4ade80; }
+
+  .node.output { background: #2d1f1a; border: 1.5px solid #f97316; }
+  .node.output .node-title { color: #fb923c; }
+
+  .node.decision { background: #2d2a1a; border: 1.5px solid #eab308; border-radius: 12px; }
+  .node.decision .node-title { color: #facc15; }
+
+  /* Arrows */
+  .arrow {
+    display: flex; flex-direction: column; align-items: center;
+    color: #475569; font-size: 0.65rem; padding: 4px 0;
+  }
+  .arrow svg { width: 20px; height: 24px; }
+  .arrow-label { font-size: 0.62rem; color: #64748b; font-style: italic; }
+
+  /* Parallel split */
+  .parallel {
+    display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;
+    width: 100%;
+  }
+  .parallel .node { min-width: 220px; flex: 1; max-width: 320px; }
+
+  /* Branch */
+  .branch {
+    display: flex; gap: 32px; justify-content: center; flex-wrap: wrap;
+    width: 100%; margin: 4px 0;
+  }
+  .branch-col {
+    display: flex; flex-direction: column; align-items: center; gap: 0;
+    flex: 1; max-width: 400px;
+  }
+  .branch-label {
+    font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; padding: 4px 10px; border-radius: 4px;
+    margin-bottom: 6px;
+  }
+  .branch-label.manual { background: #1a2744; color: #60a5fa; }
+  .branch-label.auto { background: #2d1f1a; color: #fb923c; }
+
+  /* Divider */
+  .divider {
+    width: 100%; max-width: 700px; height: 1px;
+    background: linear-gradient(90deg, transparent, #2d3748, transparent);
+    margin: 16px 0;
+  }
+
+  /* Stage list */
+  .stages {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px; width: 100%; max-width: 800px;
+  }
+  .stage {
+    background: #1e2330; border: 1px solid #2d3748; border-radius: 8px;
+    padding: 10px 14px; font-size: 0.72rem;
+    border-left: 3px solid #6366f1;
+  }
+  .stage-num { font-weight: 700; color: #a78bfa; font-size: 0.7rem; }
+  .stage-name { color: #e2e8f0; font-weight: 600; }
+  .stage-desc { color: #94a3b8; font-size: 0.65rem; margin-top: 2px; }
+  .stage-file { color: #64748b; font-size: 0.6rem; font-family: "SF Mono", Menlo, monospace; margin-top: 3px; }
+
+  /* Inject list */
+  .inject-list {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px; width: 100%; max-width: 800px;
+  }
+  .inject-item {
+    background: #1a2d25; border: 1px solid #22c55e33; border-radius: 8px;
+    padding: 10px 14px; font-size: 0.72rem;
+  }
+  .inject-item .node-title { color: #4ade80; font-size: 0.75rem; }
+  .inject-item .node-detail { color: #94a3b8; font-size: 0.65rem; }
+
+  /* Cycle indicator */
+  .cycle-indicator {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 20px; border-radius: 20px;
+    background: linear-gradient(135deg, #1a2744, #1e2330);
+    border: 1px dashed #6366f1;
+    font-size: 0.75rem; color: #a78bfa; font-weight: 600;
+    margin-top: 8px;
+  }
+  .cycle-indicator svg { width: 18px; height: 18px; }
+</style>
+</head>
+<body>
+
+<h1>Self-Learning Pipeline</h1>
+<p class="subtitle">How corrections flow from user feedback to behavioral adaptation across sessions</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:#3b82f6;"></div> Trigger / Input</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#6366f1;"></div> Processing</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#22c55e;"></div> Storage</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#f97316;"></div> Output / Injection</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#eab308;"></div> Decision Gate</div>
+</div>
+
+<div class="flow">
+
+  <!-- ═══════ PHASE 1: CAPTURE ═══════ -->
+  <div class="phase-label">Phase 1 — Capture</div>
+
+  <div class="branch">
+    <div class="branch-col">
+      <div class="branch-label manual">Manual Path</div>
+      <div class="node trigger">
+        <div class="node-title">User says "log that"</div>
+        <div class="node-detail">Explicit correction flagging during conversation</div>
+      </div>
+      <div class="arrow">
+        <svg viewBox="0 0 20 24"><path d="M10 0 L10 20 M5 15 L10 22 L15 15" stroke="#475569" fill="none" stroke-width="1.5"/></svg>
+      </div>
+      <div class="node process">
+        <div class="node-title">log-correction.sh</div>
+        <div class="node-detail">Upsert into correction_groups table.<br>Exact theme match. count++ on duplicate.</div>
+        <div class="node-file">scripts/log-correction.sh</div>
+      </div>
+    </div>
+
+    <div class="branch-col">
+      <div class="branch-label auto">Automatic Path</div>
+      <div class="node trigger">
+        <div class="node-title">Session Ends</div>
+        <div class="node-detail">Stop hook fires on every session close</div>
+      </div>
+      <div class="arrow">
+        <svg viewBox="0 0 20 24"><path d="M10 0 L10 20 M5 15 L10 22 L15 15" stroke="#475569" fill="none" stroke-width="1.5"/></svg>
+      </div>
+      <div class="node process">
+        <div class="node-title">session-learning-check.sh</div>
+        <div class="node-detail">Spawns background processor via nohup + disown.<br>PID lockfile prevents duplicate runs.</div>
+        <div class="node-file">hooks/session-learning-check.sh</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <svg viewBox="0 0 20 24"><path d="M10 0 L10 20 M5 15 L10 22 L15 15" stroke="#475569" fill="none" stroke-width="1.5"/></svg>
+    <span class="arrow-label">both paths converge on correction_groups</span>
+  </div>
+
+  <!-- ═══════ PHASE 2: BACKGROUND PROCESSING ═══════ -->
+  <div class="phase-label">Phase 2 — Background Processing (stop_processor.py)</div>
+
+  <div class="node process" style="max-width:560px;">
+    <div class="node-title">Stage 1: Correction Detection</div>
+    <div class="node-detail">
+      Parse transcript JSONL &rarr; structural pre-filter (length, code fences, markdown) &rarr;
+      semantic embedding via Ollama nomic-embed-text &rarr; cosine similarity against curated correction prototypes (threshold 0.55) &rarr;
+      upsert to correction_groups
+    </div>
+    <div class="node-file">signal_processor.py &rarr; extract_corrections() &rarr; process_session_corrections()</div>
+  </div>
+
+  <div class="arrow">
+    <svg viewBox="0 0 20 24"><path d="M10 0 L10 20 M5 15 L10 22 L15 15" stroke="#475569" fill="none" stroke-width="1.5"/></svg>
+  </div>
+
+  <div class="node store">
+    <div class="node-title">correction_groups (epics.db)</div>
+    <div class="node-detail">
+      theme | status | count | correction_dates | embedding<br>
+      Status lifecycle: accumulating &rarr; pending_promotion (count &ge; 3) &rarr; promoted
+    </div>
+    <div class="node-file">~/.claude/.claude/epics.db</div>
+  </div>
+
+  <div class="arrow">
+    <svg viewBox="0 0 20 24"><path d="M10 0 L10 20 M5 15 L10 22 L15 15" stroke="#475569" fill="none" stroke-width="1.5"/></svg>
+    <span class="arrow-label">remaining stages run in sequence</span>
+  </div>
+
+  <div class="stages">
+    <div class="stage">
+      <div><span class="stage-num">Stage 2</span> <span class="stage-name">Signal Processing</span></div>
+      <div class="stage-desc">Correlate corrections with decision_preferences. Update signal_score / signal_count. Negative signals surface at session start.</div>
+      <div class="stage-file">signal_processor.py</div>
+    </div>
+    <div class="stage">
+      <div><span class="stage-num">Stage 3</span> <span class="stage-name">Session Summary</span></div>
+      <div class="stage-desc">Duration, turn count, edited files &rarr; OpenMemory (session-summary tag). Skipped if &lt;3 turns or &lt;5 min.</div>
+      <div class="stage-file">stop_processor.py</div>
+    </div>
+    <div class="stage">
+      <div><span class="stage-num">Stage 4</span> <span class="stage-name">Auto-Distillation</span></div>
+      <div class="stage-desc">Promote pending_promotion entries. Generate rule text. Write to correction_groups + OpenMemory (behavioral-pref tag).</div>
+      <div class="stage-file">stop_processor.py &rarr; om_write.py</div>
+    </div>
+    <div class="stage">
+      <div><span class="stage-num">Stage 5</span> <span class="stage-name">Hook Generation</span></div>
+      <div class="stage-desc">For newly promoted corrections: evaluate hookability, generate compliance hooks. Skipped in subagent sessions.</div>
+      <div class="stage-file">hook_generator.py</div>
+    </div>
+    <div class="stage">
+      <div><span class="stage-num">Stage 6</span> <span class="stage-name">Staleness Gardening</span></div>
+      <div class="stage-desc">Cross-reference decision_freshness with decisions.db. Write stale-decisions.md sidecar for Tier 1 injection.</div>
+      <div class="stage-file">stop_processor.py</div>
+    </div>
+    <div class="stage">
+      <div><span class="stage-num">Stage 7</span> <span class="stage-name">Pattern Mining</span></div>
+      <div class="stage-desc">Cluster failures from merge_outcomes by domain (Jaccard similarity). Propose new decisions for recurring failure patterns (&ge;3).</div>
+      <div class="stage-file">stop_processor.py</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ═══════ PHASE 3: PERSISTENCE ═══════ -->
+  <div class="phase-label">Phase 3 — Persistence (3 Surfaces)</div>
+
+  <div class="parallel">
+    <div class="node store">
+      <div class="node-title">correction_groups</div>
+      <div class="node-detail">Source of truth for corrections.<br>Manual (log-correction.sh) + auto (stop hook).</div>
+      <div class="node-file">epics.db</div>
+    </div>
+    <div class="node store">
+      <div class="node-title">rendered-prefs.md</div>
+      <div class="node-detail">Sidecar file, git-ignored.<br>Rendered from DB by SessionStart hook.<br>Loaded via @import in CLAUDE.md.</div>
+      <div class="node-file">.claude/rendered-prefs.md</div>
+    </div>
+    <div class="node store">
+      <div class="node-title">OpenMemory</div>
+      <div class="node-detail">Semantic store: behavioral-pref, tool-learning,<br>decision, prompt-pattern, session-summary.<br>Ollama nomic-embed-text embeddings.</div>
+      <div class="node-file">openmemory.sqlite</div>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <svg viewBox="0 0 20 24"><path d="M10 0 L10 20 M5 15 L10 22 L15 15" stroke="#475569" fill="none" stroke-width="1.5"/></svg>
+    <span class="arrow-label">next session starts</span>
+  </div>
+
+  <!-- ═══════ PHASE 4: REINJECTION ═══════ -->
+  <div class="phase-label">Phase 4 — Reinjection (load-session-context.sh)</div>
+
+  <div class="node output" style="max-width:560px;">
+    <div class="node-title">SessionStart Hook</div>
+    <div class="node-detail">Tiered context injection. Tier 1 runs on every session start.</div>
+    <div class="node-file">hooks/load-session-context.sh</div>
+  </div>
+
+  <div class="arrow">
+    <svg viewBox="0 0 20 24"><path d="M10 0 L10 20 M5 15 L10 22 L15 15" stroke="#475569" fill="none" stroke-width="1.5"/></svg>
+  </div>
+
+  <div class="inject-list">
+    <div class="inject-item">
+      <div class="node-title">Render Prefs Sidecar</div>
+      <div class="node-detail">Query correction_groups (promoted + pending + manual). Write rendered-prefs.md. CLAUDE.md @imports it &mdash; survives compaction.</div>
+    </div>
+    <div class="inject-item">
+      <div class="node-title">Correction Patterns</div>
+      <div class="node-detail">Show accumulating, pending promotion, and promoted entries. Counts + needed-for-promotion displayed in session context.</div>
+    </div>
+    <div class="inject-item">
+      <div class="node-title">Tool Learnings</div>
+      <div class="node-detail">Top 5 from OpenMemory (tool-learning tag). Decay-weighted scoring. Pruned at session start.</div>
+    </div>
+    <div class="inject-item">
+      <div class="node-title">Trust Calibration</div>
+      <div class="node-detail">Computed from merge_outcomes. Global + per-domain scores. Governs model selection and approval policy.</div>
+    </div>
+    <div class="inject-item">
+      <div class="node-title">Decision Health</div>
+      <div class="node-detail">Negative-signal decisions from decision_preferences. Appended to rendered-prefs.md sidecar.</div>
+    </div>
+    <div class="inject-item">
+      <div class="node-title">Stale Decisions</div>
+      <div class="node-detail">From stale-decisions.md sidecar (written by Stage 6). Decisions with no recent file activity.</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ═══════ CYCLE ═══════ -->
+  <div class="cycle-indicator">
+    <svg viewBox="0 0 18 18">
+      <path d="M9 1 A8 8 0 1 1 1 9" stroke="#6366f1" fill="none" stroke-width="1.5"/>
+      <path d="M1 5 L1 9 L5 9" stroke="#6366f1" fill="none" stroke-width="1.5"/>
+    </svg>
+    Cycle repeats: user works &rarr; corrections accumulate &rarr; patterns emerge &rarr; behavior adapts
+  </div>
+
+  <div class="divider" style="margin-top:28px;"></div>
+
+  <!-- ═══════ STATUS LIFECYCLE ═══════ -->
+  <div class="phase-label">Correction Status Lifecycle</div>
+
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:center;">
+    <div class="node decision" style="min-width:130px; padding:10px 16px;">
+      <div class="node-title" style="font-size:0.75rem;">accumulating</div>
+      <div class="node-detail">count &lt; 3</div>
+    </div>
+    <div class="arrow" style="padding:0;">
+      <svg viewBox="0 0 28 14" style="width:28px; height:14px;">
+        <path d="M0 7 L22 7 M17 2 L24 7 L17 12" stroke="#475569" fill="none" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <div class="node decision" style="min-width:160px; padding:10px 16px;">
+      <div class="node-title" style="font-size:0.75rem;">pending_promotion</div>
+      <div class="node-detail">count &ge; 3</div>
+    </div>
+    <div class="arrow" style="padding:0;">
+      <svg viewBox="0 0 28 14" style="width:28px; height:14px;">
+        <path d="M0 7 L22 7 M17 2 L24 7 L17 12" stroke="#475569" fill="none" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <div class="node decision" style="min-width:130px; padding:10px 16px;">
+      <div class="node-title" style="font-size:0.75rem;">promoted</div>
+      <div class="node-detail">rule generated</div>
+    </div>
+  </div>
+
+  <div style="text-align:center; margin-top:12px;">
+    <div class="node decision" style="display:inline-block; min-width:130px; padding:10px 16px; opacity:0.6;">
+      <div class="node-title" style="font-size:0.75rem;">dismissed</div>
+      <div class="node-detail">user override</div>
+    </div>
+  </div>
+
+  <div class="divider" style="margin-top:28px;"></div>
+
+  <!-- ═══════ DATA FLOW SUMMARY ═══════ -->
+  <div class="phase-label">Data Flow Summary</div>
+
+  <div style="max-width:700px; width:100%; font-size:0.75rem; color:#94a3b8; line-height:1.7; padding:16px 20px; background:#1e2330; border:1px solid #2d3748; border-radius:10px;">
+    <table style="width:100%; border-collapse:collapse;">
+      <tr style="border-bottom:1px solid #2d3748;">
+        <td style="padding:6px 8px; font-weight:700; color:#60a5fa;">User corrects Claude</td>
+        <td style="padding:6px 8px;">&rarr;</td>
+        <td style="padding:6px 8px;">Transcript JSONL or manual log-correction.sh</td>
+      </tr>
+      <tr style="border-bottom:1px solid #2d3748;">
+        <td style="padding:6px 8px; font-weight:700; color:#a78bfa;">Semantic detection</td>
+        <td style="padding:6px 8px;">&rarr;</td>
+        <td style="padding:6px 8px;">Ollama embeddings vs correction prototypes (cosine &ge; 0.55)</td>
+      </tr>
+      <tr style="border-bottom:1px solid #2d3748;">
+        <td style="padding:6px 8px; font-weight:700; color:#4ade80;">correction_groups</td>
+        <td style="padding:6px 8px;">&rarr;</td>
+        <td style="padding:6px 8px;">Accumulates count. Auto-promotes at count &ge; 3.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #2d3748;">
+        <td style="padding:6px 8px; font-weight:700; color:#a78bfa;">Auto-distillation</td>
+        <td style="padding:6px 8px;">&rarr;</td>
+        <td style="padding:6px 8px;">Generate rule text. Write to DB + OpenMemory.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #2d3748;">
+        <td style="padding:6px 8px; font-weight:700; color:#fb923c;">rendered-prefs.md</td>
+        <td style="padding:6px 8px;">&rarr;</td>
+        <td style="padding:6px 8px;">Sidecar rendered at session start. @imported by CLAUDE.md.</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 8px; font-weight:700; color:#facc15;">Next session</td>
+        <td style="padding:6px 8px;">&rarr;</td>
+        <td style="padding:6px 8px;">Claude reads prefs, adapts behavior. Cycle continues.</td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+
+</body>
+</html>
