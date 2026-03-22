@@ -16,6 +16,7 @@ Read this file during /draft-plan Step 5 (critique phase). Before writing the pl
     - Explicit file paths: `tests/test_foo.py`, `src/__tests__/bar.test.ts`
     - `test_files: N/A` with a one-line justification (allowed for: pure documentation, config-only changes, SKILL.md-only edits, markdown-only stories)
     Plans without a test plan section are SIGNIFICANT — they must be sent back for revision before the plan file is written.
+12. **Cross-story seam verification**: For multi-story epics, identify every data boundary where story N produces output consumed by story M. Verify the producer code path actually creates the artifact in the format the consumer expects. Not "does the plan say it does" — trace the actual code path. Mismatches are SIGNIFICANT.
 
 **Significant issues** → surface to user before writing the plan file.
 **Minor gaps** → incorporate silently into the plan file.
