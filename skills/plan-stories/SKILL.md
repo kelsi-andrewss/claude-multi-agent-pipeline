@@ -85,6 +85,18 @@ The `.md` file contains `## What changes` -- this is an existing plan. Bypass th
 
 **Run for briefing mode, inline mode, and resume mode.**
 
+### Flow trace (pre-decomposition)
+
+Before dispatching the planner agent, if `items` count >= 3: write a DATA_FLOW_TRACE to include as planner prompt context. The trace is a linear sequence of data transformations from user action to final state.
+
+Format: `[user action] → [data A at location X] → [transform B] → [data C at location Y] → ... → [final state]`
+
+Every story must own a contiguous segment of this chain. Boundary formats between stories must be explicit (what data, what format, where). Include the trace in the planner prompt as a `DATA_FLOW_TRACE:` block after the items list.
+
+If `items` count < 3, skip this substep — the decomposition is simple enough that seam risks are low.
+
+### Planner dispatch
+
 Launch the **planner** agent in foreground with the parsed inputs:
 
 **For briefing mode and inline mode:**
@@ -96,7 +108,7 @@ TITLE: <title>
 ITEMS: <items list>
 CONTEXT: <briefing_contents if briefing mode, otherwise omit>
 
-DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping.
+DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping. DATA_FLOW_TRACE: Before decomposing into stories, write the end-to-end data transformation chain as a linear sequence. Format: `[step] → [step] → ...` with explicit data format at each boundary. Every story must own a contiguous segment. If story N produces data consumed by story M, the boundary must specify: what data, what format, what location. Include this trace in each story's description so the plan-writer can verify seam correctness.
 
 UI CODEGEN TAGGING: For each story, determine if it involves UI component creation or modification.
 Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
@@ -114,7 +126,7 @@ Agent(subagent_type="planner", prompt="""
 MODE: ship
 EPIC_ID: epic-NNN
 
-DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping.
+DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping. DATA_FLOW_TRACE: Before decomposing into stories, write the end-to-end data transformation chain as a linear sequence. Format: `[step] → [step] → ...` with explicit data format at each boundary. Every story must own a contiguous segment. If story N produces data consumed by story M, the boundary must specify: what data, what format, what location. Include this trace in each story's description so the plan-writer can verify seam correctness.
 
 UI CODEGEN TAGGING: For each story, determine if it involves UI component creation or modification.
 Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
