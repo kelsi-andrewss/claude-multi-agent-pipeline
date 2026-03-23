@@ -397,9 +397,17 @@ Do not edit any protected files. <If protected-files.md exists: "Protected files
 
 ## Tool constraints
 You are the coder. Write all code yourself.
-Do NOT call any mcp__gemini__* tools (gemini_generate, analyze, audit, find_bug, plan, test, etc.) UNLESS `ui_codegen: true` — then `mcp__gemini__gemini_ui_code` is allowed and required for visual code.
 Do NOT call any pm_* tools except pm_update_story (for state transitions).
-Gemini is a research tool for the orchestrator — not available to coders.
+
+**Gemini MCP — allowed tools:**
+- `mcp__gemini__analyze` — use for codebase investigation when you need to understand code outside your write targets. This preserves your context budget: Gemini reads the files and returns a compressed answer instead of you reading 500 lines that produce a one-sentence insight.
+- `mcp__gemini__gemini_ui_code` — ONLY when `ui_codegen: true` (see UI codegen exception below).
+
+**Gemini MCP — blocked tools:** All other `mcp__gemini__*` tools (plan, audit, find_bug, test, gemini_generate, etc.) are orchestrator-only.
+
+**Query format for `analyze`:** Be specific. Include the symbol name, the file paths to examine, and the exact question. Example:
+> "In `src/services/orders.ts`, what is the full type signature of `processOrder()` (params + return type), and do any callers in `src/controllers/` depend on the return value? List each caller with the line where the return is used or discarded."
+Bad: "What does processOrder do?" — too vague, wastes a round-trip.
 
 **UI codegen exception:** If the story has `ui_codegen: true` in its DB record:
 - You MUST call `mcp__gemini__gemini_ui_code` for all visual/layout component code.

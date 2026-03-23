@@ -66,3 +66,14 @@
 {"ts":"2026-03-22T17:32:32Z","type":"hook.warn-sync-heavy-bash","actor":"hook","ref":"git","session":"","payload":{}}
 {"ts":"2026-03-22T17:32:37Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}
 {"ts":"2026-03-22T17:33:29Z","type":"hook.warn-sync-heavy-bash","actor":"hook","ref":"cat/head/tail","session":"","payload":{}}
+{"ts":"2026-03-22T17:41:51Z","type":"hook.warn-sync-heavy-bash","actor":"hook","ref":"git","session":"","payload":{}}
+{"ts":"2026-03-22T17:41:56Z","type":"hook.session-learning-check","actor":"hook","ref":"83b181e5-3253-4bb8-bd35-f610e10c0747","session":"","payload":{}}
+{"ts":"2026-03-22T19:07:36Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}
+{"ts":"2026-03-22T19:07:40Z","type":"hook.session-learning-check","actor":"hook","ref":"ad9fbb03-d08d-4e8f-a140-3630ea418285","session":"","payload":{}}
+{"ts":"2026-03-22T22:55:38Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}
+{"ts":"2026-03-22T23:02:23Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}
+{"ts":"2026-03-22T23:02:26Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}
+{"ts":"2026-03-22T23:33:51Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}
+{"ts":"2026-03-22T23:33:54Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}
+{"ts":"2026-03-22T23:57:55Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}
+{"ts":"2026-03-22T23:58:59Z","type":"hook.session-learning-check","actor":"hook","ref":"4d6a11a6-42bb-495d-9925-2491cdd405c3","session":"","payload":{}}

@@ -1,0 +1,32 @@
+{
+  "slug": "llm-pipeline-step-compliance",
+  "skill": "scope",
+  "scope": {
+    "files": 5,
+    "stories": 1,
+    "complexity": "small"
+  },
+  "route_hint": "research",
+  "prev": [],
+  "data": {
+    "topic": "How to prevent LLM agents from skipping steps in multi-step pipelines — techniques for ensuring process compliance when the orchestrator is an LLM that optimizes for output quality over process adherence",
+    "what": null,
+    "audience": null,
+    "platform": null,
+    "in_scope": null,
+    "out_of_scope": null,
+    "stack_detected": [
+      {
+        "marker": "CLAUDE.md",
+        "framework": null,
+        "language": "python/shell",
+        "dependencies": []
+      }
+    ],
+    "problem": null,
+    "why": null,
+    "end_goal": null,
+    "needs_research": true,
+    "complexity_reasoning": "LLM agent process compliance is an external domain — the codebase has the problem but the solution patterns come from AI agent research, workflow engines, and production orchestration systems."
+  }
+}
