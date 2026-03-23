@@ -440,6 +440,11 @@ def register(mcp):
                 params.append(branch)
 
             if plan_file is not None:
+                task_count = conn.execute(
+                    "SELECT COUNT(*) FROM tasks WHERE story_id = ?", (story_id,)
+                ).fetchone()[0]
+                if task_count == 0:
+                    return f"Cannot set plan_file on '{story_id}': story has 0 tasks. Add tasks before attaching a plan."
                 updates.append("plan_file = ?")
                 params.append(plan_file)
 
