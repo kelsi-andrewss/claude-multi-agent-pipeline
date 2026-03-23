@@ -429,4 +429,9 @@
 {"ts":"2026-03-23T16:41:34Z","type":"hook.session-learning-check","actor":"hook","ref":"7fe73c16-9156-427c-b0a9-5b23e856d4c9","session":"","payload":{}}
 {"ts":"2026-03-23T16:41:41Z","type":"hook.session-learning-check","actor":"hook","ref":"7fe73c16-9156-427c-b0a9-5b23e856d4c9","session":"","payload":{}}
 {"ts":"2026-03-23T16:43:09Z","type":"hook.session-learning-check","actor":"hook","ref":"7fe73c16-9156-427c-b0a9-5b23e856d4c9","session":"","payload":{}}
-{"ts":"2026-03-23T16:46:46Z","type":"hook.warn-sync-heavy-bash","actor":"hook","ref":"git","session":"","payload":{}}
+{"ts":"2026-03-23T16:43:20Z","type":"hook.warn-sync-heavy-bash","actor":"hook","ref":"git","session":"","payload":{}}
+{"ts":"2026-03-23T16:43:25Z","type":"hook.session-learning-check","actor":"hook","ref":"cdf2045b-444f-4a9c-a2eb-2c6eb0297578","session":"","payload":{}}
+{"ts":"2026-03-23T16:43:43Z","type":"hook.session-learning-check","actor":"hook","ref":"7fe73c16-9156-427c-b0a9-5b23e856d4c9","session":"","payload":{}}
+{"ts":"2026-03-23T16:45:14Z","type":"hook.session-learning-check","actor":"hook","ref":"acbc5569-52fd-4d2a-a2ac-7ef716ac1718","session":"","payload":{}}
+{"ts":"2026-03-23T16:46:05Z","type":"hook.session-learning-check","actor":"hook","ref":"acbc5569-52fd-4d2a-a2ac-7ef716ac1718","session":"","payload":{}}
+{"ts":"2026-03-23T16:46:41Z","type":"hook.warn-sync-heavy-bash","actor":"hook","ref":"git","session":"","payload":{}}
