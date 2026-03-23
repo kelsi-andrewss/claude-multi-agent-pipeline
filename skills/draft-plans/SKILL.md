@@ -318,6 +318,13 @@ The Architecture section covers: state management, data flow, API connections, i
    equivalent). Each criterion should map to at least one task. If the story has
    `test_files`, each criterion must reference the specific test file that will verify
    it. Write the `## Acceptance criteria` section.
+3.7. For stories with frontend: true, mixed: true, or any story whose tasks involve
+   event handlers, API calls, or user interactions: acceptance criteria MUST describe
+   observable user flows, not structural facts.
+   Wrong: "ChatPanel component exists" or "sendMessage function is defined"
+   Right: "User types message and clicks Send → message appears in message list → input clears → list scrolls to bottom"
+   Each criterion must trace: trigger → handler → state mutation → visible result.
+   Pure backend/infrastructure stories may use structural criteria.
 4. Write the plan file to plans/<name>.md with this structure:
 
    # <story title>

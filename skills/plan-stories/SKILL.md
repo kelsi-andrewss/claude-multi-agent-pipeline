@@ -116,6 +116,8 @@ redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infras
 or stories where UI is incidental (e.g., adding a field to an existing form).
 
 TEST_FILES RULE: For each story that creates or modifies functional code (logic, state transitions, data transforms, API handlers, business rules), set `test_files` to the corresponding test file paths using the project's convention (test_<file>.py, <file>.test.ts, <file>_test.dart, etc.). Stories that are pure docs, config (YAML/JSON/env), scaffold/boilerplate (project init, dependency install), or pure refactors that don't change observable behavior should set `needs_testing: false` instead. When in doubt, set test_files — the merge gate catches real bugs, skipping it hides them.
+
+BEHAVIORAL_ACCEPTANCE_CRITERIA RULE: For any story that creates UI components, connects endpoints, or wires event handlers, acceptance criteria MUST be behavioral flows — "user does X → Y happens" — not structural assertions ("component exists", "file created"). Each flow criterion traces the full chain: user action → event handler → state change → UI update. Structural criteria are acceptable only for pure backend/infrastructure stories with no user-facing interaction.
 """)
 ```
 
@@ -134,6 +136,8 @@ redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infras
 or stories where UI is incidental (e.g., adding a field to an existing form).
 
 TEST_FILES RULE: For each story that creates or modifies functional code (logic, state transitions, data transforms, API handlers, business rules), set `test_files` to the corresponding test file paths using the project's convention (test_<file>.py, <file>.test.ts, <file>_test.dart, etc.). Stories that are pure docs, config (YAML/JSON/env), scaffold/boilerplate (project init, dependency install), or pure refactors that don't change observable behavior should set `needs_testing: false` instead. When in doubt, set test_files — the merge gate catches real bugs, skipping it hides them.
+
+BEHAVIORAL_ACCEPTANCE_CRITERIA RULE: For any story that creates UI components, connects endpoints, or wires event handlers, acceptance criteria MUST be behavioral flows — "user does X → Y happens" — not structural assertions ("component exists", "file created"). Each flow criterion traces the full chain: user action → event handler → state change → UI update. Structural criteria are acceptable only for pure backend/infrastructure stories with no user-facing interaction.
 """)
 ```
 
