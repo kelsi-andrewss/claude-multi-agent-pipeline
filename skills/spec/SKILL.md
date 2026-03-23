@@ -37,6 +37,90 @@ User has requested: `/spec {{args}}`
 
 ---
 
+## Step 0.5: Scope gate (build mode only)
+
+Before entering the clarification loop, determine whether the input describes a **single feature** or a **full product/application**.
+
+**Product signals** (any 2+ of these → product, not feature):
+- Multiple distinct features or subsystems described (e.g., "voice pipeline + memory + GitHub integration")
+- Multiple external services or APIs involved (e.g., Deepgram, Claude, Cartesia, GitHub)
+- Custom infrastructure requirements (e.g., WebRTC, streaming pipelines, background workers)
+- Multiple data models that aren't related to a single entity (e.g., User, Fact, Conversation, WebhookEvent)
+- The description reads like a product brief, not a feature request
+
+**Set scope_type based on detection:**
+
+- If product detected: set `scope_type = "product"` and inform the user:
+  > "This looks like a product spec (multiple features/services). I'll build a product-level spec — acceptance criteria, constraints, boundaries, and architecture overview. No FeatureSpec JSON (use /presearch + /plan-stories to decompose into stories)."
+- Otherwise: set `scope_type = "feature"`
+
+**Proceed to Step 0.75** in either case.
+
+---
+
+## Step 0.75: Clarification loop (build mode only)
+
+Before extracting spec sections, analyze the description for gaps. The goal: every spec section should have enough input that extraction is grounded in user intent, not hallucination.
+
+### Coverage checklist
+
+Score each section as **covered** (description provides clear input or user confirmed a suggestion) or **gap** (must ask):
+
+| Section | Covered when... |
+|---|---|
+| Objective | Description states both *what* and *why* |
+| User stories | Roles and actions are clear |
+| Requirements | Concrete behaviors mentioned (not just "add X") |
+| Acceptance criteria | Derived from requirements — covered if requirements are covered |
+| Constraints | Any exclusions, NFRs, or known limits mentioned |
+| Integration points | Existing systems/models/APIs referenced, OR `--project-root` set for auto-discovery |
+| Out of scope | Explicit or inferable from description |
+| Boundaries | Sensitive data or auth implications clear |
+| FeatureSpec JSON | Pattern, entity, and field types determinable. **N/A for product specs — skip this section.** |
+
+### Clarification round
+
+For each **gap** and **inferable** section, generate questions grouped into batches of 2-4. Each question MUST include a suggested answer:
+
+```
+I have a few questions before building the spec:
+
+1. **User roles**: Who uses this feature? (I'm guessing: end user + admin — the admin manages [entity] settings)
+2. **Data model**: What fields does a [entity] need? (From your description I see: name, email. Missing: phone? address? notes?)
+3. **Access control**: Can all users create [entity], or only certain roles? (Guessing: any authenticated user)
+```
+
+Rules:
+- Lead with your best guess — the user should be able to say "yes" or just correct the wrong parts
+- Never ask a question you can confidently answer from the description or project context
+- If `--project-root` is set, scan the project first — don't ask about things you can discover (existing models, auth patterns, API style)
+- Group related questions (don't ask about roles in one round and permissions in the next)
+
+### Loop protocol
+
+1. Present the batch. Wait for user response.
+2. Incorporate answers. Show updated coverage status — list which sections moved from gap → covered/excluded. This is mandatory, not optional.
+3. If gaps remain, present next batch.
+4. When all sections are **covered** or **excluded**, state coverage summary and confirm:
+   > "All sections covered. Ready to generate the spec?"
+5. User confirms → proceed to Step 1. User adds more context → incorporate, re-show coverage, and re-check.
+
+**Exit condition**: coverage, not round count. The loop ends when every section is either **covered** (user provided or confirmed input) or **excluded** (user explicitly said skip). No round cap. No `[INFERRED]` markers. No guessing.
+
+### Persistent gap escalation
+
+If a section remains a **gap** after being asked about, the question failed — not the user. Escalate the approach:
+
+1. **First attempt** — suggest-and-ask. Lead with your best guess, let the user confirm or correct. (This is the default from the clarification round above.)
+2. **Second attempt** — rephrase with concrete options. Don't re-ask the same question. Break it down smaller or offer 2-3 specific alternatives the user can react to instead of generating from scratch. Example: "For access control, here are three common approaches: (a) any authenticated user can CRUD, (b) creator + admin only, (c) role-based with custom permissions. Which fits?"
+3. **Third attempt** — ask if the section applies at all. "Does this feature need access control, or should we explicitly exclude it?" If the user says skip, mark it **excluded** — that's a decision, not a gap.
+
+Never proceed with a gap. Never infer what the user didn't say. Every section resolves to a user decision.
+
+**Fast-path**: If the description is detailed enough that all sections score covered on first analysis, skip the loop entirely — state "Description is comprehensive, generating spec" and proceed to Step 1.
+
+---
+
 ## Step 1: Extract from description (build mode only)
 
 From the natural language description, extract content for each of the 9 spec sections.
@@ -93,6 +177,8 @@ Three-tier system for AI agent behavior during implementation:
 Infer from the feature description and project decisions. Sensitive fields get a "never expose" boundary automatically.
 
 ### 1i: FeatureSpec JSON
+
+Skip this section entirely when `scope_type = "product"`.
 
 Extract the machine-readable FeatureSpec from the sections above:
 
@@ -175,6 +261,8 @@ Then ask:
 Anything to change? (sections, fields, scope, etc. — or "good" to save)
 ```
 
+Note any **excluded** sections from Step 0.5 — these were explicitly skipped by the user and should not appear in the spec.
+
 **Refinement loop:**
 - User requests changes → apply, re-display affected section
 - User says "good" / "save" / "yes" → proceed to Step 3
@@ -190,8 +278,9 @@ Locate the target project's `decisions.sql`:
 - If not found, skip: `"No decisions.sql found — skipping conflict pre-check. Run /scout --bootstrap to enable."`
 
 If found, run conflict detection (same logic as `/factory` Step 0.75):
+- Skip FeatureSpec JSON conflict check when `scope_type = "product"`. Still check other constraints against decisions.
 - Parse decisions from SQL
-- Check FeatureSpec JSON against each decision
+- Check spec constraints against each decision
 - Classify as CONFLICT or WARNING
 
 **Report inline** (informational — don't block):
@@ -219,13 +308,16 @@ Conflicts found here are already included in the Constraints section. `/factory`
 
 Determine output path:
 - If `--edit` mode: overwrite the original file
-- If build mode: write to `specs/<entity-lowercase>.md` (relative to project root or cwd). Create `specs/` directory if needed.
+- If build mode and `scope_type = "product"`: write to `specs/<product-lowercase>-product.md` (relative to project root or cwd). Create `specs/` directory if needed.
+- If build mode and `scope_type = "feature"`: write to `specs/<entity-lowercase>.md` (relative to project root or cwd). Create `specs/` directory if needed.
 
 Write the full markdown document. The FeatureSpec JSON is embedded in the `## FeatureSpec` section — `/factory` can extract it from there, or the user can copy it to a standalone `.json` file.
 
 ---
 
 ## Step 5: Report
+
+**When `scope_type = "feature"`:**
 
 ```
 Spec saved: <output-path>
@@ -242,4 +334,20 @@ Spec saved: <output-path>
 
 Run: /factory specs/<entity>.md
   (or extract the FeatureSpec JSON and run /factory specs/<entity>.json)
+```
+
+**When `scope_type = "product"`:**
+
+```
+Spec saved: <output-path>
+
+  Scope: product
+  Objective: <one-line>
+  Features: <count> (high-level)
+  Acceptance criteria: <count>
+  Constraints: <count> (including <N> project decisions)
+  Out of scope: <count> items
+
+Next: /presearch specs/<product>-product.md
+  (or /plan-stories to decompose into stories)
 ```

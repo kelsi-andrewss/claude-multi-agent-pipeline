@@ -22,7 +22,11 @@ def scrub_credentials(text):
         (r'(--token\s+)\S+', r'\1[REDACTED]'),
         (r'((?:password|secret|passwd)[=:]\s*)\S+', r'\1[REDACTED]'),
         (r'AKIA[0-9A-Z]{16}', '[REDACTED]'),
-        (r'("(?:api_key|apikey|api_secret|token|secret|password|access_token|refresh_token|auth)"\s*:\s*)"[^"]*"', r'\1"[REDACTED]"'),
+        (r'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+', '[REDACTED]'),
+        (r'xox[bpras]-[a-zA-Z0-9-]+', '[REDACTED]'),
+        (r'gsk_[a-zA-Z0-9]{20,}', '[REDACTED]'),
+        (r'("(?:api_key|apikey|api_secret|token|secret|password|access_token|refresh_token|auth|client_secret|private_key|signing_key|webhook_secret)"\s*:\s*)"[^"]*"', r'\1"[REDACTED]"'),
+        (r"('(?:api_key|apikey|api_secret|token|secret|password|access_token|refresh_token|auth|client_secret|private_key|signing_key|webhook_secret)'\s*:\s*)'[^']*'", r"\1'[REDACTED]'"),
     ]
     for pat, repl in patterns:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)

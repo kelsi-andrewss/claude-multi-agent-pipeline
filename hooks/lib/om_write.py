@@ -35,6 +35,9 @@ DEDUP_THRESHOLD = 0.85
 PRUNE_THRESHOLD = 0.01
 DEFAULT_DECAY = 0.05
 
+_ollama_fallback_warned = False
+_migration_done = False
+
 
 @contextmanager
 def _db_connection():
@@ -47,11 +50,34 @@ def _db_connection():
         conn.close()
 
 
+def _ensure_primary_tag_column():
+    global _migration_done
+    if _migration_done:
+        return
+    try:
+        with _db_connection() as conn:
+            cursor = conn.cursor()
+            cols = {row[1] for row in cursor.execute("PRAGMA table_info(memories)").fetchall()}
+            if "primary_tag" not in cols:
+                cursor.execute("ALTER TABLE memories ADD COLUMN primary_tag TEXT")
+                cursor.execute("UPDATE memories SET primary_tag = json_extract(tags, '$[0]') WHERE primary_tag IS NULL")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_primary_tag ON memories(primary_tag)")
+                conn.commit()
+            else:
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_primary_tag ON memories(primary_tag)")
+                conn.commit()
+        _migration_done = True
+    except sqlite3.Error:
+        _migration_done = True
+
+
 def _content_hash(content):
     return hashlib.md5(content.lower().strip().encode()).hexdigest()[:16]
 
 
 def dedup_check(content, primary_tag):
+    """Returns (existing_id or None, embedding or None)."""
+    _ensure_primary_tag_column()
     embedding = get_embedding(content)
 
     if embedding is not None:
@@ -59,8 +85,8 @@ def dedup_check(content, primary_tag):
             with _db_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT id, mean_vec FROM memories WHERE tags LIKE ? AND mean_vec IS NOT NULL",
-                    (f"%{primary_tag}%",),
+                    "SELECT id, mean_vec FROM memories WHERE primary_tag = ? AND mean_vec IS NOT NULL",
+                    (primary_tag,),
                 )
                 rows = cursor.fetchall()
 
@@ -68,27 +94,30 @@ def dedup_check(content, primary_tag):
                     stored_vec = blob_to_embedding(blob)
                     sim = cosine_similarity(embedding, stored_vec)
                     if sim >= DEDUP_THRESHOLD:
-                        return row_id
+                        return row_id, embedding
         except sqlite3.Error:
             pass
-        return None
+        return None, embedding
 
-    print("om_write: ollama_fallback — embedding unavailable for dedup", file=sys.stderr)
+    global _ollama_fallback_warned
+    if not _ollama_fallback_warned:
+        print("om_write: ollama_fallback — embedding unavailable for dedup", file=sys.stderr)
+        _ollama_fallback_warned = True
     simhash = _content_hash(content)
     try:
         with _db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id FROM memories WHERE simhash = ? AND tags LIKE ?",
-                (simhash, f"%{primary_tag}%"),
+                "SELECT id FROM memories WHERE simhash = ? AND primary_tag = ?",
+                (simhash, primary_tag),
             )
             row = cursor.fetchone()
             if row:
-                return row[0]
+                return row[0], None
     except sqlite3.Error:
         pass
 
-    return None
+    return None, None
 
 
 def enforce_budget(conn, primary_tag):
@@ -101,8 +130,8 @@ def enforce_budget(conn, primary_tag):
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT COUNT(*) FROM memories WHERE tags LIKE ?",
-            (f"%{primary_tag}%",),
+            "SELECT COUNT(*) FROM memories WHERE primary_tag = ?",
+            (primary_tag,),
         )
         count = cursor.fetchone()[0]
 
@@ -111,8 +140,8 @@ def enforce_budget(conn, primary_tag):
 
         now = time.time()
         cursor.execute(
-            "SELECT id, feedback_score, decay_lambda, created_at FROM memories WHERE tags LIKE ?",
-            (f"%{primary_tag}%",),
+            "SELECT id, feedback_score, decay_lambda, created_at FROM memories WHERE primary_tag = ?",
+            (primary_tag,),
         )
         entries = []
         for row_id, score, decay, created_at in cursor.fetchall():
@@ -171,7 +200,7 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
     primary_tag = valid_tags[0]
 
     try:
-        existing_id = dedup_check(content, primary_tag)
+        existing_id, embedding = dedup_check(content, primary_tag)
         if existing_id is not None:
             now = int(time.time())
             with _db_connection() as conn:
@@ -184,7 +213,6 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
             print(f"om_write: dedup_fired — existing_id={existing_id} primary_tag={primary_tag}", file=sys.stderr)
             return existing_id
 
-        embedding = get_embedding(content)
         now = int(time.time())
         new_id = str(uuid.uuid4())
 
@@ -206,11 +234,11 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO memories (id, user_id, content, simhash, primary_sector, tags, "
-                "mean_dim, mean_vec, created_at, updated_at, last_seen_at, salience, "
+                "primary_tag, mean_dim, mean_vec, created_at, updated_at, last_seen_at, salience, "
                 "decay_lambda, feedback_score) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (new_id, user_id, content, simhash, sector, tags_json,
-                 mean_dim, mean_vec, now, now, now, salience,
+                 primary_tag, mean_dim, mean_vec, now, now, now, salience,
                  decay_lambda, salience),
             )
             conn.commit()

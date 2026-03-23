@@ -199,7 +199,38 @@ If >5 features in the synthesis:
   - **Phase 2**: enhancement features, nice-to-haves that don't block core flow
   - **Cut**: features that add significant complexity without proportional value, or that can be reconsidered after MVP feedback
 
-Write the phasing directly into the briefing output. This skill does NOT gate on user input — it writes its assessment and moves on. The user reviews the briefing after.
+Write the phasing directly into the briefing output. This skill does NOT gate on user input for phasing — it writes its assessment and moves on.
+
+---
+
+## Step 5.5: Conflict resolution check
+
+Before writing, scan the assembled briefing content for unresolved conflicts or gaps:
+
+- **Clarify-vs-scout contradictions**: a clarify decision says X, but scout findings imply Y (e.g., clarify decided "use REST" but scout found the project uses tRPC exclusively)
+- **Research conflicts**: the research artifact surfaced conflicting sources that were not resolved in Step 5
+- **Missing critical info**: a required briefing section (Problem Statement, Features, Dependencies) has no content or only placeholder text
+- **Scope mismatches**: scope artifact's `out_of_scope` items appear in the Features list, or `in_scope` items are missing
+
+**If clean** (no conflicts, no gaps): proceed silently to Step 6.
+
+**If conflicts or gaps found**: present them to the user with suggested resolutions:
+
+```
+Before writing the briefing, I found <N> unresolved conflicts:
+
+1. **<Area>**: Clarify decided <X>, but scout found <Y>.
+   Suggested resolution: <recommendation with reasoning>
+
+2. **<Area>**: <gap description>
+   Suggested resolution: <recommendation>
+
+How should I resolve these?
+```
+
+Wait for user response. Incorporate their decisions into the briefing content.
+
+If the user's response surfaces one new issue, do one follow-up. Briefing is synthesis, not discovery — keep this light. After the follow-up (or if no new issues), proceed to Step 6.
 
 ---
 

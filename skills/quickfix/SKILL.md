@@ -1,10 +1,10 @@
 ---
 name: quickfix
+user_invocable: false
 description: >
   Standalone quickfix pipeline: validates criteria, writes plan, launches coder in worktree,
   merges via /merge-worktree. Accepts optional --context flag for artifact chain ingestion
   (upstream clarify/research findings enrich the plan).
-  Use when the user says "/quickfix <description>" or "/quickfix --context path/to/artifact.json <description>".
 args:
   - name: args
     type: string
@@ -15,6 +15,10 @@ args:
 # Quickfix Skill Invoked
 
 User has requested: `/quickfix {{args}}`
+
+## Flow control
+
+**Continuous execution.** Steps 1 through 9 execute as one uninterrupted flow. Do not pause, narrate, summarize, or ask for confirmation between steps. The only legitimate stop is an error that prevents the next step from running. Parse → validate → read → plan → branch → coder → merge → report — no commentary in between.
 
 ---
 
@@ -169,7 +173,7 @@ git checkout dev && git checkout -b quickfix/<slug>
 
 ## Step 7: Launch quick-fixer
 
-Launch a `quick-fixer` background agent (model: Sonnet, always) in a worktree on `quickfix/<slug>` with the plan file (or inline plan from Step 4b) as input.
+Launch a `quick-fixer` background agent (model: Sonnet, always) with `run_in_background: true`. The coder prompt creates its own worktree — do NOT use `isolation: "worktree"` on the Agent call (that creates a second, unmanaged worktree that never gets cleaned up).
 
 Use the standard coder prompt from run-stories Step 4:
 
@@ -192,9 +196,16 @@ Do NOT edit files outside this worktree.
 
 ## Tool constraints
 You are the coder. Write all code yourself.
-Do NOT call any mcp__gemini__* tools (gemini_generate, analyze, audit, find_bug, plan, test, etc.).
 Do NOT call any pm_* tools except pm_update_story (for state transitions).
-Gemini is a research tool for the orchestrator — not available to coders.
+
+**Gemini MCP — allowed tools:**
+- `mcp__gemini__analyze` — use for codebase investigation when you need to understand code outside your write targets. This preserves your context budget: Gemini reads the files and returns a compressed answer instead of you reading 500 lines that produce a one-sentence insight.
+
+**Gemini MCP — blocked tools:** All other `mcp__gemini__*` tools (plan, audit, find_bug, test, gemini_generate, gemini_ui_code, etc.) are orchestrator-only.
+
+**Query format for `analyze`:** Be specific. Include the symbol name, the file paths to examine, and the exact question. Example:
+> "In `src/services/orders.ts`, what is the full type signature of `processOrder()` (params + return type), and do any callers in `src/controllers/` depend on the return value? List each caller with the line where the return is used or discarded."
+Bad: "What does processOrder do?" — too vague, wastes a round-trip.
 
 ## Steps
 
@@ -239,6 +250,26 @@ Gemini is a research tool for the orchestrator — not available to coders.
 ## Step 8: On completion
 
 Invoke `/merge-worktree` to diff gate, review, and merge to dev.
+
+### Step 8b: Worktree cleanup guarantee
+
+After Step 8 completes (whether /merge-worktree succeeded or failed), verify the coder's worktree is removed:
+
+```bash
+WORKTREE_PATH="<project-root>/.claude/worktrees/story/<slug>"
+if [ -d "$WORKTREE_PATH" ]; then
+  bash ~/.claude/scripts/worktree-cleanup.sh --worktree-path "$WORKTREE_PATH" --branch "quickfix/<slug>"
+fi
+```
+
+Also check for any stale agent isolation worktrees from this session:
+```bash
+for wt in .claude/worktrees/agent-*; do
+  [ -d "$wt" ] && git worktree remove --force "$wt" 2>/dev/null
+done
+```
+
+This catches worktrees left behind when /merge-worktree is bypassed or fails mid-cleanup.
 
 ---
 

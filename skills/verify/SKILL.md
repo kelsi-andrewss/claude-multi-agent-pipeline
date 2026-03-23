@@ -153,6 +153,24 @@ If the build passed (or was skipped), check for test infrastructure and run test
 
 ---
 
+## Step 2.5: Smoke test
+
+Detect if the project has a runnable entry point (dev server, CLI, etc.).
+
+**Detection signals** (check in project root):
+- `package.json` with scripts containing `dev`, `start`, or `serve`
+- `main.go`
+- `manage.py` (Django runserver)
+- `bin/` directory with executables
+
+**If a runnable entry point is detected**: report "Smoke test recommended — verify the primary user flow manually" with the specific command to run (e.g., `npm run dev`, `go run main.go`, `python manage.py runserver`). Do NOT auto-run dev servers — they block.
+
+**If no runnable entry point is detected** (library, config-only, skill files): skip silently.
+
+This step is advisory, not blocking — it surfaces the need without attempting to automate arbitrary app flows.
+
+---
+
 ## Step 3: Acceptance criteria walk
 
 Collect all plan files:

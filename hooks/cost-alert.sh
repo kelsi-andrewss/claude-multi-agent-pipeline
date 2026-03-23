@@ -9,21 +9,18 @@ require_profile 1
 
 CLAUDE_ROOT="$(git -C "$(dirname "$(realpath "$0")")" rev-parse --show-toplevel)"
 CONFIG_FILE="${CLAUDE_ROOT}/hooks/cost-alert-config.json"
-TRACKER_DIR="/opt/homebrew/opt/claude-code-tracker/libexec/src"
 
 # Read threshold from config
-THRESHOLD=$(python3 -c "
+THRESHOLD=$(python3 - "$CONFIG_FILE" <<'PYEOF'
 import json, sys
 try:
-    with open('$CONFIG_FILE') as f:
-        print(f.read().strip())
-except:
-    print('{\"threshold_usd\": 5.00}')
-" 2>/dev/null | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-print(d.get('threshold_usd', 5.00))
-" 2>/dev/null)
+    with open(sys.argv[1]) as f:
+        d = json.loads(f.read().strip())
+    print(d.get('threshold_usd', 5.00))
+except Exception:
+    print('5.00')
+PYEOF
+)
 
 THRESHOLD="${THRESHOLD:-5.00}"
 
@@ -37,26 +34,28 @@ if [[ -z "$TOKENS_FILE" || ! -f "$TOKENS_FILE" ]]; then
   exit 0
 fi
 
-COST=$(python3 -c "
+COST=$(python3 - "$TOKENS_FILE" <<'PYEOF'
 import json, sys
 try:
-    with open('$TOKENS_FILE') as f:
+    with open(sys.argv[1]) as f:
         d = json.load(f)
-    # Support both flat and nested structures
     cost = d.get('estimated_cost_usd') or d.get('today', {}).get('estimated_cost_usd') or 0
     print(f'{float(cost):.2f}')
-except:
+except Exception:
     print('0.00')
-" 2>/dev/null)
+PYEOF
+)
 
 COST="${COST:-0.00}"
 
 # Compare: if cost >= threshold, warn
-EXCEEDED=$(python3 -c "
-cost = float('$COST')
-threshold = float('$THRESHOLD')
+EXCEEDED=$(python3 - "$COST" "$THRESHOLD" <<'PYEOF'
+import sys
+cost = float(sys.argv[1])
+threshold = float(sys.argv[2])
 print('yes' if cost >= threshold else 'no')
-" 2>/dev/null)
+PYEOF
+)
 
 if [[ "$EXCEEDED" == "yes" ]]; then
   echo "" >&2

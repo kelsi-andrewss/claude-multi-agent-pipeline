@@ -35,8 +35,10 @@ Parse `{{args}}` to extract inputs and flags.
 **Input modes (remaining tokens after flag stripping):**
 
 1. **Manifest mode**: a token ends with `.json` and the file exists (e.g., `.ship-manifest.json`).
-   - Read the artifact JSON. Extract story list from `data.stories` (array of story IDs or objects with `story_id` fields).
-   - If artifact `data` contains a `briefing_path` field and `--briefing` was not explicitly set, use it as `briefing_path`.
+   - Read the artifact JSON. Extract story list using the appropriate format:
+     - If `data.epics` exists and is an array: iterate each epic object, collect `epic.stories` from every entry, flatten into one combined story list. Each `epic.stories` entry has the same shape as `data.stories` entries (objects with `id`, `title`, `agent`, `detail_file`).
+     - Else if `data.stories` exists: use it directly (array of story IDs or objects with `story_id` fields).
+   - If artifact `data` contains a `briefing_path` field and `--briefing` was not explicitly set, use it as `briefing_path`. (Resolved from top-level `data`, not from within individual epic objects.)
    - Store `manifest` for provenance tracking.
 
 2. **ID mode**: tokens matching `story-\d+` or `epic-\d+`.
@@ -318,6 +320,13 @@ The Architecture section covers: state management, data flow, API connections, i
    equivalent). Each criterion should map to at least one task. If the story has
    `test_files`, each criterion must reference the specific test file that will verify
    it. Write the `## Acceptance criteria` section.
+3.7. For stories with frontend: true, mixed: true, or any story whose tasks involve
+   event handlers, API calls, or user interactions: acceptance criteria MUST describe
+   observable user flows, not structural facts.
+   Wrong: "ChatPanel component exists" or "sendMessage function is defined"
+   Right: "User types message and clicks Send → message appears in message list → input clears → list scrolls to bottom"
+   Each criterion must trace: trigger → handler → state mutation → visible result.
+   Pure backend/infrastructure stories may use structural criteria.
 4. Write the plan file to plans/<name>.md with this structure:
 
    # <story title>
@@ -642,7 +651,7 @@ If any agents failed or returned errors, list under an `Errors:` section.
 
 ## Artifact contract
 
-**Reads:** `.ship-manifest.json` (from `/plan-stories`) or inline story/epic IDs
+**Reads:** `.ship-manifest.json` (from `/plan-stories`) or inline story/epic IDs. Manifest may contain either `data.stories` (single-epic, flat list) or `data.epics[].stories` (multi-epic, stories nested under each epic object).
 **Writes:** `plans/*.md` (one per story)
 **DB side effects:** `pm_update_story(plan_file=...)` for each successful plan
 

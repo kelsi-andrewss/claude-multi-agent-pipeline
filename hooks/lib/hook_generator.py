@@ -8,7 +8,7 @@ Usage:
     hook_generator.py <theme> [--project-root <path>]
     hook_generator.py --test
 """
-import json, os, re, sqlite3, sys, tempfile
+import json, os, re, shlex, sqlite3, sys, tempfile
 
 COMPLIANCE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compliance")
 SETTINGS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "settings.json")
@@ -120,14 +120,14 @@ def _generate_bash_pretooluse(theme, classification):
         dangerous = [w for w in key_words if len(w) > 2 and w not in ("use", "never", "don", "without", "always", "the", "for", "and", "with")]
         if dangerous:
             pattern_str = "|".join(dangerous[:3])
-            condition_check = f'  if echo "$COMMAND" | grep -qEi "{pattern_str}"; then'
+            condition_check = f'  if echo "$COMMAND" | grep -qEi {shlex.quote(pattern_str)}; then'
         else:
             return None
     else:
         return None
 
     return f"""#!/bin/bash
-# Auto-generated compliance hook. Source: correction_groups theme "{theme[:200]}". Mode: warn-only.
+# Auto-generated compliance hook. Source: correction_groups theme {shlex.quote(theme[:200])}. Mode: warn-only.
 # Hook type: PreToolUse, matcher: {matcher}
 
 INPUT=$(cat)
@@ -140,7 +140,7 @@ print(ti.get('command', ti.get('content', ti.get('file_path', ''))))
 " 2>/dev/null)
 
 {condition_check}
-    echo "COMPLIANCE WARNING: This action may violate preference: {theme[:200]}" >&2
+    echo "COMPLIANCE WARNING: This action may violate preference:" {shlex.quote(theme[:200])} >&2
     echo "Source: auto-generated from correction_groups. Mode: warn-only." >&2
   fi
 
@@ -150,18 +150,18 @@ exit 0
 
 def _bash_regex_check(pattern):
     safe_pattern = pattern.replace("\\s+", "[[:space:]]+").replace("\\s", "[[:space:]]")
-    return f'  if echo "$COMMAND" | grep -qEi "{safe_pattern}"; then'
+    return f'  if echo "$COMMAND" | grep -qEi {shlex.quote(safe_pattern)}; then'
 
 
 def _generate_bash_stop(theme):
     return f"""#!/bin/bash
-# Auto-generated compliance hook. Source: correction_groups theme "{theme[:200]}". Mode: warn-only.
+# Auto-generated compliance hook. Source: correction_groups theme {shlex.quote(theme[:200])}. Mode: warn-only.
 # Hook type: Stop (response-structure)
 # NOTE: Stop hooks cannot prevent output already sent. This logs a warning for future awareness.
 
 INPUT=$(cat)
 
-echo "COMPLIANCE WARNING: Response may violate preference: {theme[:200]}" >&2
+echo "COMPLIANCE WARNING: Response may violate preference:" {shlex.quote(theme[:200])} >&2
 echo "Source: auto-generated from correction_groups. Mode: warn-only." >&2
 
 exit 0

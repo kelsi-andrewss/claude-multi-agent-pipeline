@@ -139,7 +139,7 @@ if [[ -n "$BRANCH" ]]; then
     REMOVED_BRANCH="true"
   else
     echo "Local branch $BRANCH not found or already deleted" >&2
-    REMOVED_BRANCH="true"
+    REMOVED_BRANCH="false"
   fi
 
   # Delete remote branch

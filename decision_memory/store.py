@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,7 +39,29 @@ def _derive_domain_from_scopes(scopes: list[DecisionScope]) -> str | None:
     return ",".join(sorted(domains)) if domains else "general"
 
 
+def _compute_scope_overlap(new_patterns: set[str], existing_patterns: set[str]) -> float:
+    if not new_patterns and not existing_patterns:
+        return 0.0
+    intersection = new_patterns & existing_patterns
+    return len(intersection) / max(len(new_patterns), len(existing_patterns))
+
+
+def _merge_relationships(existing: str | None, new_entry: str) -> str:
+    seen: set[str] = set()
+    if existing and existing.strip():
+        for token in existing.split(","):
+            token = token.strip()
+            if token:
+                seen.add(token)
+    new_entry = new_entry.strip()
+    if new_entry:
+        seen.add(new_entry)
+    return ",".join(sorted(seen))
+
+
 class DecisionStore:
+    _vec_warned: bool = False
+
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.dump_path = project_root / ".claude" / "decisions.sql"
@@ -49,15 +73,11 @@ class DecisionStore:
             self.sync_from_dump()
 
     def sync_from_dump(self) -> None:
-        if self.db_path.exists():
-            self.db_path.unlink()
-            for suffix in ("-shm", "-wal"):
-                p = self.db_path.parent / (self.db_path.name + suffix)
-                if p.exists():
-                    p.unlink()
-
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = self._get_connection()
+        tmp_path = self.db_path.with_suffix(".db.tmp")
+        conn = sqlite3.connect(str(tmp_path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
         try:
             dump_content = self._read_dump()
             if dump_content:
@@ -83,6 +103,11 @@ class DecisionStore:
             conn.commit()
         finally:
             conn.close()
+        os.replace(str(tmp_path), str(self.db_path))
+        for suffix in ("-shm", "-wal"):
+            p = Path(str(self.db_path) + suffix)
+            if p.exists():
+                p.unlink()
 
     def record(self, decision: Decision) -> int:
         self.ensure_ready()
@@ -129,37 +154,17 @@ class DecisionStore:
         self.ensure_ready()
         conn = self._get_connection()
         try:
-            row = conn.execute(
-                "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
-                "FROM decisions WHERE id = ?",
-                (decision_id,),
-            ).fetchone()
-            if row is None:
-                return None
-
-            scope_rows = conn.execute(
-                "SELECT id, decision_id, scope_type, scope_value FROM decision_scopes WHERE decision_id = ?",
+            rows = conn.execute(
+                "SELECT d.id, d.content, d.reasoning, d.status, d.source, d.superseded_by, "
+                "d.created_at, d.updated_at, d.domain, d.related_decisions, "
+                "s.id, s.decision_id, s.scope_type, s.scope_value "
+                "FROM decisions d LEFT JOIN decision_scopes s ON s.decision_id = d.id "
+                "WHERE d.id = ? ORDER BY s.id",
                 (decision_id,),
             ).fetchall()
-
-            scopes = [
-                DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
-                for s in scope_rows
-            ]
-
-            return Decision(
-                id=row[0],
-                content=row[1],
-                reasoning=row[2],
-                status=row[3],
-                source=row[4],
-                superseded_by=row[5],
-                created_at=row[6],
-                updated_at=row[7],
-                domain=row[8],
-                related_decisions=row[9],
-                scopes=scopes,
-            )
+            if not rows:
+                return None
+            return self._rows_to_decisions(rows)[0]
         finally:
             conn.close()
 
@@ -167,44 +172,20 @@ class DecisionStore:
         self.ensure_ready()
         conn = self._get_connection()
         try:
+            query = (
+                "SELECT d.id, d.content, d.reasoning, d.status, d.source, d.superseded_by, "
+                "d.created_at, d.updated_at, d.domain, d.related_decisions, "
+                "s.id, s.decision_id, s.scope_type, s.scope_value "
+                "FROM decisions d LEFT JOIN decision_scopes s ON s.decision_id = d.id"
+            )
             if status is not None:
-                rows = conn.execute(
-                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
-                    "FROM decisions WHERE status = ? ORDER BY id",
-                    (status,),
-                ).fetchall()
+                query += " WHERE d.status = ?"
+                query += " ORDER BY d.id, s.id"
+                rows = conn.execute(query, (status,)).fetchall()
             else:
-                rows = conn.execute(
-                    "SELECT id, content, reasoning, status, source, superseded_by, created_at, updated_at, domain, related_decisions "
-                    "FROM decisions ORDER BY id"
-                ).fetchall()
-
-            decisions = []
-            for row in rows:
-                scope_rows = conn.execute(
-                    "SELECT id, decision_id, scope_type, scope_value FROM decision_scopes WHERE decision_id = ?",
-                    (row[0],),
-                ).fetchall()
-                scopes = [
-                    DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
-                    for s in scope_rows
-                ]
-                decisions.append(
-                    Decision(
-                        id=row[0],
-                        content=row[1],
-                        reasoning=row[2],
-                        status=row[3],
-                        source=row[4],
-                        superseded_by=row[5],
-                        created_at=row[6],
-                        updated_at=row[7],
-                        domain=row[8],
-                        related_decisions=row[9],
-                        scopes=scopes,
-                    )
-                )
-            return decisions
+                query += " ORDER BY d.id, s.id"
+                rows = conn.execute(query).fetchall()
+            return self._rows_to_decisions(rows)
         finally:
             conn.close()
 
@@ -242,6 +223,7 @@ class DecisionStore:
         conn.executescript(METADATA_DDL)
         conn.executescript(FTS_DDL)
         self._try_create_vec_table(conn)
+        self._check_vec_status()
 
     def _migrate_v1_to_v2(self, conn: sqlite3.Connection) -> None:
         try:
@@ -279,6 +261,44 @@ class DecisionStore:
             log.warning("sqlite-vec unavailable: %s", e)
             self._vec_available = False
 
+    def _check_vec_status(self) -> None:
+        if self._vec_available is False and not DecisionStore._vec_warned:
+            print(
+                "decision_memory: sqlite-vec unavailable — vector search disabled",
+                file=sys.stderr,
+            )
+            DecisionStore._vec_warned = True
+
+    @staticmethod
+    def _rows_to_decisions(rows: list[tuple]) -> list[Decision]:
+        decisions: dict[int, Decision] = {}
+        for row in rows:
+            did = row[0]
+            if did not in decisions:
+                decisions[did] = Decision(
+                    id=row[0],
+                    content=row[1],
+                    reasoning=row[2],
+                    status=row[3],
+                    source=row[4],
+                    superseded_by=row[5],
+                    created_at=row[6],
+                    updated_at=row[7],
+                    domain=row[8],
+                    related_decisions=row[9],
+                    scopes=[],
+                )
+            if row[10] is not None:
+                decisions[did].scopes.append(
+                    DecisionScope(
+                        id=row[10],
+                        decision_id=row[11],
+                        scope_type=row[12],
+                        scope_value=row[13],
+                    )
+                )
+        return list(decisions.values())
+
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
         conn.execute("PRAGMA journal_mode=WAL")
@@ -292,6 +312,9 @@ class DecisionStore:
             except (ImportError, AttributeError, sqlite3.OperationalError):
                 pass
         return conn
+
+    def get_connection(self) -> sqlite3.Connection:
+        return self._get_connection()
 
     def _read_dump(self) -> str | None:
         if not self.dump_path.exists():
@@ -314,5 +337,126 @@ class DecisionStore:
                 ("dump_hash", dump_hash or ""),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def process_scope_overlap(
+        self, decision_id: int, new_patterns: set[str]
+    ) -> tuple[list[int], list[str]]:
+        """Check active decisions for scope overlap and auto-supersede/relate.
+
+        Returns (superseded_ids, warnings).
+        """
+        existing = self.list_all(status="active")
+        superseded_ids: list[int] = []
+        warnings: list[str] = []
+        related_entries: list[str] = []
+        conn = self._get_connection()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            for existing_d in existing:
+                if existing_d.id == decision_id:
+                    continue
+                existing_patterns = {
+                    s.scope_value for s in existing_d.scopes if s.scope_type == "file"
+                }
+                overlap = _compute_scope_overlap(new_patterns, existing_patterns)
+                if overlap > 0.5:
+                    conn.execute(
+                        "UPDATE decisions SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?",
+                        (decision_id, now, existing_d.id),
+                    )
+                    superseded_ids.append(existing_d.id)
+                elif overlap > 0:
+                    warnings.append(
+                        f"decision-{existing_d.id} has partial scope overlap ({overlap:.0%})"
+                    )
+                    related_entries.append(f"{existing_d.id}:related")
+                    merged = _merge_relationships(existing_d.related_decisions, f"{decision_id}:related")
+                    conn.execute(
+                        "UPDATE decisions SET related_decisions = ?, updated_at = ? WHERE id = ?",
+                        (merged, now, existing_d.id),
+                    )
+            if related_entries:
+                new_rels = None
+                for entry in related_entries:
+                    new_rels = _merge_relationships(new_rels, entry)
+                conn.execute(
+                    "UPDATE decisions SET related_decisions = ?, updated_at = ? WHERE id = ?",
+                    (new_rels, now, decision_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return superseded_ids, warnings
+
+    def rebuild_index(self, provider: "EmbeddingProvider") -> int:
+        """Rebuild the search index using the given embedding provider."""
+        from .search import SearchEngine
+
+        conn = self._get_connection()
+        try:
+            engine = SearchEngine(conn, provider)
+            count = engine.rebuild_index()
+            conn.commit()
+            return count
+        finally:
+            conn.close()
+
+    def search(self, query_text: str, provider: "EmbeddingProvider", limit: int = 5) -> list:
+        """Run hybrid search and return SearchResult list."""
+        from .search import SearchEngine
+
+        conn = self._get_connection()
+        try:
+            engine = SearchEngine(conn, provider)
+            return engine.hybrid_search(query_text, limit=limit)
+        finally:
+            conn.close()
+
+    def list_by_domain(self, domain: str, limit: int = 50) -> list[Decision]:
+        """Return active decisions matching the given domain."""
+        self.ensure_ready()
+        conn = self._get_connection()
+        try:
+            columns = conn.execute("PRAGMA table_info(decisions)").fetchall()
+            has_domain = any(col[1] == "domain" for col in columns)
+            if not has_domain:
+                return []
+
+            rows = conn.execute(
+                "SELECT id, content, reasoning, status, source, superseded_by, "
+                "created_at, updated_at, related_decisions FROM decisions "
+                "WHERE status = 'active' AND (domain = ? OR domain LIKE ?) "
+                "ORDER BY id LIMIT ?",
+                (domain, f"%{domain}%", limit),
+            ).fetchall()
+
+            decisions = []
+            for row in rows:
+                scope_rows = conn.execute(
+                    "SELECT id, decision_id, scope_type, scope_value "
+                    "FROM decision_scopes WHERE decision_id = ?",
+                    (row[0],),
+                ).fetchall()
+                scopes = [
+                    DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
+                    for s in scope_rows
+                ]
+                decisions.append(
+                    Decision(
+                        id=row[0],
+                        content=row[1],
+                        reasoning=row[2],
+                        status=row[3],
+                        source=row[4],
+                        superseded_by=row[5],
+                        created_at=row[6],
+                        updated_at=row[7],
+                        related_decisions=row[8],
+                        scopes=scopes,
+                    )
+                )
+            return decisions
         finally:
             conn.close()

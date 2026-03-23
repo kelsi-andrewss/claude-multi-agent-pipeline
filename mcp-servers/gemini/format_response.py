@@ -139,14 +139,70 @@ def fmt_dev_branch(data: dict) -> str:
 # ===========================================================================
 
 
+def _fmt_ship_multi(data: dict) -> str:
+    epics = data["epics"]
+    is_proposal = data.get("phase") == "proposal"
+    pid = data.get("proposal_id", "")
+    total_stories = 0
+
+    md = "# pm_ship — multi-epic"
+    if is_proposal:
+        md += " proposal"
+    md += "\n\n"
+
+    if is_proposal and pid:
+        md += f"Proposal {pid}\n\n"
+
+    for epic in epics:
+        eid = epic.get("epic_id", "?")
+        etitle = epic.get("epic_title", "")
+        stories = epic.get("proposed_stories" if is_proposal else "stories", [])
+        total_stories += len(stories)
+
+        md += f"## {eid}: {etitle}\n\n"
+
+        if is_proposal:
+            md += "| # | Title | Agent |\n|---|-------|-------|\n"
+            for i, s in enumerate(stories, 1):
+                t = s.get("title", "?") if isinstance(s, dict) else str(s)
+                a = _abbr_agent(s.get("agent")) if isinstance(s, dict) else "—"
+                md += f"| {i} | {t} | {a} |\n"
+        else:
+            md += "| Story | Title | Agent | Write files |\n|-------|-------|-------|-------------|\n"
+            for s in stories:
+                sid = s.get("id", "?")
+                t = s.get("title", "?")
+                a = _abbr_agent(s.get("agent"))
+                wf = s.get("write_files", [])
+                wf_str = ", ".join(wf) if wf else "—"
+                md += f"| {sid} | {t} | {a} | {wf_str} |\n"
+
+        md += "\n"
+
+    epic_count = len(epics)
+    md += f"{epic_count} epics, {total_stories} total stories.\n"
+
+    if is_proposal:
+        md += "\nCall with proposal_id to commit.\n"
+
+    path = _write_detail("ship-multi.md", md)
+
+    if is_proposal:
+        return f"Proposal {pid}: {epic_count} epics, {total_stories} stories. → {path}"
+    return f"Created {epic_count} epics ({total_stories} stories). → {path}"
+
+
 def fmt_ship(data: dict) -> str:
     if _is_error(data):
         return _fmt_error(data)
 
+    if data.get("epics"):
+        return _fmt_ship_multi(data)
+
     epic_id = data.get("epic_id", "?")
     epic_title = data.get("epic_title", "")
 
-    # Proposal phase
+    # --- Single-epic proposal ---
     if data.get("phase") == "proposal":
         stories = data.get("proposed_stories", [])
         count = data.get("story_count", len(stories))
@@ -162,7 +218,7 @@ def fmt_ship(data: dict) -> str:
         path = _write_detail(f"ship-{epic_id}.md", md)
         return f"Proposal {pid}: {count} stories for {epic_title}. → {path}"
 
-    # Commit / resume
+    # --- Single-epic commit / resume ---
     stories = data.get("stories", [])
     count = len(stories)
     md = f"# pm_ship — {epic_id}\n\n"

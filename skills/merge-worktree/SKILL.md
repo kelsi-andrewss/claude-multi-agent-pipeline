@@ -337,11 +337,13 @@ bash ~/.claude/scripts/emit-event.sh "skill.merge.started" "claude" "${story_id:
 
 > **Note:** If `branch` is null in the DB, compute the story branch from the worktree list — this is normal for stories created via `/todo` before a worktree was set up.
 
-### Step 1.5: Commit verification (test_files stories only)
+### Step 1.5: test_files gate
 
-If `story_id` is non-null, call `pm_get_story(story_id)` and check the `test_files` field.
+If `story_id` is null, skip this step.
 
-If `test_files` is non-empty:
+Call `pm_get_story(story_id)` and check the `test_files` field.
+
+**If `test_files` is non-empty and not "N/A":**
 
 1. List commits on the story branch not on dev:
    ```bash
@@ -354,9 +356,10 @@ If `test_files` is non-empty:
    If no commits touch test files, emit a warning (non-blocking):
    > "Warning: story has test_files but no test file commits found on branch. The test agent may have determined no tests were needed."
 
-This is informational — the hard gate is the test execution in Step 2.5.
+**If `test_files` is "N/A":** skip this step.
 
-If `test_files` is empty/null or `story_id` is null, skip this step.
+**If `test_files` is empty or null:** Hard block — stop and report:
+> "BLOCKED: story <story_id> has no test_files set in its plan. Every story must declare test_files (explicit paths or N/A with justification) before merging. Update the plan file and re-run."
 
 ---
 
@@ -386,7 +389,8 @@ VERIFY_RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <worktree-
 ```
 
 Parse the JSON result:
-- `project_type` is `"unknown"` → Set `test_result = "skipped (no infra)"`. Continue to Step 3.
+- `project_type` is `"unknown"` and `build_result` is `"skip"` (i.e., `--no-build` was passed) → Set `test_result = "skipped (--no-build)"`. Continue to Step 3.
+- `project_type` is `"unknown"` and `build_result` is `"fail"` → Set `test_result = "FAIL"`. Stop and report: "No recognized build system in worktree. Either add a build system or pass `--no-build` to `build-verify.sh`." Do NOT proceed to merge.
 - `build_result` is `"pass"` → Set `test_result = "pass"`. Continue to Step 3.
 - `build_result` is `"fail"` → Set `test_result = "FAIL"`. Display the failure output from JSON. Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging, or re-run with `--skip-tests` to bypass." Do NOT proceed to merge.
 
@@ -417,10 +421,72 @@ This gate prevents merging a story that bypassed run-stories validation (e.g., m
       - Continue to Step 3.
 
    d. If tests fail:
-      - Set `test_result = "FAIL (spec tests)"`
-      - Display the failure output.
-      - Stop and report: "Tests failed in `<worktree-path>`. Fix the failures before merging."
+      - Run test diagnosis to attribute the failure:
+        ```bash
+        DIAG_RESULT=$(bash ~/.claude/scripts/test-diagnosis.sh \
+          --worktree-path <worktree-path> \
+          --dev-branch <dev-branch> \
+          --test-cmd "<test-command>" \
+          --test-files "<test_files>" \
+          --story-branch <story-branch>)
+        ```
+      - Parse the JSON `diagnosis` field and set the failure message accordingly:
+        - `test_invalid` → Set `test_result = "FAIL (spec tests): test fails on dev too — test is invalid, relaunch test agent"`
+        - `code_regression` → Set `test_result = "FAIL (spec tests): test passes on dev, fails on story branch — code regression, fix implementation"`
+        - `inconclusive` → Set `test_result = "FAIL (spec tests): could not determine attribution — {detail from JSON}"`
+      - Display the failure output and diagnosis.
+      - Stop and report: "Tests failed in `<worktree-path>`. Diagnosis: {test_result}. Fix the failures before merging."
       - Do NOT proceed to merge.
+
+### Step 2.5c: Coverage delta check (advisory)
+
+This step runs only when `test_files` is non-empty AND spec tests passed in Step 2.5b. It is purely advisory — it never blocks the merge.
+
+1. Detect the project type (same detection logic as `merge-gate.py`'s `detect_project_type`):
+   - Check for `package.json` → Node/JS project
+   - Check for `pytest.ini`, `setup.py`, `pyproject.toml` → Python project
+   - Otherwise → unknown (skip silently)
+
+2. Run coverage against the story's test files targeting write_files:
+   - **Node/JS**: `cd <worktree-path> && npx c8 --reporter=text <test-command> <test_files> 2>&1 || true`
+   - **Python**: `cd <worktree-path> && python -m pytest --cov=<write_files_dirs> --cov-report=term <test_files> 2>&1 || true`
+
+3. Parse the coverage output for per-file percentages.
+
+4. For each file in `write_files` with 0% coverage, emit a non-blocking warning:
+   > "Warning: {file} has 0% test coverage"
+
+5. If the coverage command fails, the project type is unknown, or output can't be parsed — skip silently. No warning, no block.
+
+---
+
+## Step 2.6: Project test suite gate
+
+Run the project's existing test suite to catch regressions before merging. This prevents shipping code that breaks tests outside the story's scope.
+
+1. Detect test directory:
+   ```bash
+   TEST_DIR=""
+   for candidate in "<project-root>/.claude/.claude/tests" "<project-root>/tests" "<project-root>/test"; do
+     if [ -d "$candidate" ]; then
+       TEST_DIR="$candidate"
+       break
+     fi
+   done
+   ```
+
+2. If `TEST_DIR` is empty, skip this step silently.
+
+3. Run the test suite:
+   ```bash
+   python3 -m pytest "$TEST_DIR" -x -q --tb=short 2>&1
+   ```
+
+4. If pytest exits non-zero, STOP and report:
+   > "Project test suite failed. Fix the failures before merging."
+   Do NOT proceed to Step 3.
+
+5. If pytest exits zero, continue to Step 3.
 
 ---
 
@@ -599,7 +665,7 @@ conn.close()
 2. For the just-merged story, invoke the regression check script:
 
    ```bash
-   REGRESS_RESULT=$(python3 ~/.claude/.claude/scripts/regression-check.py \
+   REGRESS_RESULT=$(python3 ~/.claude/scripts/regression-check.py \
      --epic-id <epic_id> \
      --just-merged-story-id <story_id> \
      --just-merged-write-files "<comma-separated write_files>" \

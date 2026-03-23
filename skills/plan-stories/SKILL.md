@@ -35,9 +35,16 @@ Parse `{{args}}` to determine the mode. This skill does NOT handle orchestrator 
      - `title` = first `# ` heading
    - Otherwise -- treat file contents as context, extract title from first `# ` heading.
 
-3. **Inline mode**: everything else. Extract:
+3. **Inline mode**: everything else. Parse for single-category or multi-category input:
+
+   **Multi-category detection**: If args contain semicolons separating category-labeled groups (e.g., `"Hooks: 1. foo 2. bar; Skills: 1. baz 2. qux"`), parse into `epics_input` -- a list where each entry has `category` (the label before the colon) and `items` (the numbered items after). Derive `title` per entry from the category label.
+
+   **Single-category** (no semicolons or no category labels): Extract as before:
    - Quoted string or text before numbered items -- `title`
    - Remaining numbered or comma-separated items -- `items` list
+   - Wrap into a 1-element `epics_input` list: `[{category: null, title: <title>, items: <items>}]`
+
+   Resume mode and briefing/file mode also produce a 1-element `epics_input` list with `category: null`.
 
 4. **No args**: Ask the user: "What should I plan? Provide a briefing path, title + features, or epic ID." and stop.
 
@@ -67,7 +74,7 @@ The `.md` file contains `## What changes` -- this is an existing plan. Bypass th
    - `pm_create_story(title=<title>, agent=<agent>, write_files=<write targets>)`
    - `pm_update_story(story_id=<new id>, plan_file="<plan file path>")`
    - Set `stories` = single-element list with the created story
-   - Set `epic_id` = null, `dev_branch` = null
+   - Wrap into `epics_result`: `[{epic_id: null, dev_branch: null, stories: <stories>}]`
 
    **Full path (>2 write targets):**
    - `pm_create_epic(title=<title>)` -- use returned `epic_id`
@@ -76,6 +83,7 @@ The `.md` file contains `## What changes` -- this is an existing plan. Bypass th
    - `pm_update_story(story_id=<new id>, plan_file="<plan file path>")`
    - Set `stories` = single-element list with the created story
    - Derive `dev_branch` from epic metadata
+   - Wrap into `epics_result`: `[{epic_id: <epic_id>, dev_branch: <dev_branch>, stories: <stories>}]`
 
 4. Skip to Step 3.
 
@@ -84,6 +92,18 @@ The `.md` file contains `## What changes` -- this is an existing plan. Bypass th
 ## Step 2: Dispatch planner agent (foreground)
 
 **Run for briefing mode, inline mode, and resume mode.**
+
+### Flow trace (pre-decomposition)
+
+Before dispatching the planner agent, if `items` count >= 3: write a DATA_FLOW_TRACE to include as planner prompt context. The trace is a linear sequence of data transformations from user action to final state.
+
+Format: `[user action] → [data A at location X] → [transform B] → [data C at location Y] → ... → [final state]`
+
+Every story must own a contiguous segment of this chain. Boundary formats between stories must be explicit (what data, what format, where). Include the trace in the planner prompt as a `DATA_FLOW_TRACE:` block after the items list.
+
+If `items` count < 3, skip this substep — the decomposition is simple enough that seam risks are low.
+
+### Planner dispatch
 
 Launch the **planner** agent in foreground with the parsed inputs:
 
@@ -96,7 +116,16 @@ TITLE: <title>
 ITEMS: <items list>
 CONTEXT: <briefing_contents if briefing mode, otherwise omit>
 
-DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping.
+DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping. DATA_FLOW_TRACE: Before decomposing into stories, write the end-to-end data transformation chain as a linear sequence. Format: `[step] → [step] → ...` with explicit data format at each boundary. Every story must own a contiguous segment. If story N produces data consumed by story M, the boundary must specify: what data, what format, what location. Include this trace in each story's description so the plan-writer can verify seam correctness.
+
+UI CODEGEN TAGGING: For each story, determine if it involves UI component creation or modification.
+Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
+redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infrastructure,
+or stories where UI is incidental (e.g., adding a field to an existing form).
+
+TEST_FILES RULE: For each story that creates or modifies functional code (logic, state transitions, data transforms, API handlers, business rules), set `test_files` to the corresponding test file paths using the project's convention (test_<file>.py, <file>.test.ts, <file>_test.dart, etc.). Stories that are pure docs, config (YAML/JSON/env), scaffold/boilerplate (project init, dependency install), or pure refactors that don't change observable behavior should set `needs_testing: false` instead. When in doubt, set test_files — the merge gate catches real bugs, skipping it hides them.
+
+BEHAVIORAL_ACCEPTANCE_CRITERIA RULE: For any story that creates UI components, connects endpoints, or wires event handlers, acceptance criteria MUST be behavioral flows — "user does X → Y happens" — not structural assertions ("component exists", "file created"). Each flow criterion traces the full chain: user action → event handler → state change → UI update. Structural criteria are acceptable only for pure backend/infrastructure stories with no user-facing interaction.
 """)
 ```
 
@@ -107,13 +136,24 @@ Agent(subagent_type="planner", prompt="""
 MODE: ship
 EPIC_ID: epic-NNN
 
-DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping.
+DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping. DATA_FLOW_TRACE: Before decomposing into stories, write the end-to-end data transformation chain as a linear sequence. Format: `[step] → [step] → ...` with explicit data format at each boundary. Every story must own a contiguous segment. If story N produces data consumed by story M, the boundary must specify: what data, what format, what location. Include this trace in each story's description so the plan-writer can verify seam correctness.
+
+UI CODEGEN TAGGING: For each story, determine if it involves UI component creation or modification.
+Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
+redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infrastructure,
+or stories where UI is incidental (e.g., adding a field to an existing form).
+
+TEST_FILES RULE: For each story that creates or modifies functional code (logic, state transitions, data transforms, API handlers, business rules), set `test_files` to the corresponding test file paths using the project's convention (test_<file>.py, <file>.test.ts, <file>_test.dart, etc.). Stories that are pure docs, config (YAML/JSON/env), scaffold/boilerplate (project init, dependency install), or pure refactors that don't change observable behavior should set `needs_testing: false` instead. When in doubt, set test_files — the merge gate catches real bugs, skipping it hides them.
+
+BEHAVIORAL_ACCEPTANCE_CRITERIA RULE: For any story that creates UI components, connects endpoints, or wires event handlers, acceptance criteria MUST be behavioral flows — "user does X → Y happens" — not structural assertions ("component exists", "file created"). Each flow criterion traces the full chain: user action → event handler → state change → UI update. Structural criteria are acceptable only for pure backend/infrastructure stories with no user-facing interaction.
 """)
 ```
 
-Wait for the planner to return.
+**Multi-epic dispatch**: When `epics_input` has multiple entries, dispatch the planner once per entry. Each planner return yields an `epic_id`, `dev_branch`, and story list. Collect results into `epics_result`: `[{epic_id, dev_branch, stories}]`. Single-entry `epics_input` produces a 1-element `epics_result`.
 
-**On PLANNER_RESULT**: Extract `epic_id`, `dev_branch`, and the story list (IDs, titles, agents, detail_file paths). Proceed to Step 3.
+Wait for the planner(s) to return.
+
+**On PLANNER_RESULT**: Extract `epic_id`, `dev_branch`, and the story list (IDs, titles, agents, detail_file paths) per epic. Wrap into `epics_result` array. Proceed to Step 3.
 
 **On PLANNER_ERROR**: Surface the error to the user with full details (step, tool, error message, partial results). Do NOT fall back to direct MCP calls -- the failure causes (MCP down, Gemini garbage, agent context limit) would also fail here. Do NOT write a manifest. Let the user decide: retry, adjust input, or abort. Stop.
 
@@ -121,44 +161,48 @@ Wait for the planner to return.
 
 ## Step 3: Write .ship-manifest.json
 
-Build the manifest from the data collected in Step 1 (execute mode) or Step 2 (planner result).
+Build the manifest from `epics_result` collected in Step 1 (execute mode) or Step 2 (planner result). `epics_result` is always an array -- even single-epic flows use a 1-element array.
 
-**Derive slug**: from title -- lowercase, hyphen-separated, max 40 chars.
+**Derive slug**: For single-epic manifests, derive from the epic title. For multi-epic manifests, derive from the first epic's title (or a combined slug if titles share a common prefix). Lowercase, hyphen-separated, max 40 chars.
 
-**Complexity heuristic**:
-- small = 1 story
-- medium = 2-4 stories
-- large = 5+ stories
-
-**Estimated file count**: sum of write-target counts across all stories. For planner results, count write_files from each story's detail file.
+**Scope aggregation** (sums across all epics):
+- `stories`: total story count across all entries in `epics_result`
+- `files`: sum of write-target counts across all stories in all epics
+- `complexity`: uses total story count -- small = 1 story, medium = 2-4 stories, large = 5+ stories
 
 **Build the manifest:**
 
 ```json
 {
-  "slug": "<derived from title, max 40 chars>",
+  "slug": "<derived, max 40 chars>",
   "scope": {
-    "files": <estimated write-target count>,
-    "stories": <story count>,
+    "files": <total write-target count across all epics>,
+    "stories": <total story count across all epics>,
     "complexity": "small | medium | large"
   },
   "route_hint": "standard",
   "prev": "<briefing_path if briefing mode, otherwise null>",
   "skill": "plan-stories",
   "data": {
-    "epic_id": "epic-NNN",
-    "dev_branch": "dev/<slug>",
-    "stories": [
+    "epics": [
       {
-        "id": "story-NNN",
-        "title": "<title>",
-        "agent": "<agent>",
-        "detail_file": "<path>"
+        "epic_id": "epic-NNN",
+        "dev_branch": "dev/<slug>",
+        "stories": [
+          {
+            "id": "story-NNN",
+            "title": "<title>",
+            "agent": "<agent>",
+            "detail_file": "<path>"
+          }
+        ]
       }
     ]
   }
 }
 ```
+
+> **Backward compatibility**: Consumers should check for `data.epics` first. If absent (old manifest written before this change), read `data.epic_id` + `data.stories` and wrap into a 1-element epics array: `[{epic_id: data.epic_id, dev_branch: data.dev_branch, stories: data.stories}]`.
 
 Write to `.ship-manifest.json` in the project root.
 
@@ -166,19 +210,21 @@ Write to `.ship-manifest.json` in the project root.
 
 ## Step 4: Report
 
-Print the manifest path and a summary:
+**If invoked standalone** (not from within /ship): print the manifest summary and prompt. Iterate through `data.epics` to list each epic and its stories:
 
 ```
 Manifest written: .ship-manifest.json
-  Epic: <epic_id> — <title>
-  Stories: <count> (<complexity>)
-  story-NNN: <title> — <agent>
-  ...
-```
+  Epic: <epic_id> — <title> (dev/<slug>)
+    story-NNN: <title> — <agent>
+    ...
+  Epic: <epic_id> — <title> (dev/<slug>)
+    story-NNN: <title> — <agent>
+    ...
+  Total: <count> stories (<complexity>)
 
-**If invoked standalone** (not from within /ship): prompt the user:
-```
 Draft plans? (/draft-plans .ship-manifest.json)
 ```
 
-**If invoked from within /ship**: the orchestrator reads the manifest and proceeds automatically -- no prompt needed.
+Single-epic flows show the same layout (one epic block).
+
+**If invoked from within /ship**: do not print a summary or prompt. The manifest is a machine-readable artifact — the orchestrator reads it and proceeds automatically. Any output here causes a false pause.

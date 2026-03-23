@@ -105,6 +105,19 @@ Before writing a plan file, Claude independently reviews Gemini's output. Full c
 - **Story** — scoped deliverable, own branch/worktree. States: `draft` → `ready` → `in-progress` → `in-review` → `approved` → `done` → `shipped`. Also: `blocked`. Agent: `quick-fixer` | `architect` | `manual`. Must have `plan_file` to run.
 - **Task** — sub-item, no branch. States: `todo` → `in-progress` → `done`. Also: `blocked`, `skipped`.
 
+### Test requirements
+
+`test_files` is required for all stories that create or modify functional code. Stories without `test_files` are blocked at execution (`/run-stories` Step 1) unless `needs_testing` is explicitly set to `false`.
+
+**Exempt from testing** (`needs_testing: false`):
+- Docs-only changes (README, CLAUDE.md, comments)
+- Config-only changes (YAML, JSON, env files, CI pipelines)
+- Scaffold/boilerplate (project init, dependency install, file structure)
+- Pure refactors that don't change observable behavior (renames, moves, import reorganization)
+- Skill/orchestration definition changes (SKILL.md, ORCHESTRATION.md)
+
+When Gemini plans stories via `pm_plan_story`, it sets `test_files` for functional stories and `needs_testing: false` for exempt ones. The plan writer (`/draft-plans`) generates test-aware acceptance criteria when `test_files` is present.
+
 ### Story decomposition for parallelism
 
 When decomposing an epic into stories, minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns `quickfix/SKILL.md` implements ALL changes to that file across all tiers/features in the epic.
@@ -121,8 +134,11 @@ This maximizes parallel execution — stories with non-overlapping write targets
 
 Full template: run-stories/SKILL.md Step 4. Must include: story title, plan file, write-targets (absolute worktree paths), read-only context, agent approach, pitfalls, OpenMemory learnings, worktree enforcement block.
 
-**NEED_DECISION**: once per story for strategic decisions; critical decisions always escalate regardless of count. Does not count toward escalation. Second strategic NEED_DECISION → BLOCKED. Coders must use the structured format defined in the coder prompt template (run-stories/SKILL.md Step 4). Main session creates a decision review artifact per section 7 "Decision review artifacts" before resolving.
+**NEED_DECISION**: no count cap — coders emit it whenever they genuinely cannot proceed. Does not count toward the BLOCKING escalation counter. BLOCKED triggers only on: (a) coder re-emits NEED_DECISION on the same topic after receiving a resolution (communication failure), or (b) coder is fundamentally stuck (wrong plan, impossible constraint). Critical decisions (prefixed "CRITICAL:") always escalate to user regardless. Coders must use the structured format defined in the coder prompt template (run-stories/SKILL.md Step 4). Main session creates a decision review artifact per section 7 "Decision review artifacts" before resolving.
 **Size ceiling**: >5 files or >200 lines → split. **Conflict check**: no shared write targets with in-progress stories.
+**Script refs**: Any script path referenced in a SKILL.md (`bash ~/.claude/scripts/...` or `python3 ~/.claude/scripts/...`) is a write-target. If the script doesn't exist, the coder must create it as part of the story — not defer it.
+
+**Gemini MCP access**: Coders may call `mcp__gemini__analyze` for codebase investigation outside their write targets. This preserves coder context budget — Gemini reads files and returns a compressed answer instead of the coder ingesting hundreds of lines for a one-sentence insight. Queries must be specific: symbol name, file paths, exact question. Stories with `ui_codegen: true` additionally allow `mcp__gemini__gemini_ui_code` for visual component code. All other `mcp__gemini__*` tools remain orchestrator-only.
 
 ### Decision autonomy levels
 

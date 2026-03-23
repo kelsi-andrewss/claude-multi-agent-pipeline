@@ -75,10 +75,11 @@ try:
         LEFT JOIN decision_scopes ds ON d.id = ds.decision_id
         WHERE d.status = 'active'
           AND (ds.scope_value IS NULL
-               OR ? LIKE '%' || ds.scope_value || '%'
-               OR ds.scope_value LIKE '%' || ? || '%')
+               OR ? LIKE ds.scope_value || '%'
+               OR ? LIKE '%/' || ds.scope_value
+               OR ds.scope_value = ?)
         LIMIT 5
-    """, (file_path, os.path.basename(file_path)))
+    """, (file_path, file_path, os.path.basename(file_path)))
     rows = cursor.fetchall()
 except Exception:
     db.close()

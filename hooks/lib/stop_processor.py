@@ -8,7 +8,7 @@ session summary, auto-distillation, and compliance hook generation.
 Usage:
     stop_processor.py --transcript <path> --db <path> --session <id> --project <path> --cwd <path>
 """
-import argparse, fcntl, json, os, re, signal, sqlite3, sys, time
+import argparse, fcntl, hashlib, json, os, re, signal, sqlite3, sys, time
 from collections import Counter
 
 
@@ -36,6 +36,8 @@ def _acquire_lock(session_id):
         fd = os.open(path, os.O_CREAT | os.O_RDWR)
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         _lock_fd = fd
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
         os.write(fd, str(os.getpid()).encode())
         return True
     except (BlockingIOError, OSError):
@@ -152,7 +154,8 @@ def stage_session_summary(transcript_path, project_root):
     topic = ", ".join(sorted(edited_files)[:5]) if edited_files else "discussion"
     today = datetime.now().strftime("%Y-%m-%d")
 
-    sys.path.insert(0, project_root)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from hooks.lib.om_write import om_write
     om_write(
         content=f"Session {today}: {duration_min}min, {user_turns} turns. Topic: {topic}.",
@@ -180,7 +183,8 @@ def stage_auto_distillation(db_file, project_root):
         print("Stage 4: skipped (no pending_promotion entries)", file=sys.stderr)
         return
 
-    sys.path.insert(0, project_root)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from hooks.lib.om_write import om_write
     from hooks.lib.signal_processor import generate_rule, RULE_THRESHOLD
 
@@ -238,13 +242,29 @@ def stage_hook_generation(db_file, project_root):
     conn = _connect_db(db_file)
 
     # Ensure dismissed status is supported (migration from older schema)
-    schema_sql = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='correction_groups'"
-    ).fetchone()
-    if schema_sql and "'dismissed'" not in schema_sql[0]:
-        conn.executescript("""
-            ALTER TABLE correction_groups RENAME TO correction_groups_old;
-            CREATE TABLE correction_groups (
+    # Probe the CHECK constraint directly instead of string-matching DDL text
+    needs_migration = False
+    try:
+        conn.execute("SAVEPOINT migration_check")
+        conn.execute("INSERT INTO correction_groups (theme, status) VALUES ('__migration_probe__', 'dismissed')")
+        conn.execute("DELETE FROM correction_groups WHERE theme = '__migration_probe__'")
+        conn.execute("RELEASE migration_check")
+    except sqlite3.IntegrityError:
+        conn.execute("ROLLBACK TO migration_check")
+        conn.execute("RELEASE migration_check")
+        needs_migration = True
+    except sqlite3.OperationalError:
+        # Table doesn't exist yet — nothing to migrate
+        try:
+            conn.execute("ROLLBACK TO migration_check")
+            conn.execute("RELEASE migration_check")
+        except sqlite3.OperationalError:
+            pass
+    if needs_migration:
+        try:
+            conn.execute("BEGIN")
+            conn.execute("ALTER TABLE correction_groups RENAME TO correction_groups_old")
+            conn.execute("""CREATE TABLE correction_groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 theme TEXT NOT NULL,
                 status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')),
@@ -256,11 +276,14 @@ def stage_hook_generation(db_file, project_root):
                 updated_at INTEGER,
                 source TEXT DEFAULT 'auto',
                 text TEXT DEFAULT ''
-            );
-            INSERT INTO correction_groups SELECT * FROM correction_groups_old;
-            DROP TABLE correction_groups_old;
-            CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status);
-        """)
+            )""")
+            conn.execute("INSERT INTO correction_groups SELECT * FROM correction_groups_old")
+            conn.execute("DROP TABLE correction_groups_old")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)")
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Migration failed: {e}", file=sys.stderr)
 
     rows = conn.execute(
         "SELECT theme FROM correction_groups WHERE status='promoted' AND date(promoted_at) = date('now', 'localtime')"
@@ -274,7 +297,8 @@ def stage_hook_generation(db_file, project_root):
     # Ensure compliance directory exists before generating hooks
     os.makedirs(os.path.join(project_root, 'hooks', 'compliance'), exist_ok=True)
 
-    sys.path.insert(0, project_root)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from hooks.lib.hook_generator import generate_hook
 
     generated = 0
@@ -472,17 +496,18 @@ def stage_pattern_mining(project_root):
         with open(sidecar_path) as f:
             existing = f.read()
 
-    # Dedup by sorted story-ID list
+    # Dedup by hash of sorted story-ID list (whitespace/formatting-insensitive)
     new_proposals = []
     for proposal in proposals:
         evidence_line = [l for l in proposal.splitlines() if l.startswith("**Evidence:**")]
         if evidence_line:
             ids_part = evidence_line[0].split(":", 2)[-1].strip()
-            # Extract story IDs from "N stories failed similarly: id1, id2, id3"
             after_colon = ids_part.split(":", 1)[-1].strip() if ":" in ids_part else ids_part
             sorted_ids = ", ".join(sorted(s.strip() for s in after_colon.split(",")))
-            if sorted_ids in existing:
+            proposal_hash = hashlib.md5(sorted_ids.encode()).hexdigest()[:12]
+            if f"<!-- proposal-hash:{proposal_hash} -->" in existing:
                 continue
+            proposal = f"<!-- proposal-hash:{proposal_hash} -->\n{proposal}"
         new_proposals.append(proposal)
 
     if not new_proposals:

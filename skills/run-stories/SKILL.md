@@ -156,6 +156,8 @@ After collecting, validate each story and **skip with a warning** if any of the 
   - Launch one background `general-purpose` agent per unplanned story to write the plan file (same prompt as draft-plan Step 5).
   - Wait for all agents to complete, then re-fetch each story to confirm `plan_file` is now set.
   - If still missing after auto-planning, skip with warning: "story-NNN: auto-planning failed — skipping."
+- `test_files` is null or empty AND `needs_testing` is not explicitly `false`:
+  - BLOCK: "story-NNN has no test_files declared. Add test_files to the plan or set needs_testing=false to opt out." Story does not enter the execution plan.
 
 > **Note:** Stories in `ready` or `draft` state are the primary target. `in-progress` means another session claimed it — always skip.
 
@@ -275,8 +277,8 @@ RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <project-root>)
 Parse the JSON result:
 - `status: "success"` with `build_result: "pass"` → PASS
 - `status: "success"` with `build_result: "pass"` and `lint_warnings` > 0 → PASS with warnings (log warning count, do not block)
-- `status: "success"` with `build_result: "skip"` (project_type is `"unknown"`) → SKIP (no recognized build system). Log: "No recognized build system — skipping batch verification."
-- `status: "error"` with `build_result: "fail"` (exit code 1) → build FAIL (blocks downstream). Build output is in `build_output` field.
+- `status: "success"` with `build_result: "skip"` → SKIP. This only occurs when `--no-build` was explicitly passed to `build-verify.sh`. Log: "Build verification skipped (--no-build)."
+- `status: "error"` with `build_result: "fail"` (exit code 1) → build FAIL (blocks downstream). Build output is in `build_output` field. This includes unknown project types when `--no-build` was not passed.
 - `status: "error"` (exit code 2) → system error, treat as FAIL
 
 If JSON parse fails, log raw output and mark as FAIL.
@@ -395,9 +397,26 @@ Do not edit any protected files. <If protected-files.md exists: "Protected files
 
 ## Tool constraints
 You are the coder. Write all code yourself.
-Do NOT call any mcp__gemini__* tools (gemini_generate, analyze, audit, find_bug, plan, test, etc.).
 Do NOT call any pm_* tools except pm_update_story (for state transitions).
-Gemini is a research tool for the orchestrator — not available to coders.
+
+**Gemini MCP — allowed tools:**
+- `mcp__gemini__analyze` — use for codebase investigation when you need to understand code outside your write targets. This preserves your context budget: Gemini reads the files and returns a compressed answer instead of you reading 500 lines that produce a one-sentence insight.
+- `mcp__gemini__gemini_ui_code` — ONLY when `ui_codegen: true` (see UI codegen exception below).
+
+**Gemini MCP — blocked tools:** All other `mcp__gemini__*` tools (plan, audit, find_bug, test, gemini_generate, etc.) are orchestrator-only.
+
+**Query format for `analyze`:** Be specific. Include the symbol name, the file paths to examine, and the exact question. Example:
+> "In `src/services/orders.ts`, what is the full type signature of `processOrder()` (params + return type), and do any callers in `src/controllers/` depend on the return value? List each caller with the line where the return is used or discarded."
+Bad: "What does processOrder do?" — too vague, wastes a round-trip.
+
+**UI codegen exception:** If the story has `ui_codegen: true` in its DB record:
+- You MUST call `mcp__gemini__gemini_ui_code` for all visual/layout component code.
+- Define the props contract first (what data the component receives, what callbacks it exposes).
+- Call the tool with component_name, props_contract, requirements, and exemplar_paths (1-2 similar components from the project).
+- Drop the returned code into the target file as-is. Do not modify Gemini's markup or styles.
+- Run build/lint. If errors, call `gemini_ui_code` again with `error_feedback` containing the error output. Repeat until clean.
+- NEED_DECISION only if Gemini returns the same error on consecutive attempts (stuck, not iterating).
+- You own: imports, exports, props wiring, state management, data fetching, integration with the rest of the app. Gemini owns: what renders on screen.
 
 ## Decision autonomy
 
@@ -426,6 +445,33 @@ You MUST emit NEED_DECISION with "CRITICAL:" prefix for:
 ## Learnings
 
 <openmemory results formatted as bullet points, or omit section if none>
+
+## Test file requirements
+
+This story has test_files: <test_files list, or "N/A">
+<If test_files is a list of paths:>
+You MUST create or modify these test files as part of your implementation. Tests must:
+- Cover the behavioral changes specified in the plan's acceptance criteria
+- Be runnable with the project's test framework
+- Pass when run against your implementation
+<If test_files is "N/A":>
+No test files required for this story.
+
+## Wiring verification
+
+Before reporting DONE, trace every user-facing interaction in the plan through your code:
+event handler → state change → UI update. Verify each link in the chain is connected:
+- onClick/onSubmit/onChange actually calls the handler function
+- Handler actually mutates state (setState, dispatch, store update)
+- State change actually triggers re-render of the dependent component
+- Navigation actually routes to the correct page/view
+- API calls are connected to response handlers that update UI
+
+Broken wiring (onClick not bound, href pointing to wrong route, state update not
+triggering re-render, API call not connected to response handler) is a DONE-blocker.
+Fix it before committing.
+
+For non-UI stories (pure backend, infrastructure, config), skip this section.
 
 ## Steps
 
@@ -611,16 +657,18 @@ After each batch's stories are merged into dev via Step 5c, verify the dev branc
 ### Procedure
 
 1. Checkout the dev branch (post-merge state).
-2. Run build verification:
+2. Run the full validation pyramid:
    ```bash
-   RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <project-root>)
+   RESULT=$(bash ~/.claude/scripts/validation-runner.sh --project-root <project-root> --layer all)
    ```
-3. Parse JSON result and apply the same pass/fail/skip logic as Step 2c.
+3. Parse the JSON result. Check `overall_status`:
+   - `"pass"` → all layers passed
+   - `"fail"` → at least one layer failed (check `layers` array for details)
+   - `"skip"` → no recognized project type
 4. Results:
-   - **PASS**: Log `"Batch N verification: PASS"`. Continue to the next batch.
-   - **PASS with lint warnings**: Log `"Batch N verification: PASS (warnings: <count from lint_warnings>)"`. Continue. Include warning summary in Step 6 report.
-   - **FAIL**: Log `"Batch N verification: FAIL — <build output from JSON>"`. Mark ALL stories in subsequent batches as BLOCKED with reason `"Blocked: batch N verification failed"`. Stop executing further batches.
-   - **SKIP**: Log `"Batch N verification: SKIP (no build system)"`. Continue.
+   - **PASS** (`overall_status` is `"pass"`): Log `"Batch N verification: PASS"`. Continue to the next batch. If any layer has non-zero `error_count` with `status: "pass"`, log as warnings.
+   - **FAIL** (`overall_status` is `"fail"`): Find the first failed layer in the `layers` array. Log `"Batch N verification: FAIL — <layer.name>: <layer.output>"`. Mark ALL stories in subsequent batches as BLOCKED with reason `"Blocked: batch N verification failed"`. Stop executing further batches.
+   - **SKIP** (`overall_status` is `"skip"`): Log `"Batch N verification: SKIP (no build system)"`. Continue.
 
 ---
 
@@ -669,6 +717,25 @@ If the agent result doesn't include usage metadata, skip — merge-worktree hand
 4. Wait for the resumed agent to return DONE, NEED_DECISION, or BLOCKED.
 5. NEED_RESEARCH does not count toward the BLOCKING escalation counter.
 
+### Test agent BLOCKED retry
+
+When collecting results, if a **test agent** returns BLOCKED but the **coder agent** for the same story returned DONE:
+
+1. Relaunch the test agent **once** with additional context:
+   > "Previous attempt failed: {blocked_reason}. The coder's implementation is committed at {commit} on branch {story-branch}. Retry writing tests from the contract and acceptance criteria."
+
+2. The retry agent **still branches from dev** (NOT from the story branch) — the blindness constraint is preserved. Use the same test agent prompt from Step 4 with the BLOCKED reason appended as context.
+
+3. Wait for the retried test agent to return DONE or BLOCKED.
+
+4. If DONE: proceed normally — add both coder and test agent to the merge list.
+
+5. If second attempt also BLOCKED: mark the story BLOCKED with both attempts' reasons concatenated:
+   > "Test agent BLOCKED after retry. Attempt 1: {reason_1}. Attempt 2: {reason_2}."
+   Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "test agent BLOCKED after retry: {reason_2}"`.
+
+If the **coder** also returned BLOCKED, do not retry the test agent — the story is BLOCKED regardless.
+
 ### Step 5.0: Fix-loop auto-review (coder self-correction)
 
 After each coder agent returns DONE (and before the diff gate in Step 5a), run build verification against the coder's worktree to confirm the code actually works:
@@ -678,7 +745,7 @@ VERIFY_RESULT=$(bash ~/.claude/scripts/build-verify.sh --project-root <worktree-
 ```
 
 Parse the JSON result using the same logic as Step 2c:
-- **PASS** or **SKIP** (no build system): proceed to Step 5a (diff gate). No retry needed.
+- **PASS** or **SKIP** (only when `--no-build` was explicitly passed): proceed to Step 5a (diff gate). No retry needed.
 - **FAIL**: delegate to `/fix-loop` below.
 
 If the coder returned BLOCKED, skip build verification entirely (nothing to verify) — the story goes straight to the blocked list.
@@ -713,9 +780,9 @@ A coder's work is only considered complete when BOTH conditions are met:
 
 If the coder returned DONE but build verification fails, `/fix-loop` handles iterative correction and returns DONE (all layers pass) or BLOCKED (exhausted retries). If the coder returned BLOCKED, skip build verification entirely (nothing to verify).
 
-#### Stories without a build system
+#### Stories with `--no-build` opt-out
 
-When `build-verify.sh` returns `build_result: "skip"` (project_type is "unknown"), the dual-exit gate is satisfied by condition 1 alone. Fix-loop is never invoked. This preserves existing behavior for projects without lint/test infrastructure.
+When `build-verify.sh` returns `build_result: "skip"` (because `--no-build` was explicitly passed), the dual-exit gate is satisfied by condition 1 alone. Fix-loop is never invoked. Without `--no-build`, unknown project types return FAIL and enter the fix-loop like any other build failure.
 
 #### Interaction with existing steps
 
@@ -730,11 +797,14 @@ A story must pass Step 5.0 before entering Step 5a. If Step 5.0 marks a story BL
 For each DONE story, verify only expected files changed:
 
 ```bash
-DIFF_RESULT=$(bash ~/.claude/scripts/diff-gate.sh --worktree-path <worktree-path> --dev-branch <dev-branch> --write-files "<comma-separated write_files>")
+DIFF_RESULT=$(bash ~/.claude/scripts/diff-gate.sh --worktree-path <worktree-path> --dev-branch <dev-branch> --write-files "<comma-separated write_files>" --blocking --test-files "<comma-separated test_files>")
 ```
 
+When the story has `test_files`, include the `--test-files` flag with the comma-separated list. When no `test_files` exist, omit the flag entirely.
+
 Parse the JSON result:
-- If `unexpected_files` is non-empty: log the unexpected files as a warning, but continue (non-blocking). The coder may have legitimately needed adjacent files.
+- If `blocked` is `true`: check `test_file_violations` first. If non-empty, mark the story BLOCKED with reason `"Test file scope violation: coder modified test files: <test_file_violations list>"`. Otherwise, mark BLOCKED with reason `"Scope violation: unexpected files changed: <unexpected_files list>"`. Log a friction event: `category: blocked, type: automatic, skill: run-stories, detail: "diff-gate blocked: <unexpected_files>"`. Skip Steps 5b and 5c for this story.
+- If `blocked` is `false` and `unexpected_files` is non-empty: log the unexpected files as a warning, but continue (non-blocking). The coder may have legitimately needed adjacent files.
 - If `status` is `"error"`: log the error, continue (non-blocking).
 
 ### Step 5b: Per-story testing
@@ -751,7 +821,8 @@ For each DONE story that has `test_files` and both the coder and test agent retu
      --test-branch <story-branch>--test \
      --dev-branch <dev-branch> \
      --test-cmd "<detected-test-command>" \
-     --test-files "<comma-separated test_files>")
+     --test-files "<comma-separated test_files>" \
+     --coverage --mutation)
    ```
 
    Parse the JSON result.
@@ -765,6 +836,8 @@ For each DONE story that has `test_files` and both the coder and test agent retu
    | `compile_error` | **Test agent** — wrong interface | Log friction. Re-launch test agent with error output + actual exports. Max 1 retry. |
    | `logic_failure` | **Coder** — implementation wrong | Log friction. Re-launch coder with failing tests as read-only context. Max 1 retry. |
    | `ambiguous` | **Coder** (default) | Same as logic_failure path. |
+   | `low_coverage` | **Coder** — insufficient test coverage | Log friction. Delegate to `/fix-loop` — coder adds covered code paths or more tests. |
+   | `low_mutation_score` | **Coder** — weak test kill ratio | Log friction. Delegate to `/fix-loop` — coder strengthens implementation (remove dead branches, make code more testable). |
 
    Use `error_output` from the JSON result to construct the retry prompt.
 
@@ -825,18 +898,60 @@ For each DONE story that has `test_files` and both the coder and test agent retu
    git worktree remove --force "$MERGE_CANDIDATE"
    ```
 
-#### Stories WITHOUT `test_files` (existing behavior)
+#### Stories WITHOUT `test_files` (unified merge-gate path)
 
 For each DONE story that passes the diff gate and has no `test_files`:
 
-1. Check if test infrastructure exists in the project (look for test directories, test configs, `jest.config`, `pytest.ini`, `_test.go` files, etc.). If none exists, skip testing for this story.
+1. Check if test infrastructure exists in the project (look for test directories, test configs, `jest.config`, `pytest.ini`, `_test.go` files, etc.). If none exists, skip testing for this story — proceed directly to merge.
+
 2. Launch unit-tester agent (background, **Sonnet**) in the worktree. The unit-tester writes tests from the plan file's **acceptance criteria**, not from the implementation.
-3. Results:
-   - PASS → story proceeds to merge.
-   - FAIL trivial → log a friction event (category `retry`, type automatic, skill `run-stories`),
-     resume coder with failures, wait for fix. If fix succeeds, proceed to merge.
-   - FAIL non-trivial → log a friction event (category `blocked`, type automatic, skill `run-stories`),
-     story marked BLOCKED.
+
+3. After the unit-tester completes, commit tests to a test branch in the worktree:
+   ```bash
+   git -C <worktree-path> checkout -b <story-branch>--test
+   git -C <worktree-path> add <test-files>
+   git -C <worktree-path> commit -m "tests: unit-tester generated tests for <story-id>"
+   git -C <worktree-path> push -u origin <story-branch>--test
+   git -C <worktree-path> checkout <story-branch>
+   ```
+
+4. Run merge-gate.py with the test branch — same as the `test_files` path:
+   ```bash
+   MERGE_GATE_RESULT=$(python3 ~/.claude/scripts/merge-gate.py \
+     --merge-candidate <merge-candidate-path> \
+     --story-branch <story-branch> \
+     --test-branch <story-branch>--test \
+     --dev-branch dev \
+     --test-cmd "<detected test command>" \
+     --test-files "<unit-tester-generated test files>" \
+     --session-id "$SESSION_ID" \
+     --story-id <story_id> \
+     --coverage --mutation)
+   ```
+
+5. Parse the JSON result. If `test_passed` is false, use `classification` to decide retry strategy — same as the `test_files` path:
+
+   | `classification` | Attribution | Action |
+   |---|---|---|
+   | `compile_error` | **Unit-tester** — wrong interface | Log friction. Re-launch unit-tester with error output + actual exports. Max 1 retry. |
+   | `logic_failure` | **Coder** — implementation wrong | Log friction. Delegate to `/fix-loop` with `--skip-compile` and the error context. |
+   | `ambiguous` | **Coder** (default) | Same as logic_failure path. |
+   | `low_coverage` | **Coder** — insufficient test coverage | Log friction. Delegate to `/fix-loop` — coder adds covered code paths or more tests. |
+   | `low_mutation_score` | **Coder** — weak test kill ratio | Log friction. Delegate to `/fix-loop` — coder strengthens implementation (remove dead branches, make code more testable). |
+
+   After retry, re-run merge-gate.py. If second attempt also fails, mark story BLOCKED. Log friction: `category: blocked, type: automatic, skill: run-stories, detail: "Merge gate failed after retry: <last error summary>"`.
+
+   > **Opt-out**: Pass `--no-coverage` or `--no-mutation` to merge-gate.py to skip those checks. Use only when coverage/mutation infrastructure is unavailable for the target project.
+
+6. On pass — merge test commits into the code worktree (same as `test_files` path step 5):
+   ```bash
+   git -C <worktree-path> fetch origin <story-branch>--test
+   git -C <worktree-path> checkout origin/<story-branch>--test -- <test-files>
+   git -C <worktree-path> add <test-files>
+   git -C <worktree-path> commit -m "<story_id>: add spec tests (validated)"
+   git -C <worktree-path> push origin <story-branch>
+   ```
+   Story proceeds to merge (Step 5c).
 
 ### Step 5c: Merge
 

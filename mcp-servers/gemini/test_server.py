@@ -2234,3 +2234,59 @@ class TestWebSearch:
 
         assert "/tmp/gemini/search.md" in result
         assert result.startswith("A")
+
+
+# ---------------------------------------------------------------------------
+# fmt_ship multi-epic
+# ---------------------------------------------------------------------------
+
+from format_response import fmt_ship
+
+
+class TestFmtShipMultiEpic:
+    def test_single_epic_unchanged(self):
+        result = fmt_ship({
+            "epic_id": "epic-1",
+            "epic_title": "My Epic",
+            "stories": [{"id": "story-1", "title": "Do thing", "agent": "architect", "write_files": ["a.py"]}],
+        })
+        assert "epic-1" in result
+        assert "1 stories" in result
+        assert "epics" not in result.lower().split("\u2192")[0]
+
+    def test_multi_epic_commit(self):
+        result = fmt_ship({
+            "epics": [
+                {"epic_id": "epic-1", "epic_title": "First", "stories": [
+                    {"id": "story-1", "title": "A", "agent": "quick-fixer", "write_files": []},
+                ]},
+                {"epic_id": "epic-2", "epic_title": "Second", "stories": [
+                    {"id": "story-2", "title": "B", "agent": "architect", "write_files": ["x.py"]},
+                    {"id": "story-3", "title": "C", "agent": None, "write_files": []},
+                ]},
+            ],
+        })
+        assert "2 epics" in result
+        assert "3 stories" in result
+        assert "ship-multi.md" in result
+
+    def test_multi_epic_proposal(self):
+        result = fmt_ship({
+            "phase": "proposal",
+            "proposal_id": "prop-123",
+            "epics": [
+                {"epic_id": "epic-1", "epic_title": "First", "proposed_stories": [
+                    {"title": "A", "agent": "architect"},
+                ]},
+                {"epic_id": "epic-2", "epic_title": "Second", "proposed_stories": [
+                    {"title": "B", "agent": None},
+                ]},
+            ],
+        })
+        assert "Proposal prop-123" in result
+        assert "2 epics" in result
+        assert "2 stories" in result
+
+    def test_error_still_works(self):
+        result = fmt_ship({"error": "something broke"})
+        assert result == "Error: something broke"

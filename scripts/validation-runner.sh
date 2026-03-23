@@ -13,13 +13,14 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: validation-runner.sh --project-root <path> [--layer compile|lint|test|all]
+Usage: validation-runner.sh --project-root <path> [--layer compile|lint|test|all] [--coverage]
 
 Run the validation pyramid against a project directory.
 
 Arguments:
   --project-root   Absolute path to the project root (required)
   --layer          Which layer(s) to run: compile, lint, test, or all (default: all)
+  --coverage       Enable coverage collection during test layer (default: false)
   --help           Show this help message
 USAGE
   exit 2
@@ -27,11 +28,13 @@ USAGE
 
 PROJECT_ROOT=""
 LAYER="all"
+COVERAGE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-root) PROJECT_ROOT="$2"; shift 2 ;;
     --layer) LAYER="$2"; shift 2 ;;
+    --coverage) COVERAGE=true; shift ;;
     --help) usage ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
@@ -98,8 +101,10 @@ run_compile_layer() {
     set -e
 
     # Parse build-verify.sh JSON result
+    # build-verify.sh may report lint_result/test_result separately from build_result
+    # For the compile layer, we only care about build_result (not lint or test)
     local build_result
-    build_result=$(echo "$output" | python3 -c "import json,sys; print(json.load(sys.stdin).get('build_result','fail'))" 2>/dev/null || echo "fail")
+    build_result=$(echo "$output" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('build_result','fail'))" 2>/dev/null || echo "fail")
 
     if [[ "$build_result" == "pass" ]] || [[ "$build_result" == "skip" ]]; then
       LAYER_STATUS="pass"
@@ -203,19 +208,31 @@ run_test_layer() {
 
   case "$PROJECT_TYPE" in
     flutter)
-      set +e; output=$(flutter test 2>&1 | tail -50); exit_code=$?; set -e ;;
+      if [[ "$COVERAGE" == true ]]; then
+        set +e; output=$(flutter test --coverage 2>&1 | tail -50); exit_code=$?; set -e
+      else
+        set +e; output=$(flutter test 2>&1 | tail -50); exit_code=$?; set -e
+      fi ;;
     node_ts)
       local has_test
       has_test=$(python3 -c "import json; s=json.load(open('package.json')).get('scripts',{}); print('1' if 'test' in s and s['test'] != 'echo \\\"Error: no test specified\\\" && exit 1' else '0')" 2>/dev/null || echo "0")
       if [[ "$has_test" == "1" ]]; then
-        set +e; output=$(npm test 2>&1 | tail -50); exit_code=$?; set -e
+        if [[ "$COVERAGE" == true ]]; then
+          set +e; output=$(npx c8 --reporter=text npm test 2>&1 | tail -50); exit_code=$?; set -e
+        else
+          set +e; output=$(npm test 2>&1 | tail -50); exit_code=$?; set -e
+        fi
       else
         output="No test script configured"
         exit_code=0
       fi ;;
     python)
       if [[ -f "pytest.ini" ]] || [[ -f "pyproject.toml" ]] || [[ -d "tests" ]] || [[ -d "test" ]]; then
-        set +e; output=$(python3 -m pytest --tb=short 2>&1 | tail -50); exit_code=$?; set -e
+        if [[ "$COVERAGE" == true ]]; then
+          set +e; output=$(python3 -m pytest --tb=short --cov --cov-report=term 2>&1 | tail -50); exit_code=$?; set -e
+        else
+          set +e; output=$(python3 -m pytest --tb=short 2>&1 | tail -50); exit_code=$?; set -e
+        fi
       else
         output="No test configuration found"
         exit_code=0
@@ -223,7 +240,11 @@ run_test_layer() {
     rust)
       set +e; output=$(cargo test 2>&1 | tail -50); exit_code=$?; set -e ;;
     go)
-      set +e; output=$(go test ./... 2>&1 | tail -50); exit_code=$?; set -e ;;
+      if [[ "$COVERAGE" == true ]]; then
+        set +e; output=$(go test -cover ./... 2>&1 | tail -50); exit_code=$?; set -e
+      else
+        set +e; output=$(go test ./... 2>&1 | tail -50); exit_code=$?; set -e
+      fi ;;
   esac
 
   if [[ $exit_code -eq 0 ]]; then
@@ -235,6 +256,33 @@ run_test_layer() {
     LAYER_OUTPUT="$output"
     LAYER_ERROR_COUNT=$(echo "$output" | grep -c -iE "FAIL|fail|error|Error" || true)
     [[ "$LAYER_ERROR_COUNT" -eq 0 ]] && LAYER_ERROR_COUNT=1
+  fi
+
+  # Parse coverage percentage from output if coverage enabled
+  LAYER_COVERAGE_PCT="null"
+  if [[ "$COVERAGE" == true ]] && [[ -n "$output" ]]; then
+    LAYER_COVERAGE_PCT=$(python3 -c "
+import re, sys
+text = sys.argv[1]
+patterns = [
+    r'Statements\s*:\s*([\d.]+)%',
+    r'TOTAL\s+\d+\s+\d+\s+([\d.]+)%',
+    r'coverage:\s*([\d.]+)%\s+of\s+statements',
+    r'([\d.]+)%\s+coverage',
+    r'All files\s*\|\s*([\d.]+)',
+]
+for p in patterns:
+    m = re.search(p, text, re.IGNORECASE)
+    if m:
+        print(m.group(1))
+        sys.exit(0)
+# Fallback: last percentage in output
+matches = re.findall(r'([\d.]+)%', text)
+if matches:
+    print(matches[-1])
+    sys.exit(0)
+print('null')
+" "$output" 2>/dev/null || echo "null")
   fi
 }
 
@@ -280,7 +328,13 @@ run_and_record_test() {
   run_test_layer
   local escaped_output
   escaped_output=$(escape_json_string "$LAYER_OUTPUT")
-  TEST_JSON="{\"name\":\"test\",\"status\":\"$LAYER_STATUS\",\"output\":$escaped_output,\"error_count\":$LAYER_ERROR_COUNT}"
+  local coverage_field=""
+  if [[ "$LAYER_COVERAGE_PCT" != "null" ]]; then
+    coverage_field=",\"coverage_pct\":$LAYER_COVERAGE_PCT"
+  else
+    coverage_field=",\"coverage_pct\":null"
+  fi
+  TEST_JSON="{\"name\":\"test\",\"status\":\"$LAYER_STATUS\",\"output\":$escaped_output,\"error_count\":$LAYER_ERROR_COUNT$coverage_field}"
   if [[ "$LAYER_STATUS" == "fail" ]]; then
     OVERALL="fail"
   fi

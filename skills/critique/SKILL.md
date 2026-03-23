@@ -117,21 +117,22 @@ Track iteration 2 results separately. After Iteration 2 completes -> proceed to 
 
 **If `deep_mode`**: skip to Step 4.
 
-Run per-plan: iterate over each file in `plan_files`. For each plan file, apply the plan-scoped 5-question loop.
+Run per-plan: iterate over each file in `plan_files`. For each plan file, apply the plan-scoped 6-lens loop.
 
 ### Plan-scoped lenses
 
-The 5 core questions are adjusted for plan critique:
+The 5 core questions are adjusted for plan critique, plus lens 6 for multi-plan critiques:
 
 1. **Requirement coverage**: Do plan tasks cover all story requirements? Cross-reference the `## Tasks` section against `## Acceptance criteria` and the story description. Identify requirements that have no corresponding task.
 2. **Gap analysis**: Missing error paths, edge cases in the planned implementation? Check each task for unhandled failure modes. Look for missing rollback steps, missing validation, missing logging.
 3. **Weakest part**: Which task is most likely to fail or be incomplete? Flag tasks that depend on assumptions about existing code structure, tasks with vague descriptions, or tasks that touch unfamiliar APIs.
 4. **Alternative design**: Is there a simpler approach the plan missed? Could fewer files change? Could tasks be consolidated? Is there an existing utility or pattern that eliminates a task entirely?
 5. **Assumption audit**: What does the plan assume about existing code that might be wrong? Flag assumptions about file structure, function signatures, data shapes, or external API behavior. Each flagged assumption should suggest a verification step.
+6. **Cross-story data flow**: Only applies when `plans_mode = true` AND multiple plan files are being critiqued. For each plan file, extract its outputs (what it produces: files, data structures, state changes). Cross-reference against all other plan files' inputs (what they consume). For each boundary: verify the producer's tasks actually create the artifact in the format the consumer expects. Check: naming, location, format, timing. Mismatches are SIGNIFICANT. Single-story critiques skip this lens entirely.
 
 ### Iteration 1 (per plan file)
 
-Apply the 5 plan-scoped questions. For each question, either:
+Apply the plan-scoped lenses (5 core + lens 6 if multiple plan files). For each lens, either:
 - **Improve**: describe the issue and make the improvement directly in the plan file (mutate in place via Edit tool). Update tasks, add missing acceptance criteria, refine descriptions, add verification steps.
 - **NMIP**: explicitly declare "**NMIP** — No Material Improvements Possible" with a one-line justification.
 
@@ -144,7 +145,7 @@ Track: `improvements_made` (boolean), `nmip_declarations` (list per plan file).
 
 ### Iteration 2 (per plan file)
 
-Apply the same 5 plan-scoped questions to the improved plan file. Same NMIP rules.
+Apply the same plan-scoped lenses to the improved plan file. Same NMIP rules.
 
 After Iteration 2 completes -> proceed to next plan file (or Step 4 if last).
 

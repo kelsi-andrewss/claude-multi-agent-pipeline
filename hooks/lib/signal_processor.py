@@ -120,28 +120,23 @@ def extract_corrections(turns):
 
     corrections = []
     seen_themes = {}
-    prev_assistant_had_tool_use = False
     embedding_calls = 0
 
     for i, turn in enumerate(turns):
-        if turn["role"] == "assistant":
-            prev_assistant_had_tool_use = turn.get("has_tool_use", False)
-            continue
+
         if turn["role"] != "user":
+            prev_assistant_had_tool_use = turn.get("has_tool_use", False)
             continue
 
         msg = turn["content"]
         if SYSTEM_MSG.search(msg):
-            prev_assistant_had_tool_use = False
             continue
         if POSITIVE_INTENT.match(msg):
-            prev_assistant_had_tool_use = False
             continue
         if is_structural_content(msg):
-            prev_assistant_had_tool_use = False
             continue
 
-        if embedding_calls < MAX_EMBEDDING_CALLS_PER_SESSION:
+        if embedding_calls < MAX_EMBEDDING_CALLS_PER_PHASE:
             embedding_calls += 1
             matched = is_correction(msg, prototype_embs)
         else:
@@ -160,8 +155,6 @@ def extract_corrections(turns):
                 "content": msg[:300],
                 "weight": weight,
             })
-
-        prev_assistant_had_tool_use = False
 
     return corrections
 
@@ -271,7 +264,7 @@ CORRECTION_PROTOTYPES = [
     "you're not listening to me",
 ]
 PROTOTYPE_THRESHOLD = 0.55
-MAX_EMBEDDING_CALLS_PER_SESSION = 5
+MAX_EMBEDDING_CALLS_PER_PHASE = 5  # Applied independently in extraction and grouping phases
 _prototype_embeddings = None
 
 
@@ -335,38 +328,6 @@ def _find_matching_group(cursor, embedding, threshold):
             best_sim = sim
             best_id = row[0]
     return best_id
-
-
-def _check_promoted(theme_text, project_root):
-    """Check if theme is already promoted in correction_groups DB."""
-    db_path = os.path.join(project_root, ".claude", "epics.db")
-    if not os.path.isfile(db_path):
-        return False
-
-    try:
-        conn = sqlite3.connect(db_path, timeout=5)
-        rows = conn.execute(
-            "SELECT theme FROM correction_groups WHERE status='promoted'"
-        ).fetchall()
-        conn.close()
-    except Exception:
-        return False
-
-    if not rows:
-        return False
-
-    theme_vec = get_embedding(theme_text)
-    if theme_vec is None:
-        return False
-
-    for (existing_theme,) in rows:
-        existing_vec = get_embedding(existing_theme)
-        if existing_vec is None:
-            continue
-        if cosine_similarity(theme_vec, existing_vec) > 0.8:
-            return True
-
-    return False
 
 
 def generate_rule(theme_text):
@@ -468,6 +429,7 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
     if not db_file or not os.path.isfile(db_file):
         return all_corrections
 
+    conn = None
     try:
         conn = sqlite3.connect(db_file, timeout=10)
         cursor = conn.cursor()
@@ -488,7 +450,7 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
             # Try semantic matching via embedding before falling back to exact text match
             matched_group_id = None
             correction_embedding = None
-            if grouping_embedding_calls < MAX_EMBEDDING_CALLS_PER_SESSION:
+            if grouping_embedding_calls < MAX_EMBEDDING_CALLS_PER_PHASE:
                 grouping_embedding_calls += 1
                 correction_embedding = get_embedding(theme_key)
                 if correction_embedding is not None:
@@ -547,9 +509,11 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 )
 
         conn.commit()
-        conn.close()
     except Exception as e:
         print(f"process_session_corrections DB error: {e}", file=sys.stderr)
+    finally:
+        if conn is not None:
+            conn.close()
 
     return all_corrections
 
@@ -647,19 +611,25 @@ def feed_outcomes_to_scoring(db_path):
     if os.path.isfile(db_path):
         try:
             conn = sqlite3.connect(db_path, timeout=5)
-            rows = conn.execute(
-                "SELECT model, COUNT(*) as total, SUM(CASE WHEN success THEN 1 ELSE 0 END) as successes "
-                "FROM merge_outcomes WHERE success IS NOT NULL AND model IS NOT NULL "
-                "GROUP BY model"
-            ).fetchall()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='merge_outcomes'"
+            )
+            if cursor.fetchone():
+                rows = cursor.execute(
+                    "SELECT model, COUNT(*) as total FROM merge_outcomes "
+                    "WHERE success IS NOT NULL AND model IS NOT NULL "
+                    "GROUP BY model HAVING COUNT(*) >= 5"
+                ).fetchall()
+                for model, total in rows:
+                    rate = model_rates.get(model, 0.0)
+                    if rate < 0.7:
+                        print(
+                            f"Warning: model '{model}' success rate {rate:.1%} "
+                            f"({int(rate * total)}/{total}) below 0.7 threshold",
+                            file=sys.stderr,
+                        )
             conn.close()
-            for model, total, successes in rows:
-                if total >= 5 and (successes / total) < 0.7:
-                    print(
-                        f"Warning: model '{model}' success rate {successes/total:.1%} "
-                        f"({successes}/{total}) below 0.7 threshold",
-                        file=sys.stderr,
-                    )
         except sqlite3.Error:
             pass
 
@@ -805,7 +775,9 @@ def main_logic(transcript_path, db_path, session_id="", corrections=None):
         return
 
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 

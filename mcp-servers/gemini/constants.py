@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 DEFAULT_MODEL = None  # Let gemini CLI use its own model routing
-GEMINI_TIMEOUT = 120  # seconds
+GEMINI_TIMEOUT = 600  # seconds — large-context tools (audit, plan) need room
 
 PROJECT_ROOT = Path(os.environ.get("GEMINI_MCP_PROJECT_ROOT", str(Path.cwd())))
 
@@ -66,6 +66,20 @@ DESIGN_SYSTEM_INSTRUCTION = (
     "Output widget trees, component hierarchies, and structural pseudocode where helpful — "
     "but NOT full implementation code. Use bullet points, tables, and indented tree notation. "
     "For each design decision, state the rationale."
+)
+
+# ---------------------------------------------------------------------------
+# UI Codegen constants
+# ---------------------------------------------------------------------------
+UI_CODEGEN_SYSTEM_INSTRUCTION = (
+    "You are a senior frontend engineer. Generate production-ready UI component code. "
+    "Output ONLY markup and styles — no state management, no data fetching, no business logic. "
+    "Event handlers should call props (e.g., onClick={props.onSubmit}) — never define logic inline. "
+    "Match the project's framework, component library, and styling approach exactly. "
+    "Study the exemplar components provided and match their patterns: import style, export pattern, "
+    "naming conventions, file organization. "
+    "Accessibility: semantic HTML, WCAG AA contrast, aria labels where needed. "
+    "If you receive build/lint errors, fix ONLY the errors — do not restructure the component."
 )
 
 _KNOWN_DOCUMENTS: dict[str, dict[str, str]] = {

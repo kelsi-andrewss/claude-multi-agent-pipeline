@@ -12,7 +12,8 @@ def main():
     try:
         d = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
-        sys.exit(0)
+        print("parse_hook_input: invalid JSON on stdin", file=sys.stderr)
+        sys.exit(1)
 
     if field in ("file_path", "path"):
         path = d.get("tool_input", {}).get("file_path", "")

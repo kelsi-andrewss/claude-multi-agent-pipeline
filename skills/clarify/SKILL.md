@@ -145,9 +145,24 @@ Record the user's response:
    3. <Decision area>: <Option A> (pro, con) vs <Option B> (pro, con). I'd pick <recommendation> — <reasoning>.
    ```
 
-4. Wait for user response. Record each decision with area, choice, reasoning, and `source: "user"`.
+4. Wait for user response. After each response, categorize every ambiguity and decision point as **resolved** (user answered or confirmed) or **open** (still unanswered). Record each resolved decision with area, choice, reasoning, and `source: "user"`. Show updated status:
 
-5. If answers surface new ambiguities, ask ONE more round (max 2 rounds total). Format the follow-up the same way.
+   ```
+   Resolved: [list of resolved items]
+   Still open: [list of open items]
+   ```
+
+5. If open items remain, present the next batch. There is no round cap — loop until every item is **resolved** or **excluded** (user explicitly said skip/not applicable).
+
+   ### Persistent gap escalation
+
+   If an item remains **open** after being asked about, the question failed — not the user. Escalate the approach:
+
+   1. **First attempt** — suggest-and-ask. Lead with your best guess, let the user confirm or correct. (This is the default from the initial batch above.)
+   2. **Second attempt** — rephrase with concrete options. Don't re-ask the same question. Break it down smaller or offer 2-3 specific alternatives the user can react to instead of generating from scratch. Example: "For the data layer, here are three approaches: (a) Firestore with sub-collections, (b) flat document model with references, (c) SQL via Supabase. Which fits?"
+   3. **Third attempt** — ask if the item applies at all. "Does this feature actually need [X], or should we explicitly exclude it?" If the user says skip, mark it **excluded** — that's a decision, not a gap.
+
+   Never proceed with an open gap. Never infer what the user didn't say. Every item resolves to a user decision (covered or excluded).
 
 6. Proceed to Step 4 with all resolved decisions.
 

@@ -3,25 +3,28 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: build-verify.sh --project-root <path>
+Usage: build-verify.sh --project-root <path> [--no-build]
 
 Detect project type and run build/lint verification. Emits JSON results on stdout.
 
 Supported project types: node_ts, flutter, python, rust, go.
-Returns skip for unrecognized projects.
+Returns fail for unrecognized projects unless --no-build is passed.
 
 Arguments:
   --project-root   Absolute path to the project root (required)
+  --no-build       Explicitly opt out of build verification for projects with no recognized build system
   --help           Show this help message
 USAGE
   exit 2
 }
 
 PROJECT_ROOT=""
+NO_BUILD=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-root) PROJECT_ROOT="$2"; shift 2 ;;
+    --no-build) NO_BUILD=true; shift ;;
     --help) usage ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
@@ -94,9 +97,10 @@ elif [[ -f "go.mod" ]]; then
   BUILD_CMD="go build ./... && go vet ./..."
 fi
 
-# If unknown project type, emit skip
+# If unknown project type, fail unless --no-build was passed
 if [[ "$PROJECT_TYPE" == "unknown" ]]; then
-  python3 -c "
+  if [[ "$NO_BUILD" == "true" ]]; then
+    python3 -c "
 import json
 print(json.dumps({
     'status': 'success',
@@ -107,7 +111,22 @@ print(json.dumps({
     'lint_warnings': 0
 }))
 "
-  exit 0
+    exit 0
+  else
+    python3 -c "
+import json
+print(json.dumps({
+    'status': 'error',
+    'project_type': 'unknown',
+    'build_cmd': None,
+    'lint_cmd': None,
+    'build_result': 'fail',
+    'lint_warnings': 0,
+    'build_output': 'No recognized build system. Pass --no-build to explicitly opt out of build verification.'
+}))
+"
+    exit 1
+  fi
 fi
 
 # Run build (disable errexit so we can capture non-zero exit codes)
@@ -137,11 +156,30 @@ fi
 
 # Run lint if available
 LINT_WARNINGS=0
+LINT_OUTPUT=""
 if [[ -n "$LINT_CMD" ]]; then
   echo "Running lint: $LINT_CMD" >&2
+  LINT_EXIT=0
   set +e
   LINT_OUTPUT=$(bash -c "$LINT_CMD" 2>&1)
+  LINT_EXIT=$?
   set -e
+  if [[ $LINT_EXIT -ne 0 ]]; then
+    python3 -c "
+import json, sys
+print(json.dumps({
+    'status': 'error',
+    'project_type': sys.argv[1],
+    'build_cmd': sys.argv[2],
+    'lint_cmd': sys.argv[3],
+    'build_result': 'pass',
+    'lint_result': 'fail',
+    'lint_output': sys.argv[4],
+    'lint_warnings': 0
+}))
+" "$PROJECT_TYPE" "$BUILD_CMD" "$LINT_CMD" "$LINT_OUTPUT"
+    exit 1
+  fi
   LINT_WARNINGS=$(echo "$LINT_OUTPUT" | grep -c -i "warning" || true)
 fi
 
@@ -164,7 +202,8 @@ print(json.dumps({
     'build_cmd': sys.argv[2],
     'lint_cmd': sys.argv[3] if sys.argv[3] else None,
     'test_cmd': sys.argv[4],
-    'build_result': 'fail',
+    'build_result': 'pass',
+    'test_result': 'fail',
     'test_output': sys.argv[5],
     'lint_warnings': 0
 }))

@@ -18,7 +18,6 @@ from mcp.server.fastmcp import FastMCP
 
 from decision_memory.dump import dump_to_sql
 from decision_memory.embeddings import EmbeddingProvider
-from decision_memory.search import SearchEngine
 from decision_memory.store import DecisionStore
 from decision_memory.types import Decision, DecisionScope
 
@@ -88,28 +87,6 @@ def _parse_relationships(raw: str) -> list[tuple[int, str]]:
     return result
 
 
-def _merge_relationships(existing: str | None, new_entry: str) -> str:
-    """Append new_entry to existing comma-separated relationships, deduplicating by (id, type)."""
-    seen: set[str] = set()
-    if existing and existing.strip():
-        for token in existing.split(","):
-            token = token.strip()
-            if token:
-                seen.add(token)
-    new_entry = new_entry.strip()
-    if new_entry:
-        seen.add(new_entry)
-    return ",".join(sorted(seen))
-
-
-def _compute_scope_overlap(new_patterns: set[str], existing_patterns: set[str]) -> float:
-    """Return overlap ratio: len(intersection) / max(len(a), len(b)). 0.0 when both empty."""
-    if not new_patterns and not existing_patterns:
-        return 0.0
-    intersection = new_patterns & existing_patterns
-    return len(intersection) / max(len(new_patterns), len(existing_patterns))
-
-
 def _staleness_tier(created_at: str | None) -> str:
     """Return 'fresh' (<7d), 'aging' (7-30d), 'stale' (>30d), or 'unknown'."""
     if not created_at:
@@ -167,57 +144,13 @@ def record_project_decision(
 
     superseded_ids = []
     warnings = []
-    related_entries: list[str] = []
     new_patterns = {s.scope_value for s in scopes}
     if new_patterns:
-        existing = store.list_all(status="active")
-        conn = store._get_connection()
-        try:
-            now = datetime.now(timezone.utc).isoformat()
-            for existing_d in existing:
-                if existing_d.id == decision_id:
-                    continue
-                existing_patterns = {
-                    s.scope_value for s in existing_d.scopes if s.scope_type == "file"
-                }
-                overlap = _compute_scope_overlap(new_patterns, existing_patterns)
-                if overlap > 0.5:
-                    conn.execute(
-                        "UPDATE decisions SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?",
-                        (decision_id, now, existing_d.id),
-                    )
-                    superseded_ids.append(existing_d.id)
-                elif overlap > 0:
-                    warnings.append(
-                        f"decision-{existing_d.id} has partial scope overlap ({overlap:.0%})"
-                    )
-                    related_entries.append(f"{existing_d.id}:related")
-                    merged = _merge_relationships(existing_d.related_decisions, f"{decision_id}:related")
-                    conn.execute(
-                        "UPDATE decisions SET related_decisions = ?, updated_at = ? WHERE id = ?",
-                        (merged, now, existing_d.id),
-                    )
-            if related_entries:
-                new_rels = None
-                for entry in related_entries:
-                    new_rels = _merge_relationships(new_rels, entry)
-                conn.execute(
-                    "UPDATE decisions SET related_decisions = ?, updated_at = ? WHERE id = ?",
-                    (new_rels, now, decision_id),
-                )
-            conn.commit()
-        finally:
-            conn.close()
+        superseded_ids, warnings = store.process_scope_overlap(decision_id, new_patterns)
 
     provider = _get_provider()
     if provider.available():
-        conn = store._get_connection()
-        try:
-            engine = SearchEngine(conn, provider)
-            engine.rebuild_index()
-            conn.commit()
-        finally:
-            conn.close()
+        store.rebuild_index(provider)
 
     dump_to_sql(store, store.dump_path)
 
@@ -247,12 +180,7 @@ def query_project_decisions(
 
     if query_text:
         provider = _get_provider()
-        conn = store._get_connection()
-        try:
-            engine = SearchEngine(conn, provider)
-            results = engine.hybrid_search(query_text, limit=limit)
-        finally:
-            conn.close()
+        results = store.search(query_text, provider, limit=limit)
 
         if active_files:
             filtered = []
@@ -319,13 +247,7 @@ def sync_decision_store() -> str:
 
     provider = _get_provider()
     if provider.available():
-        conn = store._get_connection()
-        try:
-            engine = SearchEngine(conn, provider)
-            count = engine.rebuild_index()
-            conn.commit()
-        finally:
-            conn.close()
+        count = store.rebuild_index(provider)
         return f"Rebuilt decision store from dump. Re-indexed {count} decision(s)."
 
     return "Rebuilt decision store from dump. Embedding index skipped (fastembed unavailable)."
@@ -381,58 +303,18 @@ def query_decisions_by_domain(domain: str, limit: int = 50) -> str:
         limit: Maximum results to return (default 50).
     """
     store = _get_store()
-    conn = store._get_connection()
-    try:
-        columns = conn.execute("PRAGMA table_info(decisions)").fetchall()
-        has_domain = any(col[1] == "domain" for col in columns)
+    decisions = store.list_by_domain(domain, limit=limit)
 
-        if not has_domain:
-            return (
-                "No decisions found (domain column not available "
-                "-- Phase 3 schema required)."
-            )
+    if not decisions:
+        return f"No decisions found for domain '{domain}'."
 
-        rows = conn.execute(
-            "SELECT id, content, reasoning, status, source, superseded_by, "
-            "created_at, updated_at, related_decisions FROM decisions "
-            "WHERE status = 'active' AND (domain = ? OR domain LIKE ?) "
-            "ORDER BY id LIMIT ?",
-            (domain, f"%{domain}%", limit),
-        ).fetchall()
+    lines = [f"Found {len(decisions)} decision(s) for domain '{domain}':\n"]
+    for d in decisions:
+        lines.append(_format_decision(d))
+        lines.append(f"  Staleness: {_staleness_tier(d.created_at)}")
+        lines.append("")
 
-        if not rows:
-            return f"No decisions found for domain '{domain}'."
-
-        lines = [f"Found {len(rows)} decision(s) for domain '{domain}':\n"]
-        for row in rows:
-            scope_rows = conn.execute(
-                "SELECT id, decision_id, scope_type, scope_value "
-                "FROM decision_scopes WHERE decision_id = ?",
-                (row[0],),
-            ).fetchall()
-            scopes = [
-                DecisionScope(id=s[0], decision_id=s[1], scope_type=s[2], scope_value=s[3])
-                for s in scope_rows
-            ]
-            d = Decision(
-                id=row[0],
-                content=row[1],
-                reasoning=row[2],
-                status=row[3],
-                source=row[4],
-                superseded_by=row[5],
-                created_at=row[6],
-                updated_at=row[7],
-                related_decisions=row[8],
-                scopes=scopes,
-            )
-            lines.append(_format_decision(d))
-            lines.append(f"  Staleness: {_staleness_tier(d.created_at)}")
-            lines.append("")
-
-        return "\n".join(lines)
-    finally:
-        conn.close()
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
