@@ -35,8 +35,10 @@ Parse `{{args}}` to extract inputs and flags.
 **Input modes (remaining tokens after flag stripping):**
 
 1. **Manifest mode**: a token ends with `.json` and the file exists (e.g., `.ship-manifest.json`).
-   - Read the artifact JSON. Extract story list from `data.stories` (array of story IDs or objects with `story_id` fields).
-   - If artifact `data` contains a `briefing_path` field and `--briefing` was not explicitly set, use it as `briefing_path`.
+   - Read the artifact JSON. Extract story list using the appropriate format:
+     - If `data.epics` exists and is an array: iterate each epic object, collect `epic.stories` from every entry, flatten into one combined story list. Each `epic.stories` entry has the same shape as `data.stories` entries (objects with `id`, `title`, `agent`, `detail_file`).
+     - Else if `data.stories` exists: use it directly (array of story IDs or objects with `story_id` fields).
+   - If artifact `data` contains a `briefing_path` field and `--briefing` was not explicitly set, use it as `briefing_path`. (Resolved from top-level `data`, not from within individual epic objects.)
    - Store `manifest` for provenance tracking.
 
 2. **ID mode**: tokens matching `story-\d+` or `epic-\d+`.
@@ -649,7 +651,7 @@ If any agents failed or returned errors, list under an `Errors:` section.
 
 ## Artifact contract
 
-**Reads:** `.ship-manifest.json` (from `/plan-stories`) or inline story/epic IDs
+**Reads:** `.ship-manifest.json` (from `/plan-stories`) or inline story/epic IDs. Manifest may contain either `data.stories` (single-epic, flat list) or `data.epics[].stories` (multi-epic, stories nested under each epic object).
 **Writes:** `plans/*.md` (one per story)
 **DB side effects:** `pm_update_story(plan_file=...)` for each successful plan
 
