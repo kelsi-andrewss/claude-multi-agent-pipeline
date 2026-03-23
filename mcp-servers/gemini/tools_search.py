@@ -17,11 +17,10 @@ SEARCH_SYSTEM_INSTRUCTION = (
     "If search results conflict, note the discrepancy and cite both sources."
 )
 
-SEARCH_FILE = os.path.join(DETAIL_DIR, "search.md")
+# Per-process file: each MCP server instance (one per agent) gets its own file.
+# Within a process, batch logic appends parallel results to the same file.
+SEARCH_FILE = os.path.join(DETAIL_DIR, f"search-{os.getpid()}.md")
 
-# Tracks whether a batch is active. First call to _start_batch() overwrites
-# the file and sets the flag. Subsequent calls within the same batch append.
-# reset_search_batch() clears the flag so the next call starts fresh.
 _batch_lock = threading.Lock()
 _batch_active = False
 
@@ -34,7 +33,7 @@ def reset_search_batch() -> None:
 
 
 def _write_search_result(query: str, response: str) -> str:
-    """First call in a batch overwrites; subsequent calls append."""
+    """First call in a batch overwrites; subsequent calls append. Per-process file prevents cross-agent clobber."""
     global _batch_active
     os.makedirs(DETAIL_DIR, exist_ok=True)
     with _batch_lock:
