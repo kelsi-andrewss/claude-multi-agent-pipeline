@@ -429,3 +429,4 @@
 {"ts":"2026-03-23T16:41:34Z","type":"hook.session-learning-check","actor":"hook","ref":"7fe73c16-9156-427c-b0a9-5b23e856d4c9","session":"","payload":{}}
 {"ts":"2026-03-23T16:41:41Z","type":"hook.session-learning-check","actor":"hook","ref":"7fe73c16-9156-427c-b0a9-5b23e856d4c9","session":"","payload":{}}
 {"ts":"2026-03-23T16:43:09Z","type":"hook.session-learning-check","actor":"hook","ref":"7fe73c16-9156-427c-b0a9-5b23e856d4c9","session":"","payload":{}}
+{"ts":"2026-03-23T16:46:46Z","type":"hook.warn-sync-heavy-bash","actor":"hook","ref":"git","session":"","payload":{}}
