@@ -14,7 +14,8 @@
       "Bash(~/.claude/tracking/stop-hook.sh*)",
       "Bash(~/.claude/tracking/subagent-stop-hook.sh*)",
       "Bash(~/.claude/hooks/inject-tier2-context.sh*)",
-      "Bash(~/.claude/hooks/inject-project-decisions.sh*)"
+      "Bash(~/.claude/hooks/inject-project-decisions.sh*)",
+      "Bash(~/.claude/hooks/guard-plan-file.sh*)"
     ],
     "defaultMode": "default"
   },
@@ -74,6 +75,16 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/block-env-read.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__gemini__pm_update_story",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/guard-plan-file.sh",
             "timeout": 5
           }
         ]

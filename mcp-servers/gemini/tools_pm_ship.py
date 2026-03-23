@@ -254,14 +254,17 @@ def register(mcp):
             )
             for task_title in s.get("tasks", []):
                 _add_task_to_story(conn, sid, task_title)
-            created_stories.append({
+            story_entry = {
                 "id": sid,
                 "title": s["title"],
                 "agent": s.get("agent"),
                 "write_files": s.get("write_files", []),
                 "test_files": s.get("test_files") or test_files or [],
                 "tasks": s.get("tasks", []),
-            })
+            }
+            if not s.get("tasks"):
+                story_entry["warning"] = "Story created with 0 tasks. Add tasks before setting plan_file."
+            created_stories.append(story_entry)
 
         return {
             "epic_id": epic_id,
