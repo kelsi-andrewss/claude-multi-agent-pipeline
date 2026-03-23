@@ -1,16 +1,16 @@
 ---
 name: smoke-test
 description: >
-  Pipeline validation via throwaway artifacts. Creates a smoke-test epic with
-  simple stories, runs Gemini planning + plan-writer agents, validates output
-  structure and DB state, tears down, and reports pass/fail. Use when the user
-  says "/smoke-test ship" or "/smoke-test <mode>".
+  Pipeline output quality validation. Generates a real app via /ship, builds it,
+  and grades wiring quality with deterministic checks. Default mode ("quality")
+  generates a recipe app and validates build + wiring. "ship" mode runs the
+  legacy structural pipeline validation.
 args:
   - name: args
     type: string
     description: >
-      Test mode to run. Currently supported: "ship". Future modes may include
-      "coder", "merge", etc.
+      Test mode to run. "quality" (default) generates and validates a real app.
+      "ship" runs legacy structural pipeline validation.
 ---
 
 # Smoke Test Skill Invoked
@@ -19,22 +19,156 @@ User has requested: `/smoke-test {{args}}`
 
 ---
 
-## Step 0: Parse args and validate mode
+## Step 0: Parse args and select mode
 
 Inspect `{{args}}` (trim whitespace):
 
-- **Empty or unrecognized** — Print available modes and stop:
+- **Empty or "quality"** — Proceed to **Quality mode** (Step 1).
+- **"ship"** — Jump to **Ship mode** section below.
+- **Anything else** — Print usage and stop:
   ```
-  Usage: /smoke-test <mode>
+  Usage: /smoke-test [mode]
 
   Available modes:
-    ship — Validates the plan-writer pipeline (epic creation, Gemini planning,
-           plan-writer agents, plan file structure, DB state, teardown)
+    quality — (default) Generate a recipe app, build it, grade wiring quality
+    ship    — Legacy structural pipeline validation (DB state, plan files)
   ```
 
-- **"ship"** — Proceed to Step 1.
+---
+
+# Quality Mode
+
+## Step 1: Create temp directory
+
+```bash
+SMOKE_DIR=$(mktemp -d /tmp/smoke-test-XXXXXX)
+```
+
+Record `SMOKE_DIR` for use in subsequent steps.
 
 ---
+
+## Step 2: Generate app via /ship
+
+Use this hardcoded test fixture prompt:
+
+```
+Build a recipe search app. Next.js App Router, single page. Search bar at top that queries TheMealDB free API. Results show as cards with thumbnail, name, and category. Clicking a card opens a detail modal with full ingredients list and instructions. Users can bookmark recipes and see their bookmarks in a sidebar toggle.
+```
+
+Run:
+```
+/ship --quick "<the prompt above>"
+```
+
+The `--quick` flag skips critique/verify since the smoke test has its own validation.
+
+Wait for `/ship` to complete before proceeding.
+
+---
+
+## Step 3: Locate generated code
+
+The stories merged to dev. Clone the generated app into `SMOKE_DIR`:
+
+```bash
+ORIGIN_URL=$(git -C ~/.claude remote get-url origin)
+git clone --depth 1 --branch dev "$ORIGIN_URL" "$SMOKE_DIR/repo"
+```
+
+The generated app files will be under the project root on the dev branch. Locate the app directory — look for the `package.json` created by /ship (it will be in a subdirectory, not the root ~/.claude repo). Set `APP_DIR` to that directory.
+
+If no app directory is found, report FAIL and skip to Step 7 (teardown).
+
+---
+
+## Step 4: Run project-validator.sh
+
+```bash
+VALIDATOR_JSON=$(bash ~/.claude/scripts/project-validator.sh --project-root "$APP_DIR")
+```
+
+Parse the JSON result. Record:
+- `validator_status`: the top-level `status` field
+- `framework`: the detected framework
+- Per-layer results (install, build, typecheck)
+
+---
+
+## Step 5: Run wiring-checklist.sh
+
+```bash
+WIRING_JSON=$(bash ~/.claude/scripts/wiring-checklist.sh --project-root "$APP_DIR")
+```
+
+Parse the JSON result. Record:
+- `wiring_status`: the top-level `status` field
+- `wiring_score`: the `score` field (e.g. "7/8")
+- Per-check results
+
+---
+
+## Step 6: Grade
+
+**PASS** if both conditions are met:
+1. `validator_status` is `"pass"` (install + build + typecheck all succeed)
+2. Wiring score is >= 6/8
+
+**FAIL** otherwise.
+
+---
+
+## Step 7: Teardown
+
+Runs unconditionally, even if earlier steps failed.
+
+1. Remove temp directory:
+   ```bash
+   rm -rf "$SMOKE_DIR"
+   ```
+
+2. Archive the smoke-test epic (if one was created by /ship):
+   ```
+   /cleanup epic-<id>
+   ```
+
+---
+
+## Step 8: Report
+
+Print a summary table:
+
+```
+Smoke test: quality validation
+
+Layer              Status    Output (last line)
+--------------------------------------------------
+install            PASS/FAIL <last line of output>
+build              PASS/FAIL <last line of output>
+typecheck          PASS/FAIL <last line of output>
+
+Wiring Check       Status    Matches
+--------------------------------------------------
+event_binding      PASS/FAIL N
+fetch_to_state     PASS/FAIL N
+click_to_state     PASS/FAIL N
+conditional_render PASS/FAIL N
+shared_state       PASS/FAIL N
+toggle_pattern     PASS/FAIL N
+modal_close        PASS/FAIL N
+key_handler        PASS/FAIL N
+
+Wiring score: N/8
+Build status: PASS/FAIL
+
+Overall: PASS / FAIL
+```
+
+---
+
+# Ship Mode
+
+Legacy structural pipeline validation. Creates throwaway stories, runs planning agents, validates DB state and plan file structure, then tears down.
 
 ## Step 1: Create throwaway epic
 
