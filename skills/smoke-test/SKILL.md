@@ -38,17 +38,35 @@ Inspect `{{args}}` (trim whitespace):
 
 # Quality Mode
 
-## Step 1: Create temp directory
+## Step 1: Create isolated test repo
+
+Create a temp directory and initialize it as a standalone git repo with a minimal Node/TS scaffold:
 
 ```bash
 SMOKE_DIR=$(mktemp -d /tmp/smoke-test-XXXXXX)
+cd "$SMOKE_DIR"
+git init
+git checkout -b main
+echo '{"name":"smoke-test-recipe-app","private":true,"scripts":{"dev":"next dev","build":"next build"}}' > package.json
+echo '{"compilerOptions":{"target":"es5","lib":["dom","dom.iterable","esnext"],"allowJs":true,"skipLibCheck":true,"strict":true,"noEmit":true,"esModuleInterop":true,"module":"esnext","moduleResolution":"bundler","resolveJsonModule":true,"isolatedModules":true,"jsx":"preserve","incremental":true,"plugins":[{"name":"next"}],"paths":{"@/*":["./src/*"]}},"include":["next-env.d.ts","**/*.ts","**/*.tsx"],"exclude":["node_modules"]}' > tsconfig.json
+mkdir -p src/app
+echo 'export default function RootLayout({ children }: { children: React.ReactNode }) { return (<html><body>{children}</body></html>) }' > src/app/layout.tsx
+echo 'export default function Home() { return <main>Hello</main> }' > src/app/page.tsx
+git add -A && git commit -m "init: Next.js scaffold"
+git checkout -b dev
 ```
 
-Record `SMOKE_DIR` for use in subsequent steps.
+Record `SMOKE_DIR` for use in subsequent steps. The main session MUST `cd` to `SMOKE_DIR` before invoking /ship in Step 2.
 
 ---
 
 ## Step 2: Generate app via /ship
+
+**IMPORTANT: Change working directory to `$SMOKE_DIR` before running /ship.** All /ship operations (story creation, worktrees, merges) will target the temp repo, not ~/.claude.
+
+```bash
+cd "$SMOKE_DIR"
+```
 
 Use this hardcoded test fixture prompt:
 
@@ -63,22 +81,30 @@ Run:
 
 The `--quick` flag skips critique/verify since the smoke test has its own validation.
 
-Wait for `/ship` to complete before proceeding.
+Wait for `/ship` to complete before proceeding. Then `cd` back to the orchestration project root:
+
+```bash
+cd ~/.claude
+```
 
 ---
 
-## Step 3: Locate generated code
+## Step 3: Set app directory
 
-The stories merged to dev. Clone the generated app into `SMOKE_DIR`:
+After /ship completes, the generated code is on the dev branch of the temp repo. No cloning needed.
 
 ```bash
-ORIGIN_URL=$(git -C ~/.claude remote get-url origin)
-git clone --depth 1 --branch dev "$ORIGIN_URL" "$SMOKE_DIR/repo"
+# Checkout dev branch which has the merged code
+git -C "$SMOKE_DIR" checkout dev
+APP_DIR="$SMOKE_DIR"
 ```
 
-The generated app files will be under the project root on the dev branch. Locate the app directory — look for the `package.json` created by /ship (it will be in a subdirectory, not the root ~/.claude repo). Set `APP_DIR` to that directory.
+Verify the app has source files:
+```bash
+ls "$APP_DIR/src/" 2>/dev/null
+```
 
-If no app directory is found, report FAIL and skip to Step 7 (teardown).
+If no source files exist, report FAIL and skip to Step 7 (teardown).
 
 ---
 
