@@ -449,6 +449,22 @@ You MUST create or modify these test files as part of your implementation. Tests
 <If test_files is "N/A":>
 No test files required for this story.
 
+## Wiring verification
+
+Before reporting DONE, trace every user-facing interaction in the plan through your code:
+event handler → state change → UI update. Verify each link in the chain is connected:
+- onClick/onSubmit/onChange actually calls the handler function
+- Handler actually mutates state (setState, dispatch, store update)
+- State change actually triggers re-render of the dependent component
+- Navigation actually routes to the correct page/view
+- API calls are connected to response handlers that update UI
+
+Broken wiring (onClick not bound, href pointing to wrong route, state update not
+triggering re-render, API call not connected to response handler) is a DONE-blocker.
+Fix it before committing.
+
+For non-UI stories (pure backend, infrastructure, config), skip this section.
+
 ## Steps
 
 1. Verify the story worktree (pre-created by the resolution subagent):
