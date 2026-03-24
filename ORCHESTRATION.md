@@ -143,7 +143,7 @@ Full template: run-stories/SKILL.md Step 4. Must include: story title, plan file
 
 **UI coder routing**: Stories with `ui_codegen: true` MUST use the `ui-coder` agent — never `quick-fixer` or `architect`. The `ui-coder` agent is the ONLY agent allowed to call `mcp__gemini__gemini_ui_code`. It enforces Gemini code generation for all visual/layout component code. Quick-fixer and architect write their own code and are blocked from `gemini_ui_code`.
 
-**UI codegen gate**: If a story's write targets include UI file extensions (`.tsx`, `.jsx`, `.vue`, `.svelte`, `Screen.kt`, `.dart` files with `screen`/`widget`/`page` in the name) but `ui_codegen` is not `true`, warn before launch. The planner likely missed the tag.
+**UI codegen gate**: If a story's title or description contains visual/layout keywords (`component`, `screen`, `page`, `widget`, `view`, `layout`, `dashboard`, `form`, `panel`, `modal`, `dialog`, `sidebar`, `navbar`, `header`, `footer`, `card`, `redesign`, `UI`, `frontend`, `template`) but `ui_codegen` is not `true`, warn before launch. Language-agnostic — applies to any framework. The planner likely missed the tag.
 
 ### Decision autonomy levels
 
