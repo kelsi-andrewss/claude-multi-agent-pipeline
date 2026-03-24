@@ -415,7 +415,7 @@ Do NOT call any pm_* tools except pm_update_story (for state transitions).
 1. **Prepare all contracts** — scan plan for all visual components. Classify each as greenfield (file doesn't exist) or brownfield (file exists). Write input contracts for greenfield; extract existing contracts + consumers for brownfield.
 2. **Fire ALL gemini_ui_code calls in parallel** — one call per component, all in a single message. Do NOT serialize. Brownfield calls include existing contract + consumer list in `requirements` and the existing file as an `exemplar_path`.
 3. **Drop all results, wire everything** — drop Gemini's code as-is into each file. For brownfield: contract diff (restore renamed/removed props if plan doesn't authorize, NEED_DECISION if irreconcilable). Wire imports, state, handlers across all components.
-4. **Build once, fix broken** — build/lint the whole worktree. If Gemini errors, retry only broken components (also in parallel). NEED_DECISION on consecutive same-error.
+4. **Build once, fix broken (max 3 rounds)** — build/lint the whole worktree. If Gemini errors, retry only broken components (parallel), include cross-component context when errors span components. Circuit breaker → NEED_DECISION after: same error twice, OR 3 total rounds without clean build, OR persistent cross-component interface mismatch. Don't loop.
 
 **HARD BLOCKS:** Writing visual markup yourself, hand-editing Gemini's returned styles, cramming components into one file, skipping `gemini_ui_code` for "small" components, serializing Gemini calls when they could be parallel.
 

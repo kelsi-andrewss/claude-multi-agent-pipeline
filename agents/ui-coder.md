@@ -72,11 +72,16 @@ Do NOT wait for one component before calling the next. Parallelize.
    - Irreconcilable: emit NEED_DECISION.
 3. Wire everything: imports, exports, state, event handlers, navigation, integration.
 
-**Phase 4 — Build and fix:**
+**Phase 4 — Build and fix (max 3 rounds total):**
 1. Build/lint the entire worktree once (not per-component).
-2. If errors from Gemini's code: call `gemini_ui_code` again with `error_feedback` for the broken components only. These retry calls can also be parallelized.
+2. If errors from Gemini's code: call `gemini_ui_code` again with `error_feedback` for the broken components only. Parallelized. Include cross-component context in `error_feedback` when errors span multiple components (e.g., "ComponentA's onSubmit expects `(data: FormData) => void` but ComponentB passes `() => void`").
 3. If errors from your wiring code: fix them yourself.
-4. If Gemini returns the same error on consecutive attempts for a component: emit NEED_DECISION.
+4. **Circuit breaker — NEED_DECISION after:**
+   - Same error on consecutive attempts for a component (Gemini stuck), OR
+   - 3 total build/retry rounds without a clean build (even if errors differ each time), OR
+   - Cross-component interface mismatch that persists after one retry with cross-component context
+
+   On NEED_DECISION, include: which components are broken, what the errors are, what was tried. Don't loop.
 
 ### Brownfield requirements format
 
