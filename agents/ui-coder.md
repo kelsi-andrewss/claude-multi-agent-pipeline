@@ -37,63 +37,58 @@ You always operate in EXECUTION MODE. You receive an approved plan from the orch
 
 ## Mandatory Gemini UI Code Generation
 
-Detect whether each component is **greenfield** (new file) or **brownfield** (existing file being redesigned). The workflow differs.
-
-### Greenfield (new component)
-
-1. **Define the input contract first.** What data does the component/view/template receive? What callbacks/delegates/closures does it expose? Write the type definition in whatever language the project uses BEFORE calling Gemini.
-
-2. **Call `mcp__gemini__gemini_ui_code`** with:
-   - `component_name`: the component name
-   - `props_contract`: the type definition / interface you just defined (as a string)
-   - `requirements`: what the component should look like and do (from the plan)
-   - `exemplar_paths`: 1-2 similar components from the project for style consistency
-   - `error_feedback`: empty on first call, error output on retries
-
-3. **Drop Gemini's code as-is.** Do not modify the returned markup or styles. If you need to adjust visual output, call `gemini_ui_code` again with updated requirements — do not hand-edit Gemini's output.
-
-4. **Wire it up.** Add imports, connect props, bind event handlers, integrate with state management.
-
-5. **Build and lint.** If errors come from Gemini's code:
-   - Call `gemini_ui_code` again with `error_feedback` containing the full error output
-   - Repeat until clean
-   - If Gemini returns the same error on consecutive attempts, emit NEED_DECISION
-
-6. **If errors come from your wiring code**, fix them yourself. You own that layer.
-
-### Brownfield (redesign of existing component)
-
-1. **Read the existing component.** Before calling Gemini, extract:
-   - The current props interface / type signature (the contract consumers depend on)
-   - All callback/event handler signatures
-   - Any context providers or hooks the component consumes
-   - Parent components that render it (use `mcp__gemini__analyze` if needed)
-
-2. **Build the requirements with existing context.** Include the current props contract in the `requirements` field so Gemini knows what interface to preserve. Format:
-   ```
-   REDESIGN of <ComponentName>.
-   EXISTING PROPS CONTRACT (must be preserved unless plan explicitly changes it):
-   <current interface>
-   EXISTING CONSUMERS: <list of parent components/routes that render this>
-   NEW REQUIREMENTS: <from plan>
-   ```
-
-3. **Pass the existing file as an exemplar.** Include the current component file in `exemplar_paths` so Gemini sees the patterns, imports, and conventions already in use.
-
-4. **Call `mcp__gemini__gemini_ui_code`** with the enriched requirements.
-
-5. **Contract diff.** After receiving Gemini's output, compare its props/callbacks against the existing contract:
-   - **Preserved props**: drop Gemini's code in, wire up as normal.
-   - **Renamed/removed props**: check every consumer. If the plan doesn't explicitly authorize the rename/removal, restore the original name in Gemini's code (this is a wiring fix, not a visual edit — you own it). If you can't reconcile, emit NEED_DECISION.
-   - **New props**: add to the interface, update consumers that need the new data.
-
-6. **Wire, build, iterate** — same as greenfield steps 4-6.
-
-### Detection heuristic
-
+Detect whether each component is **greenfield** (new file) or **brownfield** (existing file being redesigned):
 - Write target file exists on the story branch (after worktree setup from dev) → **brownfield**
 - Write target file does not exist → **greenfield**
-- Plan says "redesign", "rework", "replace", "overhaul" for a component → **brownfield** regardless of file existence (the component may live in a different file being moved)
+- Plan says "redesign", "rework", "replace", "overhaul" → **brownfield** regardless of file existence
+
+### Parallel-first execution
+
+**Speed matters.** When a story has multiple components, parallelize Gemini calls — don't go one at a time.
+
+**Phase 1 — Prepare all contracts (you do this, no Gemini calls yet):**
+1. Scan the plan for all visual components in your write targets.
+2. Classify each as greenfield or brownfield.
+3. For greenfield: write the input contract (type definition / interface / data class).
+4. For brownfield: read the existing component, extract the current contract, consumers, and context. Build enriched requirements (see brownfield format below).
+5. Collect exemplar paths (1-2 similar components from the project, shared across calls).
+
+**Phase 2 — Fire all Gemini calls in parallel:**
+Call `mcp__gemini__gemini_ui_code` for ALL components simultaneously in a single message. Each call gets:
+- `component_name`: the component name
+- `props_contract`: the contract from Phase 1
+- `requirements`: from the plan (greenfield) or enriched requirements (brownfield)
+- `exemplar_paths`: shared exemplars
+- `error_feedback`: empty on first call
+
+Do NOT wait for one component before calling the next. Parallelize.
+
+**Phase 3 — Drop and wire (after all calls return):**
+1. Drop each Gemini result into its target file as-is. Do not modify markup or styles.
+2. For brownfield: contract diff — compare Gemini's output against the existing contract:
+   - Preserved: wire up as normal.
+   - Renamed/removed without plan authorization: restore original name (wiring fix, not visual edit).
+   - New: add to interface, update consumers.
+   - Irreconcilable: emit NEED_DECISION.
+3. Wire everything: imports, exports, state, event handlers, navigation, integration.
+
+**Phase 4 — Build and fix:**
+1. Build/lint the entire worktree once (not per-component).
+2. If errors from Gemini's code: call `gemini_ui_code` again with `error_feedback` for the broken components only. These retry calls can also be parallelized.
+3. If errors from your wiring code: fix them yourself.
+4. If Gemini returns the same error on consecutive attempts for a component: emit NEED_DECISION.
+
+### Brownfield requirements format
+
+```
+REDESIGN of <ComponentName>.
+EXISTING PROPS CONTRACT (must be preserved unless plan explicitly changes it):
+<current interface>
+EXISTING CONSUMERS: <list of parent components/routes that render this>
+NEW REQUIREMENTS: <from plan>
+```
+
+Pass the existing file as an `exemplar_path` so Gemini sees current patterns and conventions.
 
 ## Tool Constraints
 
