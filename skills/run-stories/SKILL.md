@@ -411,28 +411,13 @@ Do NOT call any pm_* tools except pm_update_story (for state transitions).
 
 **Gemini MCP — blocked tools:** All other `mcp__gemini__*` tools (plan, audit, find_bug, test, etc.) are orchestrator-only.
 
-**gemini_ui_code workflow:**
-For each write target, detect greenfield (file doesn't exist) vs brownfield (file exists = redesign).
+**gemini_ui_code workflow — parallel-first:**
+1. **Prepare all contracts** — scan plan for all visual components. Classify each as greenfield (file doesn't exist) or brownfield (file exists). Write input contracts for greenfield; extract existing contracts + consumers for brownfield.
+2. **Fire ALL gemini_ui_code calls in parallel** — one call per component, all in a single message. Do NOT serialize. Brownfield calls include existing contract + consumer list in `requirements` and the existing file as an `exemplar_path`.
+3. **Drop all results, wire everything** — drop Gemini's code as-is into each file. For brownfield: contract diff (restore renamed/removed props if plan doesn't authorize, NEED_DECISION if irreconcilable). Wire imports, state, handlers across all components.
+4. **Build once, fix broken** — build/lint the whole worktree. If Gemini errors, retry only broken components (also in parallel). NEED_DECISION on consecutive same-error.
 
-**Greenfield:**
-1. Define the props contract first (TypeScript interface, Kotlin data class, Dart class).
-2. Call `gemini_ui_code` with component_name, props_contract, requirements, and exemplar_paths (1-2 similar components from the project).
-3. Drop the returned code into the target file as-is. Do NOT modify Gemini's markup or styles.
-4. Wire it: add imports, connect props, bind event handlers, integrate with state.
-
-**Brownfield (redesign):**
-1. Read the existing component. Extract: current props interface, callback signatures, context/hooks consumed, parent components.
-2. Include the existing props contract and consumer list in `requirements` so Gemini preserves the interface. Pass the existing file as an `exemplar_path`.
-3. Call `gemini_ui_code` with the enriched requirements.
-4. Contract diff: compare Gemini's output props/callbacks against existing. Restore renamed/removed props if the plan doesn't authorize the change. Update consumers for new props. Emit NEED_DECISION if irreconcilable.
-5. Wire it: same as greenfield step 4.
-
-**Both modes:**
-- Build/lint. If errors from Gemini's code, call `gemini_ui_code` again with `error_feedback`. Repeat until clean.
-- NEED_DECISION only if Gemini returns the same error on consecutive attempts.
-- One component per file. Multiple components = multiple `gemini_ui_code` calls.
-
-**HARD BLOCKS:** Writing JSX/HTML/template markup yourself, hand-editing Gemini's returned styles, cramming components into one file, skipping `gemini_ui_code` for "small" components.
+**HARD BLOCKS:** Writing visual markup yourself, hand-editing Gemini's returned styles, cramming components into one file, skipping `gemini_ui_code` for "small" components, serializing Gemini calls when they could be parallel.
 
 <If agent is NOT ui-coder:>
 You are the coder. Write all code yourself.
