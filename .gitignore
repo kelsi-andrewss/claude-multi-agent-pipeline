@@ -68,11 +68,19 @@ __pycache__/
 epics.db
 hooks/lib/exemplar_cache.json
 
-# Tracking runtime data
+# Tracking runtime data (written by hooks between every tool call)
+tracking/events/
+.claude/tracking/friction.json
+.claude/tracking/charts.html
 .claude/tracking/tracking.db
 .claude/tracking/tracking.db-shm
 .claude/tracking/tracking.db-wal
 .claude/tracking/tokens.json.migrated
+.claude/tracking/skill-telemetry.jsonl
+
+# Plugin state (updated by hooks)
+plugins/blocklist.json
+plugins/known_marketplaces.json
 
 # Per-project decision memory (local rebuild)
 .claude/decisions.db
