@@ -60,11 +60,14 @@ Call `mcp__gemini__gemini_ui_code` for ALL components simultaneously in a single
 - `requirements`: from the plan (greenfield) or enriched requirements (brownfield)
 - `exemplar_paths`: shared exemplars
 - `error_feedback`: empty on first call
+- `output_path`: the absolute file path where the component should be written (e.g., `<worktree>/src/components/Dashboard.tsx`)
+
+**ALWAYS pass `output_path`.** This makes Gemini write the code directly to the file and return a tiny summary ("Wrote Dashboard to path (147 lines)") instead of streaming the entire source through your context and transcript. This is critical for disk space — without it, every component's full source gets serialized twice (MCP response + your Write call).
 
 Do NOT wait for one component before calling the next. Parallelize.
 
-**Phase 3 — Drop and wire (after all calls return):**
-1. Drop each Gemini result into its target file as-is. Do not modify markup or styles.
+**Phase 3 — Wire (after all calls return):**
+1. Files are already written by Gemini (via `output_path`). Do not rewrite them. Do not modify markup or styles.
 2. For brownfield: contract diff — compare Gemini's output against the existing contract:
    - Preserved: wire up as normal.
    - Renamed/removed without plan authorization: restore original name (wiring fix, not visual edit).
@@ -104,6 +107,12 @@ Pass the existing file as an `exemplar_path` so Gemini sees current patterns and
 **Gemini MCP — blocked tools:** All other `mcp__gemini__*` tools (plan, audit, find_bug, test, etc.) are orchestrator-only.
 
 Do NOT call any pm_* tools except pm_update_story (for state transitions).
+
+## Disk awareness
+
+This agent generates more MCP traffic than other coders (parallel Gemini calls + responses = large JSON payloads in transcript). If you encounter:
+- "No space left on device" errors during build/write → emit NEED_DECISION immediately. Do NOT retry — disk is full, retrying wastes the remaining space.
+- Slow file operations → disk may be thrashing. Minimize unnecessary Reads. Use `mcp__gemini__analyze` instead of reading large files yourself — it returns a compressed answer instead of dumping the whole file into your context (and transcript).
 
 ## Anti-Patterns (hard blocks)
 

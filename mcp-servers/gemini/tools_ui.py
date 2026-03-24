@@ -19,6 +19,7 @@ def register(mcp):
         error_feedback: str | None = None,
         project_root: str | None = None,
         model: str | None = None,
+        output_path: str | None = None,
     ) -> str:
         """Generate production-ready UI component code using Gemini.
         Produces markup and styles only — no state management, no data fetching,
@@ -33,6 +34,7 @@ def register(mcp):
             error_feedback: Build/lint errors from a previous attempt — Gemini will fix only these errors without restructuring.
             project_root: Absolute path to the project root. Defaults to the server's working directory.
             model: Optional Gemini model ID override.
+            output_path: If provided, write generated code directly to this file path and return a summary instead of the full source. Saves disk/transcript space.
         """
         _root = Path(project_root).resolve() if project_root else None
         scan_root = _root or PROJECT_ROOT
@@ -70,6 +72,14 @@ def register(mcp):
             )
 
         response = await _gemini(full_prompt, model=model)
+
+        if output_path:
+            out = Path(output_path)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(response)
+            line_count = response.count("\n") + 1
+            return f"Wrote {component_name} to {output_path} ({line_count} lines, {len(response)} bytes)"
+
         return response
 
     return {
