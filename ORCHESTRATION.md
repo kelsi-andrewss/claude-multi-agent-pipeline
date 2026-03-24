@@ -15,7 +15,7 @@ These are decision rules and constraints for the main Claude Code session. Spawn
 **Branch merge hierarchy**: `main` is production. The ONLY thing that merges to main is `dev`. Everything else (story branches, hotfixes, quickfixes) merges to `dev`. Stories from different epics execute in parallel — epics are organizational grouping only, not execution boundaries. Conflict detection and dependency ordering operate at the story level across all epics.
 
 **Gemini** — research and planning via MCP tools (`pm_*`, `gemini_*`). Writes to `epics.db`.
-**Coders** (`quick-fixer`, `architect`) — execute approved plan files in worktrees. Never plan. Always `run_in_background: true`.
+**Coders** (`quick-fixer`, `architect`, `ui-coder`) — execute approved plan files in worktrees. Never plan. Always `run_in_background: true`.
 **Reviewer/Unit-tester/Git-ops** — on-demand, always `run_in_background: true`.
 
 ### Frontend design ownership
@@ -34,7 +34,8 @@ Gemini's visual/layout reasoning produces better design specs; Claude's architec
 | Role | Default | Escalation |
 |---|---|---|
 | Claude (main) | Sonnet | Opus if user requests or high-risk |
-| Coder | Sonnet | Opus after 2 BLOCKING round-trips |
+| Coder (quick-fixer/architect) | Sonnet | Opus after 2 BLOCKING round-trips |
+| Coder (ui-coder) | Sonnet | Opus after 2 BLOCKING round-trips |
 | Reviewer | Sonnet | Sonnet only if coder ran on Opus |
 | Unit-tester | Sonnet | Never escalated |
 
@@ -70,7 +71,7 @@ Trust scores computed by `hooks/lib/signal_processor.py:compute_trust_scores()`.
 
 **Draft** is the critical gate. Gemini researches; Claude critiques and writes the plan file coders execute.
 
-**Fast-path**: agent = `quick-fixer`, ≤2 write-target files, no protected files, tasks in DB → skip Gemini, Claude writes plan directly.
+**Fast-path**: agent = `quick-fixer`, ≤2 write-target files, no protected files, no `ui_codegen`, tasks in DB → skip Gemini, Claude writes plan directly. UI stories always go through the full pipeline.
 
 **Default for new work**: `/ship`. Fall back to full pipeline when iterating on production code, touching protected files, or changing schemas/APIs.
 
@@ -102,7 +103,7 @@ Before writing a plan file, Claude independently reviews Gemini's output. Full c
 ## 6. STORY STRUCTURE
 
 - **Epic** — broad theme. States: `active` → `done` → `shipped`.
-- **Story** — scoped deliverable, own branch/worktree. States: `draft` → `ready` → `in-progress` → `in-review` → `approved` → `done` → `shipped`. Also: `blocked`. Agent: `quick-fixer` | `architect` | `manual`. Must have `plan_file` to run.
+- **Story** — scoped deliverable, own branch/worktree. States: `draft` → `ready` → `in-progress` → `in-review` → `approved` → `done` → `shipped`. Also: `blocked`. Agent: `quick-fixer` | `architect` | `ui-coder` | `manual`. Must have `plan_file` to run. Stories with `ui_codegen: true` MUST use `ui-coder`.
 - **Task** — sub-item, no branch. States: `todo` → `in-progress` → `done`. Also: `blocked`, `skipped`.
 
 ### Test requirements
@@ -138,7 +139,11 @@ Full template: run-stories/SKILL.md Step 4. Must include: story title, plan file
 **Size ceiling**: >5 files or >200 lines → split. **Conflict check**: no shared write targets with in-progress stories.
 **Script refs**: Any script path referenced in a SKILL.md (`bash ~/.claude/scripts/...` or `python3 ~/.claude/scripts/...`) is a write-target. If the script doesn't exist, the coder must create it as part of the story — not defer it.
 
-**Gemini MCP access**: Coders may call `mcp__gemini__analyze` for codebase investigation outside their write targets. This preserves coder context budget — Gemini reads files and returns a compressed answer instead of the coder ingesting hundreds of lines for a one-sentence insight. Queries must be specific: symbol name, file paths, exact question. Stories with `ui_codegen: true` additionally allow `mcp__gemini__gemini_ui_code` for visual component code. All other `mcp__gemini__*` tools remain orchestrator-only.
+**Gemini MCP access**: Coders may call `mcp__gemini__analyze` for codebase investigation outside their write targets. This preserves coder context budget — Gemini reads files and returns a compressed answer instead of the coder ingesting hundreds of lines for a one-sentence insight. Queries must be specific: symbol name, file paths, exact question. All other `mcp__gemini__*` tools remain orchestrator-only.
+
+**UI coder routing**: Stories with `ui_codegen: true` MUST use the `ui-coder` agent — never `quick-fixer` or `architect`. The `ui-coder` agent is the ONLY agent allowed to call `mcp__gemini__gemini_ui_code`. It enforces Gemini code generation for all visual/layout component code. Quick-fixer and architect write their own code and are blocked from `gemini_ui_code`.
+
+**UI codegen gate**: If a story's write targets include UI file extensions (`.tsx`, `.jsx`, `.vue`, `.svelte`, `Screen.kt`, `.dart` files with `screen`/`widget`/`page` in the name) but `ui_codegen` is not `true`, warn before launch. The planner likely missed the tag.
 
 ### Decision autonomy levels
 
@@ -291,7 +296,7 @@ Delegate by phase — each pipeline phase that doesn't require user decisions sh
 
 | Phase | What it does | Delegation | Agent type |
 |---|---|---|---|
-| **Resolution** | Plan file → coder in worktree → committed code | 1 subagent per story via `run-stories` | Coder (`quick-fixer` / `architect`) |
+| **Resolution** | Plan file → coder in worktree → committed code | 1 subagent per story via `run-stories` | Coder (`quick-fixer` / `architect` / `ui-coder`) |
 | **Critique** | Plan reads + `pm_critique` + `pm_add_decision` | 1 subagent per plan | Reviewer |
 | **Merge** | Diff gates + git merges + cleanup + DB updates + outcome logging | 1 subagent per batch via `merge-worktree` | Git-ops |
 
