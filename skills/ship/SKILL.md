@@ -65,13 +65,15 @@ Parse `{{args}}` to determine the mode:
    **Auto-classification (inline mode only):** After parsing, if `quickfix_mode` is not already set by the `--quickfix` flag, classify the task to determine routing. Scan the full description (title + items) for:
 
    - **File count**: Count tokens containing `/` or file extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.md`, `.json`, `.yaml`, `.yml`, `.css`, `.html`, `.sh`, `.sql`). Store as `detected_file_count`.
+   - **UI file detection**: Check if any detected files have UI extensions (`.tsx`, `.jsx`, `.vue`, `.svelte`) or match UI naming patterns (`*Screen*.kt`, `*Widget*.dart`, `*Page*.dart`, `*page.tsx`, `*page.jsx`). Also check for UI keywords in the description: `component`, `screen`, `page`, `widget`, `layout`, `dashboard`, `form`, `redesign`, `UI`, `frontend`. Store as `has_ui_targets`.
    - **Schema keywords**: Check for any of: `Firestore`, `migration`, `schema`, `field rename`, `field delete`, `DB migration`, `API contract`, `type change`. (Note: `add field` alone is NOT a disqualifier — additive schema changes are quickfix-eligible.)
    - **AI tool keywords**: Check for any of: `toolDeclarations`, `toolExecutors`, `system prompt`.
    - **Protected file mentions**: If `<project-root>/.claude/protected-files.md` exists, read it and check whether any detected file paths appear in the protected list.
 
    Classification result:
    - If `detected_file_count` is 0 (no file tokens found): set `quickfix_eligible = false`. Log: `"Could not determine file targets from description — using full pipeline."`
-   - If `detected_file_count` is 1-5 AND no schema keywords AND no AI tool keywords AND no protected file mentions: set `quickfix_eligible = true` and `quickfix_mode = true`. Log: `"Auto-routed to quickfix (<=N files, no schema/AI/protected)."`
+   - If `has_ui_targets` is true: set `quickfix_eligible = false`. Log: `"UI write targets detected — routing to full pipeline (ui-coder agent required)."` UI work NEVER goes through quickfix because quickfix blocks `gemini_ui_code`.
+   - If `detected_file_count` is 1-5 AND no schema keywords AND no AI tool keywords AND no protected file mentions AND NOT `has_ui_targets`: set `quickfix_eligible = true` and `quickfix_mode = true`. Log: `"Auto-routed to quickfix (<=N files, no schema/AI/protected/UI)."`
    - Otherwise: set `quickfix_eligible = false`. Proceed to sufficiency check below.
 
    **Sufficiency check (inline mode only):** After classification, check for actionable signals:

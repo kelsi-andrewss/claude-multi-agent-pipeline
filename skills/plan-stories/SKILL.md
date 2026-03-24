@@ -119,9 +119,13 @@ CONTEXT: <briefing_contents if briefing mode, otherwise omit>
 DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping. DATA_FLOW_TRACE: Before decomposing into stories, write the end-to-end data transformation chain as a linear sequence. Format: `[step] → [step] → ...` with explicit data format at each boundary. Every story must own a contiguous segment. If story N produces data consumed by story M, the boundary must specify: what data, what format, what location. Include this trace in each story's description so the plan-writer can verify seam correctness.
 
 UI CODEGEN TAGGING: For each story, determine if it involves UI component creation or modification.
-Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
-redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infrastructure,
-or stories where UI is incidental (e.g., adding a field to an existing form).
+Set `ui_codegen: true` AND `agent: ui-coder` on stories where the primary work is visual/layout
+(new components, redesigns, UI-heavy features, screens, pages, widgets, dashboards, forms with
+custom layouts). The ui-coder agent MUST use Gemini's gemini_ui_code tool for ALL visual component
+code — it never writes markup/styles itself. Set `ui_codegen: false` for backend, data,
+infrastructure, or stories where UI is incidental (e.g., adding a field to an existing form).
+IMPORTANT: quick-fixer and architect agents CANNOT generate UI code via Gemini. If a story has
+visual components, it MUST be tagged ui_codegen: true with agent: ui-coder.
 
 TEST_FILES RULE: For each story that creates or modifies functional code (logic, state transitions, data transforms, API handlers, business rules), set `test_files` to the corresponding test file paths using the project's convention (test_<file>.py, <file>.test.ts, <file>_test.dart, etc.). Stories that are pure docs, config (YAML/JSON/env), scaffold/boilerplate (project init, dependency install), or pure refactors that don't change observable behavior should set `needs_testing: false` instead. When in doubt, set test_files — the merge gate catches real bugs, skipping it hides them.
 
@@ -139,9 +143,13 @@ EPIC_ID: epic-NNN
 DECOMPOSITION RULE: Minimize write-target file overlap across stories. Group changes by the files they modify, not by conceptual theme or tier. A story that owns a file implements ALL changes to that file across all features in the epic. If two stories would share a write-target file, restructure them to eliminate the overlap — every shared file serializes those stories and kills parallelism. Decomposition priority: file ownership > conceptual grouping. DATA_FLOW_TRACE: Before decomposing into stories, write the end-to-end data transformation chain as a linear sequence. Format: `[step] → [step] → ...` with explicit data format at each boundary. Every story must own a contiguous segment. If story N produces data consumed by story M, the boundary must specify: what data, what format, what location. Include this trace in each story's description so the plan-writer can verify seam correctness.
 
 UI CODEGEN TAGGING: For each story, determine if it involves UI component creation or modification.
-Set `ui_codegen: true` on stories where the primary work is visual/layout (new components,
-redesigns, UI-heavy features). Set `ui_codegen: false` for backend, data, infrastructure,
-or stories where UI is incidental (e.g., adding a field to an existing form).
+Set `ui_codegen: true` AND `agent: ui-coder` on stories where the primary work is visual/layout
+(new components, redesigns, UI-heavy features, screens, pages, widgets, dashboards, forms with
+custom layouts). The ui-coder agent MUST use Gemini's gemini_ui_code tool for ALL visual component
+code — it never writes markup/styles itself. Set `ui_codegen: false` for backend, data,
+infrastructure, or stories where UI is incidental (e.g., adding a field to an existing form).
+IMPORTANT: quick-fixer and architect agents CANNOT generate UI code via Gemini. If a story has
+visual components, it MUST be tagged ui_codegen: true with agent: ui-coder.
 
 TEST_FILES RULE: For each story that creates or modifies functional code (logic, state transitions, data transforms, API handlers, business rules), set `test_files` to the corresponding test file paths using the project's convention (test_<file>.py, <file>.test.ts, <file>_test.dart, etc.). Stories that are pure docs, config (YAML/JSON/env), scaffold/boilerplate (project init, dependency install), or pure refactors that don't change observable behavior should set `needs_testing: false` instead. When in doubt, set test_files — the merge gate catches real bugs, skipping it hides them.
 
