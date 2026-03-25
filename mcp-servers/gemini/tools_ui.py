@@ -38,6 +38,8 @@ _COMPONENT_CATEGORIES = {
     "footer": "layout",
 }
 
+_SIMPLE_TYPES = {"button", "input", "card", "header", "footer", "nav"}
+
 
 def _type_to_component_name(component_type: str) -> str:
     """Convert a component type slug to PascalCase component name."""
@@ -64,6 +66,11 @@ def _extract_code_block(response: str) -> str:
     if match:
         return match.group(1).strip()
     return response.strip()
+
+
+def _pascal_to_slug(name: str) -> str:
+    """Convert PascalCase to kebab-case slug (e.g. DataTable -> data-table)."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", name).lower()
 
 
 def register(mcp):
@@ -151,7 +158,7 @@ def register(mcp):
         model: str | None = None,
         extend_manifest: str | None = None,
     ) -> str:
-        """Generate a full component library from a design spec. Calls Gemini once per component type in parallel, writes each to output_dir, and produces manifest.json.
+        """Generate a full component library from a design spec using two-phase generation. Phase 1 plans component specs with a single Gemini call, Phase 2 generates code in batched parallel calls. Writes each component to output_dir and produces manifest.json.
 
         Args:
             design_spec: Design specification describing the visual language, spacing, component behavior.
@@ -205,16 +212,104 @@ def register(mcp):
                     if old_file.name not in preserved_files:
                         old_file.unlink()
 
-        async def _generate_one(comp_type: str) -> dict:
-            name = _type_to_component_name(comp_type)
+        # -- Phase 1: Plan component specs with a single Gemini call ----------
+        async def _plan_components(comp_types: list[str]) -> list[dict]:
+            plan_prompt = (
+                "You are a senior frontend engineer planning a component library.\n\n"
+                f"## Design Context\n\n{design_context}\n\n"
+                "## Task\n\n"
+                "For each of the following component types, produce a JSON array of specs.\n"
+                f"Component types: {', '.join(comp_types)}\n\n"
+                "Each element must have exactly these keys:\n"
+                '- "name": PascalCase component name (e.g. "DataTable")\n'
+                '- "props_contract": TypeScript-style interface body for the component props\n'
+                '- "category": one of action, display, input, overlay, layout, navigation, general\n\n'
+                "Return ONLY a JSON array. No prose, no markdown, no code blocks."
+            )
+            response = await _gemini(plan_prompt, model=model)
+            try:
+                specs = json.loads(response)
+                if isinstance(specs, list) and all(
+                    isinstance(s, dict) and "name" in s for s in specs
+                ):
+                    return specs
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return [
+                {
+                    "name": _type_to_component_name(ct),
+                    "props_contract": "",
+                    "category": _COMPONENT_CATEGORIES.get(ct, "general"),
+                }
+                for ct in comp_types
+            ]
+
+        specs = await _plan_components(types)
+        spec_by_name = {s["name"]: s for s in specs}
+
+        # -- Phase 2: Generate code in batched parallel calls -----------------
+        async def _generate_batch(batch_specs: list[dict]) -> list[dict]:
+            names_list = ", ".join(s["name"] for s in batch_specs)
+            spec_lines = "\n".join(
+                f'- {s["name"]} (category: {s.get("category", "general")}): '
+                f'{s.get("props_contract", "")}'
+                for s in batch_specs
+            )
+            prompt = (
+                f"## Code Generation Request — Batch\n\n"
+                f"Generate {len(batch_specs)} components: {names_list}\n\n"
+                f"## Design Context\n\n{design_context}\n\n"
+                f"## Component Specs\n\n{spec_lines}\n\n"
+                f"## Requirements\n\n"
+                f"For EACH component, generate a complete, production-ready implementation. "
+                f"Use the props contract provided — do not re-derive it. "
+                f"Each component should be self-contained with its own styles. "
+                f"Follow the design spec for colors, spacing, and typography.\n\n"
+                f"## Output Format\n\n"
+                f"Separate each component with delimiters exactly like this:\n"
+                f"=== COMPONENT: ComponentName ===\n"
+                f"<full component code here>\n"
+                f"=== END ===\n"
+            )
+            if exemplar_context:
+                prompt += f"\n## Exemplar Code\n\n{exemplar_context}\n"
+
+            response = await _gemini(
+                prompt, model=model, system_instruction=UI_CODEGEN_SYSTEM_INSTRUCTION
+            )
+
+            batch_results = []
+            blocks = re.split(r"===\s*COMPONENT:\s*(\w+)\s*===", response)
+            i = 1
+            while i < len(blocks) - 1:
+                comp_name = blocks[i].strip()
+                raw_code = blocks[i + 1]
+                raw_code = re.sub(r"===\s*END\s*===.*", "", raw_code, flags=re.DOTALL).strip()
+                code = _extract_code_block(raw_code) if "```" in raw_code else raw_code
+                file_name = f"{comp_name}{ext}"
+                (out / file_name).write_text(code, encoding="utf-8")
+                spec = spec_by_name.get(comp_name, {})
+                batch_results.append({
+                    "name": comp_name,
+                    "path": str(Path(output_dir) / file_name),
+                    "props_contract": spec.get("props_contract") or _extract_props_contract(code, comp_name),
+                    "category": spec.get("category", "general"),
+                    "source": "gen-library",
+                })
+                i += 2
+            return batch_results
+
+        async def _generate_single(spec: dict) -> list[dict]:
+            name = spec["name"]
             prompt = (
                 f"## Code Generation Request\n\n"
                 f"Component: {name}\n"
-                f"Category: {_COMPONENT_CATEGORIES.get(comp_type, 'general')}\n\n"
+                f"Category: {spec.get('category', 'general')}\n\n"
+                f"## Props Contract\n\n{spec.get('props_contract', '')}\n\n"
                 f"## Design Context\n\n{design_context}\n\n"
                 f"## Requirements\n\n"
                 f"Generate a complete, production-ready {name} component. "
-                f"Include a typed props interface/contract. "
+                f"Use the props contract provided — do not re-derive it. "
                 f"Follow the design spec for colors, spacing, and typography. "
                 f"The component should be self-contained with its own styles.\n"
             )
@@ -227,29 +322,42 @@ def register(mcp):
 
             code = _extract_code_block(response)
             file_name = f"{name}{ext}"
-            file_path = out / file_name
-            file_path.write_text(code, encoding="utf-8")
-
-            return {
+            (out / file_name).write_text(code, encoding="utf-8")
+            return [{
                 "name": name,
                 "path": str(Path(output_dir) / file_name),
-                "props_contract": _extract_props_contract(code, name),
-                "category": _COMPONENT_CATEGORIES.get(comp_type, "general"),
+                "props_contract": spec.get("props_contract") or _extract_props_contract(code, name),
+                "category": spec.get("category", "general"),
                 "source": "gen-library",
-            }
+            }]
 
-        results = await asyncio.gather(
-            *[_generate_one(ct) for ct in types],
-            return_exceptions=True,
-        )
+        # Classify specs into simple (batched) vs complex (individual)
+        simple_specs = []
+        complex_specs = []
+        for spec in specs:
+            slug = _pascal_to_slug(spec["name"])
+            if slug in _SIMPLE_TYPES:
+                simple_specs.append(spec)
+            else:
+                complex_specs.append(spec)
+
+        tasks = []
+        batch_size = 3
+        for idx in range(0, len(simple_specs), batch_size):
+            batch = simple_specs[idx : idx + batch_size]
+            tasks.append(_generate_batch(batch))
+        for spec in complex_specs:
+            tasks.append(_generate_single(spec))
+
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         components = []
         errors = []
-        for i, result in enumerate(results):
+        for i, result in enumerate(raw_results):
             if isinstance(result, Exception):
-                errors.append(f"{types[i]}: {result}")
+                errors.append(f"batch-{i}: {result}")
             else:
-                components.append(result)
+                components.extend(result)
 
         # Merge with existing components:
         # - extend mode: merge with full existing manifest (replace by name)
