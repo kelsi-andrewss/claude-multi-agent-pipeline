@@ -129,11 +129,12 @@ def register(mcp):
         response = await _gemini(full_prompt, model=model)
 
         if output_path:
+            code = _extract_code_block(response)
             out = Path(output_path)
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(response)
-            line_count = response.count("\n") + 1
-            return f"Wrote {component_name} to {output_path} ({line_count} lines, {len(response)} bytes)"
+            out.write_text(code)
+            line_count = code.count("\n") + 1
+            return f"Wrote {component_name} to {output_path} ({line_count} lines, {len(code)} bytes)"
 
         return response
 
