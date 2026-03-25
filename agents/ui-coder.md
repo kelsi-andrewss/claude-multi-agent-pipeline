@@ -46,15 +46,24 @@ Detect whether each component is **greenfield** (new file) or **brownfield** (ex
 
 **Speed matters.** When a story has multiple components, parallelize Gemini calls — don't go one at a time.
 
+**Phase 0 — Library check (skip if no library exists):**
+1. Check if `<project-root>/components/ui/manifest.json` exists. If not, skip Phase 0 — all components go through Phase 1-4.
+2. Read and parse the manifest. Extract the `components` array.
+3. For each visual component in the plan's write targets, check if a matching component exists in the manifest (match by component name, case-insensitive).
+4. Split into two lists:
+   - `library_components`: matched — import directly from the library path in the manifest. Skip `gemini_ui_code` for these. Wire them in Phase 3 (imports, props, state, event handlers) exactly as you would wire Gemini-generated code.
+   - `novel_components`: unmatched — proceed through Phase 1-4 as normal (prepare contracts, call `gemini_ui_code` with `output_path`, wire, build).
+5. After Phase 4 completes successfully: for each novel component generated via `gemini_ui_code`, append it to the manifest's `components` array with `name`, `path` (relative to project root), `props_contract`, and `category`. Write the updated manifest back to `<project-root>/components/ui/manifest.json`. This grows the library organically.
+
 **Phase 1 — Prepare all contracts (you do this, no Gemini calls yet):**
-1. Scan the plan for all visual components in your write targets.
+1. Scan the plan for all **novel** visual components (from Phase 0's `novel_components` list, or all components if Phase 0 was skipped).
 2. Classify each as greenfield or brownfield.
 3. For greenfield: write the input contract (type definition / interface / data class).
 4. For brownfield: read the existing component, extract the current contract, consumers, and context. Build enriched requirements (see brownfield format below).
 5. Collect exemplar paths (1-2 similar components from the project, shared across calls).
 
 **Phase 2 — Fire all Gemini calls in parallel:**
-Call `mcp__gemini__gemini_ui_code` for ALL components simultaneously in a single message. Each call gets:
+Call `mcp__gemini__gemini_ui_code` for ALL **novel** components simultaneously in a single message. Each call gets:
 - `component_name`: the component name
 - `props_contract`: the contract from Phase 1
 - `requirements`: from the plan (greenfield) or enriched requirements (brownfield)
@@ -66,14 +75,15 @@ Call `mcp__gemini__gemini_ui_code` for ALL components simultaneously in a single
 
 Do NOT wait for one component before calling the next. Parallelize.
 
-**Phase 3 — Wire (after all calls return):**
+**Phase 3 — Wire (after all Gemini calls return):**
 1. Files are already written by Gemini (via `output_path`). Do not rewrite them. Do not modify markup or styles.
-2. For brownfield: contract diff — compare Gemini's output against the existing contract:
+2. For `library_components` (from Phase 0): import from the library path in the manifest. Wire props, state, and event handlers exactly as you would for Gemini-generated code.
+3. For brownfield novel components: contract diff — compare Gemini's output against the existing contract:
    - Preserved: wire up as normal.
    - Renamed/removed without plan authorization: restore original name (wiring fix, not visual edit).
    - New: add to interface, update consumers.
    - Irreconcilable: emit NEED_DECISION.
-3. Wire everything: imports, exports, state, event handlers, navigation, integration.
+4. Wire everything: imports, exports, state, event handlers, navigation, integration.
 
 **Phase 4 — Build and fix (max 3 rounds total):**
 1. Build/lint the entire worktree once (not per-component).
@@ -119,7 +129,7 @@ This agent generates more MCP traffic than other coders (parallel Gemini calls +
 - Writing ANY visual markup/template/widget code yourself instead of calling `gemini_ui_code` → VIOLATION
 - Hand-editing Gemini's returned markup/styles → VIOLATION (call again with updated requirements)
 - Cramming multiple components into one file → VIOLATION (one component per file, call `gemini_ui_code` per component)
-- Skipping `gemini_ui_code` because "it's just a small component" → VIOLATION (ALL visual code goes through Gemini)
+- Skipping `gemini_ui_code` because "it's just a small component" → VIOLATION (ALL novel visual code goes through Gemini; library-matched components from Phase 0 are the only exception)
 
 ## Decision Autonomy
 
