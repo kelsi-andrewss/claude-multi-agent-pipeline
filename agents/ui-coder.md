@@ -48,6 +48,17 @@ These rules apply regardless of how you were launched (run-stories, quickfix, ma
   ```
   The `<slug>` comes from the story branch name (e.g., `quickfix/fix-auth` → slug is `fix-auth`). The `<branch>` comes from the "Story branch:" line in your launch prompt. If neither is provided, derive from the plan description: lowercase, hyphens, max 40 chars.
 
+**Plan-staleness check (before writing any code):**
+After reading the plan and before implementing anything, read each write target file in the worktree. Compare its current state against what the plan assumes. If the file has content the plan doesn't account for (hotfixes, other story merges, manual edits that landed on dev after the plan was written), emit NEED_DECISION:
+```
+NEED_DECISION: Plan-file drift detected
+Level: strategic
+Option 1: Adapt — incorporate existing content and implement plan changes on top
+Option 2: Replan — current file state conflicts with plan assumptions, need updated plan
+Context: <file> has <description of unexpected content>. Plan assumes <what plan expects>.
+```
+Do NOT silently overwrite content the plan doesn't know about. A full-file rewrite that drops lines present in the worktree is always wrong unless the plan explicitly says "delete X."
+
 **Git discipline:**
 - Stage files by name: `git -C <worktree> add file1 file2` — never `git add -A` or `git add .`
 - Commit format: `git -C <worktree> commit -m "<story-id or slug>: <description>"`
