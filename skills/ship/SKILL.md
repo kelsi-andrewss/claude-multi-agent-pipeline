@@ -76,6 +76,12 @@ Parse `{{args}}` to determine the mode:
    - If `detected_file_count` is 1-5 AND no schema keywords AND no AI tool keywords AND no protected file mentions AND NOT `has_ui_targets`: set `quickfix_eligible = true` and `quickfix_mode = true`. Log: `"Auto-routed to quickfix (<=N files, no schema/AI/protected/UI)."`
    - Otherwise: set `quickfix_eligible = false`. Proceed to sufficiency check below.
 
+   **Component library check (inline mode only):** After classification, if `has_ui_targets` is true AND `quickfix_mode` is false:
+   - Check if `<project-root>/components/ui/manifest.json` exists.
+   - If missing: log `"No component library found. Consider running /gen-library <design spec> for faster UI stories."`
+   - If found: read the manifest, count components. Log `"Component library found: N components. ui-coder agents will import from library."`
+   - This is informational only — does not block the pipeline or prompt the user.
+
    **Sufficiency check (inline mode only):** After classification, check for actionable signals:
    - Specific technologies/frameworks mentioned? (e.g., "Stripe", "React", "Firebase")
    - Existing file paths referenced?
