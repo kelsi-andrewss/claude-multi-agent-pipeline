@@ -71,22 +71,38 @@ If NOT `--extend`:
 3. Collect their filenames into `preserved_files`.
 4. Delete all component files in `<project-root>/components/ui/` EXCEPT those in `preserved_files` and `manifest.json`.
 
-### 2c: Generate component code (parallel)
+### 2c: Generate component code (truly parallel via background agents)
 
-Load tool:
+MCP tool calls from the main session are serial — calling `gemini_ui_code` 11 times sequentially defeats the purpose. Instead, launch background agents that each make their own `gemini_ui_code` call. This gives real parallelism.
+
+Load tool for agents to use:
 ```
 ToolSearch: select:mcp__gemini__gemini_ui_code
 ```
 
-For each spec in the plan:
-- `component_name`: spec.name
-- `props_contract`: spec.props_contract
-- `requirements`: "Production-ready component following the design spec. Category: <spec.category>. Self-contained with its own styles."
-- `output_path`: `<project-root>/components/ui/<spec.name><spec.file_ext>`
-- `exemplar_paths`: from Step 1 (if found)
-- `project_root`: resolved project root
+For each spec in the plan, launch a **background `general-purpose` agent** (`run_in_background: true`):
 
-Fire ALL calls in a single message (parallel). Each writes directly to disk via `output_path` and returns a one-liner confirmation.
+```
+Agent(subagent_type="general-purpose", run_in_background=true, prompt="""
+Generate one UI component via Gemini.
+
+Load the tool first: ToolSearch: select:mcp__gemini__gemini_ui_code
+
+Then call gemini_ui_code with:
+- component_name: "<spec.name>"
+- props_contract: "<spec.props_contract>"
+- requirements: "Production-ready component following the design spec. Category: <spec.category>. Self-contained with its own styles."
+- output_path: "<project-root>/components/ui/<spec.name><spec.file_ext>"
+- exemplar_paths: <exemplar_paths from Step 1, or omit>
+- project_root: "<project-root>"
+
+Return the tool's response (the one-liner confirmation).
+""")
+```
+
+Launch ALL agents in a **single message** (one Agent tool call per component, all in the same response). This ensures they run concurrently.
+
+Wait for all agents to complete. Collect the one-liner results. If any agent fails, log the error but continue — partial libraries are usable.
 
 ### 2d: Write manifest
 
