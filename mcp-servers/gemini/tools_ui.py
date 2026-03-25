@@ -188,12 +188,22 @@ def register(mcp):
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
-        # Clean stale component files on full regeneration (not extend).
-        # Prevents orphaned files when component names change across redesigns.
+        # On full regen (not extend): read existing manifest to preserve ui-coder
+        # novel components, then clean only gen-library files from disk.
+        preserved_components = []
+        preserved_files = set()
         if not extend_manifest:
+            existing_manifest_path = out / "manifest.json"
+            if existing_manifest_path.exists():
+                existing_data = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
+                for c in existing_data.get("components", []):
+                    if c.get("source") == "ui-coder":
+                        preserved_components.append(c)
+                        preserved_files.add(Path(c["path"]).name)
             for old_file in out.iterdir():
                 if old_file.suffix in (".tsx", ".jsx", ".vue", ".svelte", ".kt", ".dart", ".html", ".erb", ".tmpl"):
-                    old_file.unlink()
+                    if old_file.name not in preserved_files:
+                        old_file.unlink()
 
         async def _generate_one(comp_type: str) -> dict:
             name = _type_to_component_name(comp_type)
@@ -225,6 +235,7 @@ def register(mcp):
                 "path": str(Path(output_dir) / file_name),
                 "props_contract": _extract_props_contract(code, name),
                 "category": _COMPONENT_CATEGORIES.get(comp_type, "general"),
+                "source": "gen-library",
             }
 
         results = await asyncio.gather(
@@ -240,12 +251,17 @@ def register(mcp):
             else:
                 components.append(result)
 
+        # Merge with existing components:
+        # - extend mode: merge with full existing manifest (replace by name)
+        # - full regen: merge with preserved ui-coder components only
         existing_components = []
         if extend_manifest:
             manifest_path = Path(extend_manifest)
             if manifest_path.exists():
                 existing_data = json.loads(manifest_path.read_text(encoding="utf-8"))
                 existing_components = existing_data.get("components", [])
+        elif preserved_components:
+            existing_components = preserved_components
 
         if existing_components:
             new_names = {c["name"] for c in components}

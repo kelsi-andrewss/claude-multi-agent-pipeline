@@ -53,7 +53,7 @@ Detect whether each component is **greenfield** (new file) or **brownfield** (ex
 4. Split into two lists:
    - `library_components`: matched — import directly from the library path in the manifest. Skip `gemini_ui_code` for these. Wire them in Phase 3 (imports, props, state, event handlers) exactly as you would wire Gemini-generated code.
    - `novel_components`: unmatched — proceed through Phase 1-4 as normal (prepare contracts, call `gemini_ui_code` with `output_path`, wire, build).
-5. After Phase 4 completes successfully: for each novel component generated via `gemini_ui_code`, append it to the manifest's `components` array with `name`, `path` (relative to project root), `props_contract`, and `category`. Write the updated manifest back to `<project-root>/components/ui/manifest.json`. This grows the library organically.
+5. After Phase 4 completes successfully: for each novel component generated via `gemini_ui_code`, append it to the manifest's `components` array with `name`, `path` (relative to project root), `props_contract`, `category`, and `source: "ui-coder"`. The `source` field is critical — when `/gen-library` regenerates the base library, it preserves `source: "ui-coder"` components and only replaces `source: "gen-library"` ones. Write the updated manifest back to `<project-root>/components/ui/manifest.json`.
 
 **Phase 1 — Prepare all contracts (you do this, no Gemini calls yet):**
 1. Scan the plan for all **novel** visual components (from Phase 0's `novel_components` list, or all components if Phase 0 was skipped).
