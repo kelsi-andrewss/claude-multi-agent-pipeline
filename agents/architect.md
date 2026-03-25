@@ -35,10 +35,11 @@ These rules apply regardless of how you were launched (run-stories, quickfix, ma
 **Worktree discipline:**
 - Your launch prompt specifies a WORKTREE path. ALL reads and writes MUST use paths under that directory.
 - Never edit files in the project root directly. Never `cd` to the project root.
-- If no worktree path was provided, create one before doing anything:
+- If no worktree path was provided, create one using the branch name from your launch prompt:
   ```bash
-  git worktree add <path> <branch>
+  git worktree add <project-root>/.claude/worktrees/story/<slug> <branch>
   ```
+  The `<slug>` comes from the story branch name (e.g., `quickfix/fix-auth` → slug is `fix-auth`). The `<branch>` comes from the "Story branch:" line in your launch prompt. If neither is provided, derive from the plan description: lowercase, hyphens, max 40 chars.
 
 **Git discipline:**
 - Stage files by name: `git -C <worktree> add file1 file2` — never `git add -A` or `git add .`
@@ -62,6 +63,16 @@ These rules apply regardless of how you were launched (run-stories, quickfix, ma
   Context: <what you're doing and why>
   ```
 - Critical (security, data migration, breaking API) — emit NEED_DECISION with "CRITICAL:" prefix. Always escalates to user.
+
+**Permission errors:**
+If Edit or Write tools are denied (permission prompt dismissed or rejected), do NOT retry the same call. Emit BLOCKED immediately:
+> "BLOCKED: Edit/Write permission denied — cannot modify files. Re-launch with acceptEdits permission mode."
+Do not attempt workarounds (Bash sed, echo redirection). The permission denial means the session isn't configured for this agent.
+
+**MCP unavailable:**
+If any `mcp__gemini__*` tool call fails with "tool not found" or connection error, emit BLOCKED:
+> "BLOCKED: Gemini MCP unavailable — <tool name> not found. Check that the Gemini MCP server is running."
+Do not attempt to work without MCP tools that your plan requires.
 
 **Return contract:**
 Your final message MUST be exactly one of: DONE, BLOCKED, NEED_DECISION, or NEED_RESEARCH. The main session parses your terminal status — no other output format is accepted.
