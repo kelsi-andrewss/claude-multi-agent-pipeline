@@ -188,6 +188,13 @@ def register(mcp):
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
+        # Clean stale component files on full regeneration (not extend).
+        # Prevents orphaned files when component names change across redesigns.
+        if not extend_manifest:
+            for old_file in out.iterdir():
+                if old_file.suffix in (".tsx", ".jsx", ".vue", ".svelte", ".kt", ".dart", ".html", ".erb", ".tmpl"):
+                    old_file.unlink()
+
         async def _generate_one(comp_type: str) -> dict:
             name = _type_to_component_name(comp_type)
             prompt = (
