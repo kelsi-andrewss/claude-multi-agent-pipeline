@@ -41,23 +41,78 @@ If `--extend` is set and `design_spec` is empty: extend with default component t
 2. Find 1-2 exemplar component files if they exist (glob for common component directories: src/components/, lib/src/, app/components/, etc.). Store paths as `exemplar_paths`.
 3. If `--extend`: read `<project-root>/components/ui/manifest.json`.
    - If missing: warn "No existing library found. Generating new library instead." Clear the extend flag.
-   - If found: store as `existing_manifest` for the MCP call.
+   - If found: store as `existing_manifest` for later merge.
 
 ---
 
 ## Step 2: Generate library
 
+### 2a: Plan components
+
 Load tool:
 ```
-ToolSearch: select:mcp__gemini__gemini_component_library
+ToolSearch: select:mcp__gemini__gemini_plan_library
 ```
 
-Call `gemini_component_library` with:
+Call `gemini_plan_library` with:
 - `design_spec`: the parsed design spec text
-- `output_dir`: `<project-root>/components/ui`
-- `exemplar_paths`: from Step 1 (or omit if none found)
 - `project_root`: resolved project root
-- `extend_manifest`: path to existing manifest.json if --extend, otherwise omit
+- `color_palette`: if provided in design spec
+- `typography`: if provided in design spec
+- If `--extend`: pass only component types NOT already in the existing manifest
+
+Read the result file at the returned path (e.g., `/tmp/gemini/library-plan.json`). Parse as JSON array of component specs.
+
+### 2b: Preserve existing ui-coder components
+
+If NOT `--extend`:
+1. Read `<project-root>/components/ui/manifest.json` if it exists.
+2. Collect components with `source: "ui-coder"` into `preserved_components`.
+3. Collect their filenames into `preserved_files`.
+4. Delete all component files in `<project-root>/components/ui/` EXCEPT those in `preserved_files` and `manifest.json`.
+
+### 2c: Generate component code (parallel)
+
+Load tool:
+```
+ToolSearch: select:mcp__gemini__gemini_ui_code
+```
+
+For each spec in the plan:
+- `component_name`: spec.name
+- `props_contract`: spec.props_contract
+- `requirements`: "Production-ready component following the design spec. Category: <spec.category>. Self-contained with its own styles."
+- `output_path`: `<project-root>/components/ui/<spec.name><spec.file_ext>`
+- `exemplar_paths`: from Step 1 (if found)
+- `project_root`: resolved project root
+
+Fire ALL calls in a single message (parallel). Each writes directly to disk via `output_path` and returns a one-liner confirmation.
+
+### 2d: Write manifest
+
+Build manifest.json from the specs + generated file paths:
+
+```json
+{
+  "framework": "<from specs>",
+  "generated_at": "<ISO timestamp>",
+  "design_spec": "<first 200 chars of design_spec>",
+  "components": [
+    {
+      "name": "<spec.name>",
+      "path": "components/ui/<spec.name><ext>",
+      "props_contract": "<spec.props_contract>",
+      "category": "<spec.category>",
+      "source": "gen-library"
+    },
+    ...preserved_components (source: "ui-coder")
+  ]
+}
+```
+
+If `--extend`: merge with existing manifest (replace by name for new, keep existing for unchanged).
+
+Write to `<project-root>/components/ui/manifest.json`.
 
 ---
 
