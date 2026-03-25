@@ -157,9 +157,7 @@ BEHAVIORAL_ACCEPTANCE_CRITERIA RULE: For any story that creates UI components, c
 """)
 ```
 
-**Multi-epic dispatch**: When `epics_input` has multiple entries, dispatch the planner once per entry. Each planner return yields an `epic_id`, `dev_branch`, and story list. Collect results into `epics_result`: `[{epic_id, dev_branch, stories}]`. Single-entry `epics_input` produces a 1-element `epics_result`.
-
-Wait for the planner(s) to return.
+**Multi-epic dispatch**: When `epics_input` has multiple entries, launch ALL planner agents in parallel as **background agents** (`run_in_background: true`) — one per entry, all in a single message. Each epic is independent (no cross-epic dependencies at planning time), so there's no reason to serialize. Wait for all to complete, then collect results into `epics_result`: `[{epic_id, dev_branch, stories}]`. Single-entry `epics_input` uses a single foreground agent (unchanged).
 
 **On PLANNER_RESULT**: Extract `epic_id`, `dev_branch`, and the story list (IDs, titles, agents, detail_file paths) per epic. Wrap into `epics_result` array. Proceed to Step 3.
 
