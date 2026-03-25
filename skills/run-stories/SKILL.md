@@ -151,9 +151,7 @@ After collecting, validate each story and **skip with a warning** if any of the 
 - `agent` is null or empty — warn: "story-NNN has no agent assigned — set it with pm_update_story"
 - `agent` is `"manual"` — note: "story-NNN requires manual execution — skipping"
 - `plan_file` is null or empty:
-  - Load `ToolSearch: select:mcp__gemini__pm_plan_story` and call `pm_plan_story(story_id=<id>)` for all unplanned stories **in parallel** (single message).
-  - Wait for all `pm_plan_story` calls to complete.
-  - Launch one background `general-purpose` agent per unplanned story to write the plan file (same prompt as draft-plan Step 5).
+  - For each unplanned story, launch a **background `general-purpose` agent** (`run_in_background: true`) that: (1) loads `ToolSearch: select:mcp__gemini__pm_plan_story`, (2) calls `pm_plan_story(story_id=<id>)`, (3) writes the plan file (same prompt as draft-plan Step 5). Launch ALL agents in a **single message** for real parallelism — MCP calls from the main session are serial, but each agent makes its own call independently.
   - Wait for all agents to complete, then re-fetch each story to confirm `plan_file` is now set.
   - If still missing after auto-planning, skip with warning: "story-NNN: auto-planning failed — skipping."
 - `test_files` is null or empty AND `needs_testing` is not explicitly `false`:
