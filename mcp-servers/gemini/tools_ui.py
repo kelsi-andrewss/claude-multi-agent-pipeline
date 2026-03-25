@@ -1,11 +1,9 @@
-"""UI codegen tools: gemini_ui_code, gemini_component_library."""
+"""UI codegen tools: gemini_ui_code, gemini_plan_library."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 
 from constants import UI_CODEGEN_SYSTEM_INSTRUCTION, PROJECT_ROOT
@@ -38,8 +36,6 @@ _COMPONENT_CATEGORIES = {
     "footer": "layout",
 }
 
-_SIMPLE_TYPES = {"button", "input", "card", "header", "footer", "nav"}
-
 
 def _type_to_component_name(component_type: str) -> str:
     """Convert a component type slug to PascalCase component name."""
@@ -66,11 +62,6 @@ def _extract_code_block(response: str) -> str:
     if match:
         return match.group(1).strip()
     return response.strip()
-
-
-def _pascal_to_slug(name: str) -> str:
-    """Convert PascalCase to kebab-case slug (e.g. DataTable -> data-table)."""
-    return re.sub(r"(?<!^)(?=[A-Z])", "-", name).lower()
 
 
 def register(mcp):
@@ -147,253 +138,79 @@ def register(mcp):
         return response
 
     @mcp.tool()
-    async def gemini_component_library(
+    async def gemini_plan_library(
         design_spec: str,
-        output_dir: str,
         component_types: list[str] | None = None,
         color_palette: str | None = None,
         typography: str | None = None,
-        exemplar_paths: list[str] | None = None,
         project_root: str | None = None,
         model: str | None = None,
-        extend_manifest: str | None = None,
     ) -> str:
-        """Generate a full component library from a design spec using two-phase generation. Phase 1 plans component specs with a single Gemini call, Phase 2 generates code in batched parallel calls. Writes each component to output_dir and produces manifest.json.
+        """Plan a component library: generate specs (names, typed props contracts, categories) for each component type. Writes specs to /tmp/gemini/library-plan.json. Use gemini_ui_code to generate the actual component code from these specs.
 
         Args:
             design_spec: Design specification describing the visual language, spacing, component behavior.
-            output_dir: Directory to write generated component files and manifest.json.
-            component_types: Component types to generate. Defaults to: button, card, form, input, modal, layout, nav, data-table, sidebar, header, footer.
+            component_types: Component types to plan. Defaults to: button, card, form, input, modal, layout, nav, data-table, sidebar, header, footer.
             color_palette: Color palette description (e.g. "primary: #3B82F6, secondary: #10B981, ...").
             typography: Typography spec (e.g. "font-family: Inter, heading sizes, body size").
-            exemplar_paths: Existing component files to use as style exemplars.
-            project_root: Absolute path to the project root. Defaults to the server's working directory.
+            project_root: Absolute path to the project root (for framework detection).
             model: Optional Gemini model ID override.
-            extend_manifest: Path to existing manifest.json to extend rather than overwrite.
         """
         _root = Path(project_root).resolve() if project_root else None
         scan_root = _root or PROJECT_ROOT
         types = component_types or list(_DEFAULT_COMPONENT_TYPES)
 
         framework = _detect_framework(scan_root)
-        ext = _FRAMEWORK_EXT.get(framework, ".tsx")
 
-        exemplar_context = ""
-        if exemplar_paths:
-            exemplar_context, _ = _collect_redesign_files(scan_root, exemplar_paths, framework)
-
-        design_context_parts = [
-            f"Framework: {framework}",
-            f"Design Spec:\n{design_spec}",
-        ]
+        design_context_parts = [f"Framework: {framework}", f"Design Spec:\n{design_spec}"]
         if color_palette:
             design_context_parts.append(f"Color Palette: {color_palette}")
         if typography:
             design_context_parts.append(f"Typography: {typography}")
         design_context = "\n\n".join(design_context_parts)
 
-        out = Path(output_dir)
-        out.mkdir(parents=True, exist_ok=True)
+        plan_prompt = (
+            "You are a senior frontend engineer planning a component library.\n\n"
+            f"## Design Context\n\n{design_context}\n\n"
+            "## Task\n\n"
+            f"For each of the following component types, produce a JSON array of specs.\n"
+            f"Component types: {', '.join(types)}\n\n"
+            "Each element must have exactly these keys:\n"
+            '- "name": PascalCase component name (e.g. "DataTable")\n'
+            '- "props_contract": full typed interface for the component props\n'
+            '- "category": one of action, display, input, overlay, layout, navigation, general\n\n'
+            "Return ONLY a JSON array. No prose, no markdown, no code blocks."
+        )
 
-        # On full regen (not extend): read existing manifest to preserve ui-coder
-        # novel components, then clean only gen-library files from disk.
-        preserved_components = []
-        preserved_files = set()
-        if not extend_manifest:
-            existing_manifest_path = out / "manifest.json"
-            if existing_manifest_path.exists():
-                existing_data = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
-                for c in existing_data.get("components", []):
-                    if c.get("source") == "ui-coder":
-                        preserved_components.append(c)
-                        preserved_files.add(Path(c["path"]).name)
-            for old_file in out.iterdir():
-                if old_file.suffix in (".tsx", ".jsx", ".vue", ".svelte", ".kt", ".dart", ".html", ".erb", ".tmpl"):
-                    if old_file.name not in preserved_files:
-                        old_file.unlink()
+        response = await _gemini(plan_prompt, model=model)
 
-        # -- Phase 1: Plan component specs with a single Gemini call ----------
-        async def _plan_components(comp_types: list[str]) -> list[dict]:
-            plan_prompt = (
-                "You are a senior frontend engineer planning a component library.\n\n"
-                f"## Design Context\n\n{design_context}\n\n"
-                "## Task\n\n"
-                "For each of the following component types, produce a JSON array of specs.\n"
-                f"Component types: {', '.join(comp_types)}\n\n"
-                "Each element must have exactly these keys:\n"
-                '- "name": PascalCase component name (e.g. "DataTable")\n'
-                '- "props_contract": TypeScript-style interface body for the component props\n'
-                '- "category": one of action, display, input, overlay, layout, navigation, general\n\n'
-                "Return ONLY a JSON array. No prose, no markdown, no code blocks."
-            )
-            response = await _gemini(plan_prompt, model=model)
-            try:
-                specs = json.loads(response)
-                if isinstance(specs, list) and all(
-                    isinstance(s, dict) and "name" in s for s in specs
-                ):
-                    return specs
-            except (json.JSONDecodeError, TypeError):
-                pass
-            return [
+        try:
+            specs = json.loads(response)
+            if not (isinstance(specs, list) and all(isinstance(s, dict) and "name" in s for s in specs)):
+                raise ValueError("Invalid spec format")
+        except (json.JSONDecodeError, TypeError, ValueError):
+            specs = [
                 {
                     "name": _type_to_component_name(ct),
-                    "props_contract": "",
+                    "props_contract": f"interface {_type_to_component_name(ct)}Props {{}}",
                     "category": _COMPONENT_CATEGORIES.get(ct, "general"),
                 }
-                for ct in comp_types
+                for ct in types
             ]
 
-        specs = await _plan_components(types)
-        spec_by_name = {s["name"]: s for s in specs}
-
-        # -- Phase 2: Generate code in batched parallel calls -----------------
-        async def _generate_batch(batch_specs: list[dict]) -> list[dict]:
-            names_list = ", ".join(s["name"] for s in batch_specs)
-            spec_lines = "\n".join(
-                f'- {s["name"]} (category: {s.get("category", "general")}): '
-                f'{s.get("props_contract", "")}'
-                for s in batch_specs
-            )
-            prompt = (
-                f"## Code Generation Request — Batch\n\n"
-                f"Generate {len(batch_specs)} components: {names_list}\n\n"
-                f"## Design Context\n\n{design_context}\n\n"
-                f"## Component Specs\n\n{spec_lines}\n\n"
-                f"## Requirements\n\n"
-                f"For EACH component, generate a complete, production-ready implementation. "
-                f"Use the props contract provided — do not re-derive it. "
-                f"Each component should be self-contained with its own styles. "
-                f"Follow the design spec for colors, spacing, and typography.\n\n"
-                f"## Output Format\n\n"
-                f"Separate each component with delimiters exactly like this:\n"
-                f"=== COMPONENT: ComponentName ===\n"
-                f"<full component code here>\n"
-                f"=== END ===\n"
-            )
-            if exemplar_context:
-                prompt += f"\n## Exemplar Code\n\n{exemplar_context}\n"
-
-            response = await _gemini(
-                prompt, model=model, system_instruction=UI_CODEGEN_SYSTEM_INSTRUCTION
-            )
-
-            batch_results = []
-            blocks = re.split(r"===\s*COMPONENT:\s*(\w+)\s*===", response)
-            i = 1
-            while i < len(blocks) - 1:
-                comp_name = blocks[i].strip()
-                raw_code = blocks[i + 1]
-                raw_code = re.sub(r"===\s*END\s*===.*", "", raw_code, flags=re.DOTALL).strip()
-                code = _extract_code_block(raw_code) if "```" in raw_code else raw_code
-                file_name = f"{comp_name}{ext}"
-                (out / file_name).write_text(code, encoding="utf-8")
-                spec = spec_by_name.get(comp_name, {})
-                batch_results.append({
-                    "name": comp_name,
-                    "path": str(Path(output_dir) / file_name),
-                    "props_contract": spec.get("props_contract") or _extract_props_contract(code, comp_name),
-                    "category": spec.get("category", "general"),
-                    "source": "gen-library",
-                })
-                i += 2
-            return batch_results
-
-        async def _generate_single(spec: dict) -> list[dict]:
-            name = spec["name"]
-            prompt = (
-                f"## Code Generation Request\n\n"
-                f"Component: {name}\n"
-                f"Category: {spec.get('category', 'general')}\n\n"
-                f"## Props Contract\n\n{spec.get('props_contract', '')}\n\n"
-                f"## Design Context\n\n{design_context}\n\n"
-                f"## Requirements\n\n"
-                f"Generate a complete, production-ready {name} component. "
-                f"Use the props contract provided — do not re-derive it. "
-                f"Follow the design spec for colors, spacing, and typography. "
-                f"The component should be self-contained with its own styles.\n"
-            )
-            if exemplar_context:
-                prompt += f"\n## Exemplar Code\n\n{exemplar_context}\n"
-
-            response = await _gemini(
-                prompt, model=model, system_instruction=UI_CODEGEN_SYSTEM_INSTRUCTION
-            )
-
-            code = _extract_code_block(response)
-            file_name = f"{name}{ext}"
-            (out / file_name).write_text(code, encoding="utf-8")
-            return [{
-                "name": name,
-                "path": str(Path(output_dir) / file_name),
-                "props_contract": spec.get("props_contract") or _extract_props_contract(code, name),
-                "category": spec.get("category", "general"),
-                "source": "gen-library",
-            }]
-
-        # Classify specs into simple (batched) vs complex (individual)
-        simple_specs = []
-        complex_specs = []
+        ext = _FRAMEWORK_EXT.get(framework, ".tsx")
         for spec in specs:
-            slug = _pascal_to_slug(spec["name"])
-            if slug in _SIMPLE_TYPES:
-                simple_specs.append(spec)
-            else:
-                complex_specs.append(spec)
+            spec["framework"] = framework
+            spec["file_ext"] = ext
 
-        tasks = []
-        batch_size = 3
-        for idx in range(0, len(simple_specs), batch_size):
-            batch = simple_specs[idx : idx + batch_size]
-            tasks.append(_generate_batch(batch))
-        for spec in complex_specs:
-            tasks.append(_generate_single(spec))
+        out_dir = Path("/tmp/gemini")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "library-plan.json"
+        out_path.write_text(json.dumps(specs, indent=2), encoding="utf-8")
 
-        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        components = []
-        errors = []
-        for i, result in enumerate(raw_results):
-            if isinstance(result, Exception):
-                errors.append(f"batch-{i}: {result}")
-            else:
-                components.extend(result)
-
-        # Merge with existing components:
-        # - extend mode: merge with full existing manifest (replace by name)
-        # - full regen: merge with preserved ui-coder components only
-        existing_components = []
-        if extend_manifest:
-            manifest_path = Path(extend_manifest)
-            if manifest_path.exists():
-                existing_data = json.loads(manifest_path.read_text(encoding="utf-8"))
-                existing_components = existing_data.get("components", [])
-        elif preserved_components:
-            existing_components = preserved_components
-
-        if existing_components:
-            new_names = {c["name"] for c in components}
-            merged = [c for c in existing_components if c["name"] not in new_names]
-            merged.extend(components)
-            components = merged
-
-        spec_preview = design_spec[:200] + ("..." if len(design_spec) > 200 else "")
-        manifest = {
-            "framework": framework,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "design_spec": spec_preview,
-            "components": components,
-        }
-
-        manifest_path = out / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
-        summary = f"Generated {len(components)} components to {output_dir}. Manifest: {output_dir}/manifest.json"
-        if errors:
-            summary += f"\n{len(errors)} failed: " + "; ".join(errors)
-        return summary
+        return f"Library plan: {len(specs)} components -> {out_path}"
 
     return {
         "gemini_ui_code": gemini_ui_code,
-        "gemini_component_library": gemini_component_library,
+        "gemini_plan_library": gemini_plan_library,
     }
