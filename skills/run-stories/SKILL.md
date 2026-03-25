@@ -411,13 +411,21 @@ Do NOT call any pm_* tools except pm_update_story (for state transitions).
 
 **Gemini MCP — blocked tools:** All other `mcp__gemini__*` tools (plan, audit, find_bug, test, etc.) are orchestrator-only.
 
+**Library check (before gemini_ui_code workflow):**
+Before Phase 1, read `<project-root>/components/ui/manifest.json` if it exists. If found:
+- Match each planned component against the manifest by name (case-insensitive).
+- For matched components: import directly from the library path in the manifest. Do NOT call gemini_ui_code. Wire them normally (imports, props, state, handlers).
+- For unmatched components: proceed through the gemini_ui_code workflow below.
+- After successful build (Phase 4): append any novel components to the manifest (name, path, props_contract, category).
+If no manifest exists, skip this block — all components go through gemini_ui_code.
+
 **gemini_ui_code workflow — parallel-first:**
 1. **Prepare all contracts** — scan plan for all visual components. Classify each as greenfield (file doesn't exist) or brownfield (file exists). Write input contracts for greenfield; extract existing contracts + consumers for brownfield.
 2. **Fire ALL gemini_ui_code calls in parallel** — one call per component, all in a single message. Do NOT serialize. ALWAYS pass `output_path` (absolute worktree file path) so Gemini writes directly to the file — avoids streaming full source through your context and transcript. Brownfield calls include existing contract + consumer list in `requirements` and the existing file as an `exemplar_path`.
 3. **Wire everything** — files already written by Gemini via `output_path`. For brownfield: contract diff (restore renamed/removed props if plan doesn't authorize, NEED_DECISION if irreconcilable). Wire imports, state, handlers across all components.
 4. **Build once, fix broken (max 3 rounds)** — build/lint the whole worktree. If Gemini errors, retry only broken components (parallel), include cross-component context when errors span components. Circuit breaker → NEED_DECISION after: same error twice, OR 3 total rounds without clean build, OR persistent cross-component interface mismatch. Don't loop.
 
-**HARD BLOCKS:** Writing visual markup yourself, hand-editing Gemini's returned styles, cramming components into one file, skipping `gemini_ui_code` for "small" components, serializing Gemini calls when they could be parallel.
+**HARD BLOCKS:** Writing visual markup yourself, hand-editing Gemini's returned styles, cramming components into one file, skipping `gemini_ui_code` for "small" components, serializing Gemini calls when they could be parallel, calling `gemini_ui_code` for a component that exists in the library manifest.
 
 <If agent is NOT ui-coder:>
 You are the coder. Write all code yourself.
