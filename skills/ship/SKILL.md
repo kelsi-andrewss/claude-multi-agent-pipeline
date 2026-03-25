@@ -140,8 +140,7 @@ Invoke /plan-stories based on the mode detected in Step 0:
 - **Inline mode (multi-epic)**: When `multi_epic_mode = true`:
   For each entry in `epics`:
     `Skill: plan-stories, args: "\"<epic.title>\" 1. <epic.items[0]> 2. <epic.items[1]> ..."`
-  Run sequentially (each call creates its own epic and stories in the DB).
-  After ALL calls complete, merge results: collect each call's `epic_id`, `dev_branch`, and `stories` list.
+  Epics are independent — invoke all `/plan-stories` calls in parallel (each as a separate Skill call in a single message, or launch background agents if Skill calls can't parallelize). After ALL complete, merge results: collect each call's `epic_id`, `dev_branch`, and `stories` list.
 
 - **Resume mode**: `Skill: plan-stories, args: "epic-NNN"`
 
