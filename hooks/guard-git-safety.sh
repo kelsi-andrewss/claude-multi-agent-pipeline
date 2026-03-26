@@ -29,9 +29,13 @@ if echo "$COMMAND" | grep -qE 'git\s+push\s+.*--force|git\s+push\s+-f\b'; then
   exit 2
 fi
 
-# Block push to main
+# Block push to main — unless we're ON main (legitimate dev→main merge push)
 if echo "$COMMAND" | grep -qE 'git\s+push\s+\S+\s+main\b'; then
-  echo "BLOCKED: Cannot push directly to main. Only dev merges to main via /merge-worktree." >&2
+  CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
+  if [[ "$CURRENT_BRANCH" == "main" ]]; then
+    exit 0
+  fi
+  echo "BLOCKED: Cannot push to main from branch '$CURRENT_BRANCH'. Merge to dev first, then dev to main." >&2
   exit 2
 fi
 
