@@ -15,7 +15,8 @@
       "Bash(~/.claude/tracking/subagent-stop-hook.sh*)",
       "Bash(~/.claude/hooks/inject-tier2-context.sh*)",
       "Bash(~/.claude/hooks/inject-project-decisions.sh*)",
-      "Bash(~/.claude/hooks/guard-plan-file.sh*)"
+      "Bash(~/.claude/hooks/guard-plan-file.sh*)",
+      "Bash(~/.claude/hooks/reinject-essentials.sh*)"
     ],
     "defaultMode": "default"
   },
@@ -91,6 +92,16 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "Compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/reinject-essentials.sh",
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "TaskUpdate",
         "hooks": [

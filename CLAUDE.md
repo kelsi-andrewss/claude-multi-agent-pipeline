@@ -70,6 +70,9 @@ When the user says "log" or "log that", immediately run log-correction.sh captur
 
 The Stop hook also auto-detects corrections from the transcript and writes them to the same correction_groups table.
 
+## Compaction guidance
+When compacting, always preserve: the current task and its state, all modified file paths, test commands that have been run, any NEED_DECISION or BLOCKED status from coder agents, and the active skill pipeline step. These are not recoverable from context after compaction.
+
 ## Behavioral learning
 @.claude/rendered-prefs.md
 
