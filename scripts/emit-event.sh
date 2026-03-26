@@ -18,7 +18,7 @@ set -euo pipefail
 EVENT_TYPE="${1:-}"
 ACTOR="${2:-}"
 REF="${3:-}"
-PAYLOAD="${4:-{}}"
+PAYLOAD="${4:-"{}"}"
 
 if [[ -z "$EVENT_TYPE" || -z "$ACTOR" || -z "$REF" ]]; then
   echo "Usage: scripts/emit-event.sh <event_type> <actor> <ref> [json_payload]" >&2
