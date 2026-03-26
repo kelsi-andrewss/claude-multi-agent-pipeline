@@ -17,7 +17,8 @@
       "Bash(~/.claude/hooks/inject-project-decisions.sh*)",
       "Bash(~/.claude/hooks/guard-plan-file.sh*)",
       "Bash(~/.claude/hooks/reinject-essentials.sh*)",
-      "Bash(~/.claude/hooks/guard-git-safety.sh*)"
+      "Bash(~/.claude/hooks/guard-git-safety.sh*)",
+      "Bash(~/.claude/hooks/session-budget.sh*)"
     ],
     "defaultMode": "default"
   },
@@ -203,6 +204,12 @@
             "type": "command",
             "command": "~/.claude/hooks/inject-tier2-context.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/session-budget.sh",
+            "timeout": 5,
+            "async": true
           }
         ]
       }
