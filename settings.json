@@ -16,7 +16,8 @@
       "Bash(~/.claude/hooks/inject-tier2-context.sh*)",
       "Bash(~/.claude/hooks/inject-project-decisions.sh*)",
       "Bash(~/.claude/hooks/guard-plan-file.sh*)",
-      "Bash(~/.claude/hooks/reinject-essentials.sh*)"
+      "Bash(~/.claude/hooks/reinject-essentials.sh*)",
+      "Bash(~/.claude/hooks/guard-git-safety.sh*)"
     ],
     "defaultMode": "default"
   },
@@ -52,6 +53,11 @@
       {
         "matcher": "Bash",
         "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/guard-git-safety.sh",
+            "timeout": 5
+          },
           {
             "type": "command",
             "command": "~/.claude/hooks/warn-sync-heavy-bash.sh",

@@ -27,10 +27,12 @@ Responsible engineers check in before irreversible or shared-state actions — n
 
 **Everything else**: use your judgment, explain if asked. When unsure, bias toward acting.
 
+<important if="you are making an architectural decision or choosing between approaches">
 ## Decisions
-- Decisions outlive the code that prompted them. Record in `pm_add_decision` so future sessions can query context. Inline comments only for code that looks like a bug but isn't.
+- Record in `pm_add_decision` so future sessions can query context.
 - Before proposing an approach, check `pm_list_decisions` — conflicting with a recorded decision wastes a round-trip.
-- After calling pm_add_decision, shadow the decision to OpenMemory for semantic search: openmemory_store with tags=["decision", "<decision-id>"], user_id="proj:<project>".
+- After calling pm_add_decision, shadow to OpenMemory: openmemory_store with tags=["decision", "<decision-id>"], user_id="proj:<project>".
+</important>
 
 ## Code philosophy
 - Changes should be scoped. Fix what's broken in code you're modifying — including its types and docs. Don't touch code you're not otherwise changing.
@@ -38,27 +40,22 @@ Responsible engineers check in before irreversible or shared-state actions — n
 - Solve the current problem. Abstractions for hypothetical future needs add complexity now and are usually wrong later.
 - Test logic that can break silently — data transformations, state transitions, conditional behavior. Don't test wiring (route configs, component composition, dependency injection) — it fails obviously. Don't duplicate what the type system already catches.
 
+<important if="you just produced significant work — architectural decisions, multi-file plans, new patterns, design proposals">
 ## Self-critique
-- After producing significant work (architectural decisions, multi-file plans, new patterns, design proposals), run `/critique` before presenting. "Is this solid? Any gaps?" should never need to be asked.
-- Significant = architectural decisions, 2+ file plans, new file/skill/hook creation, complex logic changes.
-- Trivial = single-line fixes, config changes, simple scripts. Skip auto-trigger; `/critique` can still be invoked manually.
+- Run `/critique` before presenting. Significant = 2+ file plans, new file/skill/hook creation, complex logic.
+- Trivial (single-line fixes, config) = skip auto-trigger.
+</important>
 
 ## Commits
 - `git add -A` risks capturing secrets, build artifacts, or unintended changes. Stage files by name.
 - Secrets in code or commit messages can't be fully scrubbed from git history. They belong only in .env files.
 - Linters catch what review misses. Run the project linter before committing if one exists.
 
+<important if="you just completed significant work — breakthroughs, bug resolutions, architecture decisions">
 ## Tracking
-High-signal prompts encode what worked and what didn't. After significant work, append to `<project>/.claude/tracking/key-prompts/YYYY-MM-DD.md`:
-  ## [date] — [short title]
-  **Category**: breakthrough | bug-resolution | architecture | feature
-  **Context**: What problem was being solved?
-  **The Prompt**: (exact or close paraphrase)
-  **Why It Worked**: (what made the phrasing/framing effective)
-  **Prior Attempts That Failed**: (for bugs: what didn't work; otherwise: N/A)
-The bar is "would this help a future session solve a similar problem?" Skip routine exchanges.
-
-After appending a key prompt entry, also store to OpenMemory: `openmemory_store(content="<title>: <why-it-worked, 1-2 sentences>", tags=["prompt-pattern", "<category>"], user_id="global")`. This enables semantic recall of effective prompt patterns across projects.
+Append to `<project>/.claude/tracking/key-prompts/YYYY-MM-DD.md` with: date, category, context, prompt, why it worked, prior failed attempts. Bar: "would this help a future session?" Skip routine exchanges.
+Also store to OpenMemory: openmemory_store with tags=["prompt-pattern", "<category>"], user_id="global".
+</important>
 
 ## Corrections
 After receiving a redirect or correction from the user, log BEFORE proceeding with the corrected approach. Run:
@@ -76,11 +73,4 @@ When compacting, always preserve: the current task and its state, all modified f
 ## Behavioral learning
 @.claude/rendered-prefs.md
 
-These surfaces track patterns across sessions:
-- `correction_groups` table (epics.db) — single source of truth for corrections (manual via `log-correction.sh` + auto-detected by stop hook)
-- `~/.claude/.claude/rendered-prefs.md` — rendered from correction_groups DB at session start (loaded via @import, survives compaction)
-- OpenMemory — queryable semantic store for tool learnings, decisions, prompt patterns
-- `decision_preferences` table (epics.db) — tracks decision outcomes and correlates them with corrections; negative-signal decisions surface in the sidecar at session start (see `hooks/lib/signal_processor.py`)
-- `merge_outcomes` table (run-state.db) — records post-merge/rejection results per story; feeds trust calibration and signal scoring
-
-> Infrastructure details (OpenMemory, pipelines, project structure): see ~/.claude/.claude/CLAUDE.md
+> Infrastructure details: see ~/.claude/.claude/CLAUDE.md
