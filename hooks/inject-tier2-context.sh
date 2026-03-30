@@ -51,6 +51,9 @@ fi
 if echo "$PROMPT" | grep -iqE 'orchestrat'; then
   MATCHED_CATEGORIES+=("infra_orch")
 fi
+if echo "$PROMPT" | grep -iqE 'hotfix|quickfix|handoff|protected.file|/clear|merge.procedure|commit.rule'; then
+  MATCHED_CATEGORIES+=("infra_procedures")
+fi
 if echo "$PROMPT" | grep -iqE 'correction|distill'; then
   MATCHED_CATEGORIES+=("infra_corrections")
 fi
@@ -104,7 +107,10 @@ PYEOF
       FRAGMENTS+=("Worktrees at ~/.claude/worktrees/story/<branch>/. Coder agents run inside worktrees, not main session. EnterWorktree/ExitWorktree tools manage lifecycle.")
       ;;
     infra_orch)
-      FRAGMENTS+=("Full orchestration rules in ~/.claude/ORCHESTRATION.md. Read it with the Read tool -- do not rely on session context alone.")
+      FRAGMENTS+=("Architecture and workflow in ~/.claude/ORCHESTRATION.md. Session procedures (merges, hotfixes, commits, context mgmt) in ~/.claude/refs/orch-procedures.md. Read with the Read tool -- do not rely on session context alone.")
+      ;;
+    infra_procedures)
+      FRAGMENTS+=("Session procedures (hotfix/quickfix rules, merge flow, context management, protected files, commit discipline) in ~/.claude/refs/orch-procedures.md. Read with the Read tool.")
       ;;
     infra_corrections)
       FRAGMENTS+=("Corrections: logged directly to correction_groups table (epics.db) via log-correction.sh. Auto-detected by signal_processor.py at session end. Auto-promoted when count>=3. Preferences rendered from DB to .claude/rendered-prefs.md at session start. No corrections.md — that surface is dead.")

@@ -78,13 +78,23 @@ SYSTEM_MSG = re.compile(
     r'<(local-command-caveat|task-notification|system-reminder|command-name|command-message)>|'
     r'^Base directory for this skill|'
     r'^Implement the following plan:|'
-    r'^<skill-',
+    r'^<skill-|'
+    r'^\[Request interrupted',
     re.IGNORECASE
 )
 
 POSITIVE_INTENT = re.compile(
     r"^(let'?s |looks good|ship it|continue|approved|woo+|yes[,.\s!]|yeah|okay|lgtm|"
     r"go ahead|do it|hell yeah|let'?s go|nice|perfect|awesome|sounds good|love it|great|cool)",
+    re.IGNORECASE
+)
+
+NON_CORRECTION = re.compile(
+    r"^(logged in|done|ready|fixed|deployed|"
+    r"continue|go on|keep going|"
+    r"always|never|sure|ok|right|correct|"
+    r"you do it|no you do it|"
+    r"sorry continue|that's how we fix it\??)[.!?\s]*$",
     re.IGNORECASE
 )
 
@@ -135,14 +145,18 @@ def extract_corrections(turns):
             continue
         if is_structural_content(msg):
             continue
+        if len(msg) < 15:
+            continue
+        if NON_CORRECTION.match(msg):
+            continue
 
         if embedding_calls < MAX_EMBEDDING_CALLS_PER_PHASE:
             embedding_calls += 1
             matched = is_correction(msg, prototype_embs)
         else:
-            matched = False
+            matched = None
 
-        if matched:
+        if matched is not None:
             theme_key = msg[:30].lower().strip()
             weight = 1.0
 
@@ -154,6 +168,7 @@ def extract_corrections(turns):
                 "turn_idx": turn["turn_idx"],
                 "content": msg[:300],
                 "weight": weight,
+                "embedding": matched,
             })
 
     return corrections
@@ -263,9 +278,28 @@ CORRECTION_PROTOTYPES = [
     "why did you skip the pipeline",
     "you're not listening to me",
 ]
-PROTOTYPE_THRESHOLD = 0.55
+
+# Messages that share imperative tone with corrections but aren't corrections.
+# Used as a negative signal: if a message is closer to these than to CORRECTION_PROTOTYPES,
+# it's an instruction/status/bug-report, not a correction.
+NON_CORRECTION_PROTOTYPES = [
+    "I just logged in successfully",
+    "sorry, please continue where you left off",
+    "yes always do that from now on",
+    "no, you handle it instead of me",
+    "is that how we fix this problem?",
+    "kill the server and restart it from the worktree",
+    "now ship the other feature too",
+    "run them all through the pipeline now",
+    "after the process dies it never restarts, fix the bug",
+    "what exactly will you write? show me an example first",
+]
+
+PROTOTYPE_THRESHOLD = 0.65
+NON_CORRECTION_MARGIN = 0.02  # Positive must beat negative by this margin
 MAX_EMBEDDING_CALLS_PER_PHASE = 5  # Applied independently in extraction and grouping phases
 _prototype_embeddings = None
+_non_correction_embeddings = None
 
 
 def _get_prototype_embeddings():
@@ -283,17 +317,45 @@ def _get_prototype_embeddings():
     return _prototype_embeddings
 
 
-def is_correction(msg, prototype_embeddings):
-    """Returns True if msg is semantically similar to a correction prototype.
+def _get_non_correction_embeddings():
+    """Lazy-load and cache negative prototype embeddings. Returns None if Ollama unavailable."""
+    global _non_correction_embeddings
+    if _non_correction_embeddings is not None:
+        return _non_correction_embeddings
+    embeddings = []
+    for proto in NON_CORRECTION_PROTOTYPES:
+        vec = get_embedding(proto)
+        if vec is None:
+            return None
+        embeddings.append(vec)
+    _non_correction_embeddings = embeddings
+    return _non_correction_embeddings
 
-    Computes cosine similarity against each prototype embedding and returns
-    True if max similarity >= PROTOTYPE_THRESHOLD.
+
+def is_correction(msg, prototype_embeddings):
+    """Returns the embedding vector if msg is semantically similar to a correction prototype, else None.
+
+    Computes cosine similarity against both positive (correction) and negative
+    (non-correction) prototypes. Returns msg embedding only if:
+    1. Max positive similarity >= PROTOTYPE_THRESHOLD
+    2. Max positive similarity > max negative similarity + NON_CORRECTION_MARGIN
     """
     msg_vec = get_embedding(msg)
     if msg_vec is None:
-        return False
-    similarities = [cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
-    return max(similarities) >= PROTOTYPE_THRESHOLD
+        return None
+    pos_similarities = [cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
+    max_pos = max(pos_similarities)
+    if max_pos < PROTOTYPE_THRESHOLD:
+        return None
+
+    neg_embeddings = _get_non_correction_embeddings()
+    if neg_embeddings:
+        neg_similarities = [cosine_similarity(msg_vec, neg_vec) for neg_vec in neg_embeddings]
+        max_neg = max(neg_similarities)
+        if max_pos < max_neg + NON_CORRECTION_MARGIN:
+            return None
+
+    return msg_vec
 
 
 def _ensure_correction_groups_table(cursor):
@@ -330,68 +392,379 @@ def _find_matching_group(cursor, embedding, threshold):
     return best_id
 
 
+CLUSTER_THRESHOLD = 0.80
+
+
+def cluster_and_merge_corrections(cursor, threshold=CLUSTER_THRESHOLD):
+    """Cluster correction_groups by semantic similarity and merge related entries.
+
+    Uses union-find at the given threshold to group entries that express the same
+    behavioral correction in different words. Merges multi-member clusters into
+    a single representative (highest count), dismissing the rest.
+
+    Returns number of entries absorbed (dismissed via merge).
+    """
+    rows = cursor.execute(
+        "SELECT id, embedding, count, correction_dates, theme, status "
+        "FROM correction_groups "
+        "WHERE status != 'dismissed' AND embedding IS NOT NULL"
+    ).fetchall()
+
+    if len(rows) < 2:
+        return 0
+
+    entries = []
+    for row in rows:
+        rid, emb_blob, count, dates_json, theme, status = row
+        try:
+            vec = blob_to_embedding(emb_blob)
+        except Exception:
+            continue
+        try:
+            dates = json.loads(dates_json) if dates_json else []
+        except (json.JSONDecodeError, TypeError):
+            dates = []
+        entries.append({
+            'id': rid, 'vec': vec, 'count': count,
+            'dates': dates, 'theme': theme, 'status': status,
+        })
+
+    if len(entries) < 2:
+        return 0
+
+    # Union-find
+    parent = {e['id']: e['id'] for e in entries}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for i in range(len(entries)):
+        for j in range(i + 1, len(entries)):
+            sim = cosine_similarity(entries[i]['vec'], entries[j]['vec'])
+            if sim >= threshold:
+                union(entries[i]['id'], entries[j]['id'])
+
+    # Group by cluster root
+    clusters = {}
+    for e in entries:
+        root = find(e['id'])
+        clusters.setdefault(root, []).append(e)
+
+    # Merge clusters with 2+ members
+    absorbed = 0
+    now = int(time.time())
+    for members in clusters.values():
+        if len(members) < 2:
+            continue
+
+        # Representative: highest count, then lowest id (oldest) as tiebreak
+        members.sort(key=lambda m: (-m['count'], m['id']))
+        rep = members[0]
+        rest = members[1:]
+
+        # Pick best theme for rule generation: longest non-trivial theme
+        best_theme = rep['theme']
+        for m in members:
+            cleaned = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', m['theme'], flags=re.IGNORECASE).strip()
+            cleaned_rep = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', best_theme, flags=re.IGNORECASE).strip()
+            if len(cleaned) > len(cleaned_rep):
+                best_theme = m['theme']
+
+        # Combine dates and recompute count
+        all_dates = list(rep['dates'])
+        for m in rest:
+            all_dates.extend(m['dates'])
+        total_count = len(all_dates)
+
+        # Update representative
+        cursor.execute(
+            "UPDATE correction_groups SET count=?, correction_dates=?, theme=?, "
+            "text='', updated_at=? WHERE id=?",
+            (total_count, json.dumps(all_dates), best_theme[:300], now, rep['id']),
+        )
+
+        # Re-check promotion status for representative
+        distinct_dates = len(set(all_dates))
+        if total_count >= PROMOTION_THRESHOLD and len(best_theme) >= 20 and distinct_dates >= 2:
+            new_status = 'pending_promotion'
+            cursor.execute(
+                "UPDATE correction_groups SET status=? WHERE id=? AND status='accumulating'",
+                (new_status, rep['id']),
+            )
+
+        # Dismiss absorbed entries
+        for m in rest:
+            cursor.execute(
+                "UPDATE correction_groups SET status='dismissed', "
+                "text=? WHERE id=?",
+                (f"merged into id={rep['id']}", m['id']),
+            )
+            absorbed += 1
+
+    return absorbed
+
+
+def _call_gemini_sync(prompt, timeout=30):
+    """Synchronous gemini CLI call. Returns response text or None on failure.
+
+    Uses -p flag for headless mode (no interactive terminal) and pipes prompt
+    via stdin to avoid shell argument length limits.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["gemini", "-p", "", "-o", "json"],
+            input=prompt, capture_output=True, text=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            print(f"gemini CLI exit {result.returncode}: {result.stderr[:200]}", file=sys.stderr)
+            return None
+        data = json.loads(result.stdout)
+        return data.get("response", "")
+    except subprocess.TimeoutExpired:
+        print(f"gemini CLI timed out after {timeout}s", file=sys.stderr)
+        return None
+    except json.JSONDecodeError:
+        print(f"gemini CLI returned invalid JSON: {result.stdout[:200]}", file=sys.stderr)
+        return None
+    except (FileNotFoundError, OSError) as e:
+        print(f"gemini CLI not available: {e}", file=sys.stderr)
+        return None
+
+
+LLM_CLUSTER_MIN_ENTRIES = 4  # Don't bother LLM with fewer entries
+
+
+def llm_cluster_corrections(cursor):
+    """Use Gemini to cluster corrections by behavioral intent.
+
+    Embedding similarity can't bridge vocabulary gaps ("bro use the skill" vs
+    "why didn't you use ship"). This function sends all non-dismissed themes
+    to Gemini and asks it to group them by underlying behavioral correction.
+
+    Returns number of entries absorbed (dismissed via merge).
+    """
+    # Quick health check — bail fast if Gemini is down rather than waiting 90s
+    health = _call_gemini_sync('Return: {"ok":true}', timeout=15)
+    if health is None:
+        print("llm_cluster: Gemini unavailable, skipping", file=sys.stderr)
+        return 0
+
+    # Only cluster entries with count >= 2 — singletons don't benefit from LLM grouping
+    # and sending 100+ entries makes the prompt too large / slow
+    rows = cursor.execute(
+        "SELECT id, count, correction_dates, theme, status "
+        "FROM correction_groups "
+        "WHERE status IN ('accumulating', 'pending_promotion') AND count >= 2"
+    ).fetchall()
+
+    if len(rows) < LLM_CLUSTER_MIN_ENTRIES:
+        return 0
+
+    # Build ID→entry map
+    entries_by_id = {}
+    theme_list = []
+    for rid, count, dates_json, theme, status in rows:
+        try:
+            dates = json.loads(dates_json) if dates_json else []
+        except (json.JSONDecodeError, TypeError):
+            dates = []
+        entries_by_id[rid] = {
+            'id': rid, 'count': count, 'dates': dates,
+            'theme': theme, 'status': status,
+        }
+        theme_list.append(f"  id={rid}: {theme[:200]}")
+
+    prompt = (
+        "[System: You are a clustering engine. You group user correction messages by "
+        "the behavioral intent they express. Two messages belong in the same cluster "
+        "if they are telling the AI to change the same behavior, even if they use "
+        "completely different words or levels of profanity.]\n\n"
+        "Below are correction messages from a user to an AI assistant. "
+        "Group them into clusters where each cluster represents ONE behavioral correction. "
+        "Only group entries that clearly express the SAME underlying complaint.\n\n"
+        "Messages:\n" + "\n".join(theme_list) + "\n\n"
+        "Return ONLY valid JSON — no markdown, no code blocks. Format:\n"
+        '[{"cluster_name": "short-label", "ids": [1, 2, 3]}, ...]\n\n'
+        "Rules:\n"
+        "- Only include clusters with 2+ members\n"
+        "- Be conservative — when unsure, leave entries unclustered\n"
+        "- Ignore profanity/tone differences, focus on what behavior is being corrected\n"
+        "- cluster_name should be a short kebab-case label like 'use-ship-skill' or 'research-first'"
+    )
+
+    raw = _call_gemini_sync(prompt, timeout=90)
+    if not raw:
+        return 0
+
+    # Parse JSON response — handle markdown wrapping
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+
+    try:
+        clusters = json.loads(text)
+    except json.JSONDecodeError:
+        print(f"llm_cluster: invalid JSON response: {text[:200]}", file=sys.stderr)
+        return 0
+
+    if not isinstance(clusters, list):
+        return 0
+
+    absorbed = 0
+    now = int(time.time())
+
+    for cluster in clusters:
+        if not isinstance(cluster, dict):
+            continue
+        ids = cluster.get("ids", [])
+        # Validate: all IDs must exist in our entry map
+        valid_ids = [i for i in ids if i in entries_by_id]
+        if len(valid_ids) < 2:
+            continue
+
+        members = [entries_by_id[i] for i in valid_ids]
+        # Representative: highest count, then oldest (lowest id)
+        members.sort(key=lambda m: (-m['count'], m['id']))
+        rep = members[0]
+        rest = members[1:]
+
+        # Pick best theme: longest non-trivial
+        best_theme = rep['theme']
+        for m in members:
+            cleaned = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', m['theme'], flags=re.IGNORECASE).strip()
+            cleaned_rep = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', best_theme, flags=re.IGNORECASE).strip()
+            if len(cleaned) > len(cleaned_rep):
+                best_theme = m['theme']
+
+        all_dates = list(rep['dates'])
+        for m in rest:
+            all_dates.extend(m['dates'])
+        total_count = len(all_dates)
+
+        cursor.execute(
+            "UPDATE correction_groups SET count=?, correction_dates=?, theme=?, "
+            "text='', updated_at=? WHERE id=?",
+            (total_count, json.dumps(all_dates), best_theme[:300], now, rep['id']),
+        )
+
+        distinct_dates = len(set(all_dates))
+        if total_count >= PROMOTION_THRESHOLD and len(best_theme) >= 20 and distinct_dates >= 2:
+            cursor.execute(
+                "UPDATE correction_groups SET status=? WHERE id=? AND status='accumulating'",
+                ('pending_promotion', rep['id']),
+            )
+
+        cluster_name = cluster.get("cluster_name", "unknown")
+        for m in rest:
+            cursor.execute(
+                "UPDATE correction_groups SET status='dismissed', "
+                "text=? WHERE id=?",
+                (f"llm-merged into id={rep['id']} ({cluster_name})", m['id']),
+            )
+            del entries_by_id[m['id']]
+            absorbed += 1
+
+    return absorbed
+
+
+_EXPLETIVES = r'(?:bro|omg|omfg|wtf|bruh|dude|yo|buddy|ffs|jfc)'
+_PROFANITY = r'(?:what the fuck|fuck(?:ing)?|damn|stupid\s+ass|stupid|ass|shit(?:ty)?)'
+
+
+def _clean_text(text):
+    """Strip dates, expletives, and profanity from correction text."""
+    # Strip leading date prefixes like "2026-03-04 — "
+    text = re.sub(r'^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?\s*[—–-]\s*', '', text).strip()
+    # Strip leading/trailing expletives
+    text = re.sub(rf'^{_EXPLETIVES}\b[,!?\s]*', '', text, flags=re.IGNORECASE).strip()
+    text = re.sub(rf'[,!?\s]*{_EXPLETIVES}[.!?]*$', '', text, flags=re.IGNORECASE).strip()
+    # Strip inline profanity
+    text = re.sub(rf'\b{_PROFANITY}\b\s*', '', text, flags=re.IGNORECASE).strip()
+    # Clean up double spaces and leading/trailing punctuation
+    text = re.sub(r'\s{2,}', ' ', text).strip(' ,.')
+    return text
+
+
+def _degerund(phrase):
+    """Convert leading gerund to base form: 'creating hooks' -> 'create hooks'."""
+    m = re.match(r'^(\w+)ing\b(.*)$', phrase)
+    if not m:
+        return phrase
+    stem, rest = m.group(1), m.group(2)
+    # Double consonant: running→run, stopping→stop
+    if len(stem) >= 2 and stem[-1] == stem[-2]:
+        return stem[:-1] + rest
+    # Silent-e verbs: creating→create, making→make
+    if stem and stem[-1] in 'bcdfghjklmnpqrstvwxyz':
+        return stem + 'e' + rest
+    return stem + rest
+
+
 def generate_rule(theme_text):
     """Convert a correction theme into a positive-instruction rule.
 
     Extracts the behavioral pattern from the correction text and reframes it
-    as a directive. E.g. "don't skip research" -> "When research is applicable, always do research first."
+    as a directive. E.g. "don't skip research" -> "Always do research first."
     """
-    text = theme_text.strip().rstrip('.')
+    text = _clean_text(theme_text)
     lower = text.lower()
 
-    # Strip leading date prefixes like "2026-03-04 — "
-    date_stripped = re.sub(r'^\d{4}-\d{2}-\d{2}\s*[—–-]\s*', '', text)
-    if date_stripped != text:
-        text = date_stripped.strip()
-        lower = text.lower()
+    if not text or len(text) < 10:
+        return f"Per repeated user correction: {theme_text.strip()}"
 
-    # Strip leading/trailing expletives like "bro", "omg", "wtf", etc.
-    text = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', text, flags=re.IGNORECASE).strip()
-    text = re.sub(r'[,!?\s]*(bro|omg|omfg|wtf|bruh|dude|yo)[.!?]*$', '', text, flags=re.IGNORECASE).strip()
-    lower = text.lower()
-
-    # Pattern: "don't/do not/stop <doing X>" -> "When <X> is relevant, always <do X>"
+    # Pattern: "don't/do not/stop/never <doing X>"
     neg_match = re.match(r"(?:don'?t|do not|stop|quit|never)\s+(.+)", lower)
     if neg_match:
         action = neg_match.group(1).strip().rstrip('.')
-        return f"When {action} is the topic, always avoid it per user preference"
+        return f"Never {action}"
 
-    # Pattern: "why didn't you / why aren't you / why do you keep" -> extract the expected action
-    # "why are you X-ing" -> complaint about current behavior, stop doing X
+    # Pattern: "why do you keep X" -> "Never X" (degerund: creating→create)
+    keep_match = re.match(r"why (?:do )?(?:you|u) keep\s+(.+)", lower)
+    if keep_match:
+        bad_action = _degerund(keep_match.group(1).strip().rstrip('?.'))
+        return f"Never {bad_action}"
+
+    # Pattern: "why are you X-ing" -> "Never X" (degerund)
     why_are_match = re.match(r"why are you\s+(.+)", lower)
     if why_are_match:
-        bad_action = why_are_match.group(1).strip().rstrip('?').rstrip('.')
-        return f"When relevant, never {bad_action}"
+        bad_action = _degerund(why_are_match.group(1).strip().rstrip('?.'))
+        return f"Never {bad_action}"
 
-    why_match = re.match(r"why (?:didn'?t|don'?t|aren'?t|isn'?t|won'?t|do) (?:you|u)\s+(.+)", lower)
+    # Pattern: "why didn't you X" -> "Always X"
+    why_match = re.match(r"why (?:didn'?t|don'?t|aren'?t|isn'?t|won'?t) (?:you|u)\s+(.+)", lower)
     if why_match:
-        rest = why_match.group(1).strip().rstrip('?').rstrip('.')
-        # "why do you keep X" -> "never X"
-        keep_match = re.match(r"keep\s+(.+)", rest)
-        if keep_match:
-            bad_action = keep_match.group(1).strip()
-            return f"When relevant, never {bad_action}"
-        return f"When applicable, always {rest}"
+        expected = why_match.group(1).strip().rstrip('?.')
+        return f"Always {expected}"
 
-    # Pattern: "use X instead" / "do X" -> direct instruction
-    use_match = re.match(r"(?:use|do|run|call|try)\s+(.+?)(?:\s+instead)?$", lower)
+    # Pattern: "use X" / "run X" / "do X"
+    use_match = re.match(r"(use|do|run|call|try)\s+(.+?)(?:\s+instead)?$", lower)
     if use_match:
-        action = use_match.group(1).strip()
-        return f"When applicable, always use {action}"
+        verb, action = use_match.group(1), use_match.group(2).strip()
+        return f"Always {verb} {action}"
 
-    # Pattern: "this is for X" / "no. this is for X"
+    # Pattern: "no. this is for X" -> "This tool/context is for X"
     this_match = re.match(r"(?:no[.!,]?\s*)?this is (?:for\s+)?(.+)", lower)
     if this_match:
         purpose = this_match.group(1).strip().rstrip('.')
-        return f"When this context arises, remember: this is for {purpose}"
+        return f"This is for {purpose} — use accordingly"
 
     # Pattern: "X comes first" / "X before Y"
     first_match = re.search(r'(\w[\w\s]*?)\s+comes?\s+first', lower)
     if first_match:
         priority = first_match.group(1).strip()
-        return f"When applicable, always do {priority} first"
+        return f"Always do {priority} first"
 
-    # Fallback: frame the correction text as a direct rule
+    # Fallback: use the cleaned text directly
     return f"Per repeated user correction: {text}"
 
 
@@ -436,8 +809,6 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
         _ensure_correction_groups_table(cursor)
         now = int(time.time())
 
-        grouping_embedding_calls = 0
-
         for correction in all_corrections:
             theme_text = correction["content"]
             theme_key = theme_text[:300]
@@ -447,14 +818,13 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 continue
             seen_themes.add(theme_key)
 
+            # Reuse the embedding computed during extraction
+            correction_embedding = correction.get("embedding")
+
             # Try semantic matching via embedding before falling back to exact text match
             matched_group_id = None
-            correction_embedding = None
-            if grouping_embedding_calls < MAX_EMBEDDING_CALLS_PER_PHASE:
-                grouping_embedding_calls += 1
-                correction_embedding = get_embedding(theme_key)
-                if correction_embedding is not None:
-                    matched_group_id = _find_matching_group(cursor, correction_embedding, SIMILARITY_THRESHOLD)
+            if correction_embedding is not None:
+                matched_group_id = _find_matching_group(cursor, correction_embedding, SIMILARITY_THRESHOLD)
 
             if matched_group_id is not None:
                 # Semantic match found -- use that group for the update
@@ -474,16 +844,21 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 if row[3] == 'dismissed':
                     continue
                 if row[3] == 'promoted':
-                    # Reinforce: update timestamp without incrementing count
+                    # Reinforce: increment count and append date (rule stays promoted)
+                    old_dates = json.loads(row[2]) if row[2] else []
+                    old_dates.append(today)
+                    new_count = row[1] + 1
                     cursor.execute(
-                        "UPDATE correction_groups SET updated_at=? WHERE id=?",
-                        (now, row[0])
+                        "UPDATE correction_groups SET count=?, correction_dates=?, updated_at=? WHERE id=?",
+                        (new_count, json.dumps(old_dates), now, row[0])
                     )
                     continue
                 new_count = row[1] + 1
                 old_dates = json.loads(row[2]) if row[2] else []
                 old_dates.append(today)
-                new_status = 'pending_promotion' if new_count >= PROMOTION_THRESHOLD else row[3]
+                distinct_dates = len(set(old_dates))
+                qualifies = new_count >= PROMOTION_THRESHOLD and len(theme_key) >= 20 and distinct_dates >= 2
+                new_status = 'pending_promotion' if qualifies else row[3]
                 updates = {
                     'count': new_count, 'correction_dates': json.dumps(old_dates),
                     'status': new_status, 'updated_at': now,
@@ -501,7 +876,10 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                     + (row[0],)
                 )
             else:
-                embedding_blob = embedding_to_blob(correction_embedding) if correction_embedding is not None else None
+                # Don't create orphan rows without embeddings -- they can never be deduplicated
+                if correction_embedding is None:
+                    continue
+                embedding_blob = embedding_to_blob(correction_embedding)
                 cursor.execute(
                     "INSERT INTO correction_groups (theme, status, count, correction_dates, embedding, source, created_at, updated_at) "
                     "VALUES (?, 'accumulating', 1, ?, ?, 'auto', ?, ?)",

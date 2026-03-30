@@ -129,7 +129,7 @@ def print_correction_patterns(db_path):
         return
 
     pending = [r for r in rows if r[1] == "pending_promotion"]
-    accumulating = [r for r in rows if r[1] == "accumulating"]
+    accumulating = [r for r in rows if r[1] == "accumulating" and r[2] >= 3][:15]
     promoted = [r for r in rows if r[1] == "promoted"]
 
     if not pending and not accumulating:
@@ -148,9 +148,7 @@ def print_correction_patterns(db_path):
         print("  Accumulating:")
         for r in accumulating:
             theme, status, count, dates = r[0], r[1], r[2], r[3]
-            needed = 3 - int(count)
-            if needed < 1:
-                needed = 1
+            needed = max(1, 5 - int(count))
             print(f'    [{count}x] "{theme}" (need {needed} more)')
     if promoted and (pending or accumulating):
         print("  Already promoted:")
