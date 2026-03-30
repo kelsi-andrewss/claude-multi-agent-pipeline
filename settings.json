@@ -18,7 +18,8 @@
       "Bash(~/.claude/hooks/guard-plan-file.sh*)",
       "Bash(~/.claude/hooks/reinject-essentials.sh*)",
       "Bash(~/.claude/hooks/guard-git-safety.sh*)",
-      "Bash(~/.claude/hooks/session-budget.sh*)"
+      "Bash(~/.claude/hooks/session-budget.sh*)",
+      "Bash(~/.claude/plugins/marketplaces/claude-plugins-official/plugins/ralph-loop/hooks/stop-hook.sh*)"
     ],
     "defaultMode": "default"
   },
