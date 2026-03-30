@@ -29,8 +29,7 @@ def render_prefs(db_path, out_path):
     rows = query_db(
         db_path,
         "SELECT text FROM correction_groups "
-        "WHERE (status IN ('promoted','pending_promotion') OR source='manual') "
-        "AND status != 'dismissed' "
+        "WHERE status = 'promoted' "
         "ORDER BY updated_at DESC;",
     )
 

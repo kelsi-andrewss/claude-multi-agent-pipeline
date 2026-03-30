@@ -90,6 +90,19 @@ All stores from Claude's session go through the MCP `openmemory_store` tool. All
 
 ---
 
+## Model Selection
+
+| Role | Default | Escalation |
+|---|---|---|
+| Claude (main) | Opus | — |
+| Coders | Sonnet | Opus after 2 BLOCKING round-trips |
+| Reviewer | Sonnet | Sonnet only if coder ran Opus |
+| Unit-tester | Sonnet | Never |
+
+Trust scores from `merge_outcomes` override defaults when ≥10 records exist (see §Trust Calibration below).
+
+---
+
 ## Trust Calibration
 
 Trust scores are derived from merge_outcomes in run-state.db (populated directly at merge time; legacy data backfilled via outcomes-parser.py).

@@ -174,6 +174,32 @@ def stage_auto_distillation(db_file, project_root):
     today = datetime.now().strftime("%Y-%m-%d")
 
     conn = _connect_db(db_file)
+
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    from hooks.lib.om_write import om_write
+    from hooks.lib.signal_processor import generate_rule, RULE_THRESHOLD, cluster_and_merge_corrections, llm_cluster_corrections
+
+    # Embedding clustering pass: merge entries with cosine >= 0.80
+    try:
+        cursor = conn.cursor()
+        absorbed = cluster_and_merge_corrections(cursor)
+        if absorbed > 0:
+            conn.commit()
+            print(f"Stage 4: embedding clustering merged {absorbed} entries", file=sys.stderr)
+    except Exception as e:
+        print(f"Stage 4: embedding clustering failed (non-fatal): {e}", file=sys.stderr)
+
+    # LLM clustering pass: merge entries that express the same intent in different words
+    try:
+        cursor = conn.cursor()
+        llm_absorbed = llm_cluster_corrections(cursor)
+        if llm_absorbed > 0:
+            conn.commit()
+            print(f"Stage 4: LLM clustering merged {llm_absorbed} entries", file=sys.stderr)
+    except Exception as e:
+        print(f"Stage 4: LLM clustering failed (non-fatal): {e}", file=sys.stderr)
+
     rows = conn.execute(
         "SELECT theme, count, correction_dates, text FROM correction_groups WHERE status='pending_promotion'"
     ).fetchall()
@@ -183,13 +209,12 @@ def stage_auto_distillation(db_file, project_root):
         print("Stage 4: skipped (no pending_promotion entries)", file=sys.stderr)
         return
 
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-    from hooks.lib.om_write import om_write
-    from hooks.lib.signal_processor import generate_rule, RULE_THRESHOLD
-
     promoted = 0
     for theme, count, dates, existing_text in rows:
+        if count < RULE_THRESHOLD:
+            # Not enough evidence — leave as pending_promotion, don't render
+            continue
+
         # Parse last correction date from dates array
         last_date = today
         try:
@@ -199,17 +224,14 @@ def stage_auto_distillation(db_file, project_root):
         except (json.JSONDecodeError, TypeError):
             pass
 
-        if count >= RULE_THRESHOLD:
-            # Use existing rule text if signal_processor already generated it
-            if existing_text and existing_text.startswith("RULE:"):
-                # Strip any "(Auto-generated from N corrections)" suffix to avoid duplication
-                rule_core = re.sub(r'\s*\(Auto-generated from \d+ corrections\)\s*$', '', existing_text)
-                pref_text = f"{rule_core} (from {count} corrections, last: {last_date})"
-            else:
-                rule = generate_rule(theme)
-                pref_text = f"RULE: {rule} (from {count} corrections, last: {last_date})"
+        # Use existing rule text if signal_processor already generated it
+        if existing_text and existing_text.startswith("RULE:"):
+            rule_core = re.sub(r'\s*\(Auto-generated from \d+ corrections\)\s*$', '', existing_text)
+            rule_core = re.sub(r'\s*\(from \d+ corrections, last: \d{4}-\d{2}-\d{2}\)\s*$', '', rule_core)
+            pref_text = f"{rule_core} (from {count} corrections, last: {last_date})"
         else:
-            pref_text = f"Pattern ({count}/5): {theme[:200]} — will become rule at 5 corrections"
+            rule = generate_rule(theme)
+            pref_text = f"RULE: {rule} (from {count} corrections, last: {last_date})"
 
         try:
             conn.execute(
