@@ -19,6 +19,16 @@ if [[ -z "$THEME" ]]; then
   exit 1
 fi
 
+if [[ ${#THEME} -lt 20 ]]; then
+  echo '{"status":"skipped","reason":"theme too short (min 20 chars)"}'
+  exit 0
+fi
+
+if echo "$THEME" | grep -qi "not a correction"; then
+  echo '{"status":"skipped","reason":"contains not-a-correction marker"}'
+  exit 0
+fi
+
 DATE="${2:-$(date +%Y-%m-%d)}"
 DB_FILE="$HOME/.claude/.claude/epics.db"
 

@@ -129,7 +129,7 @@ def print_correction_patterns(db_path):
         return
 
     pending = [r for r in rows if r[1] == "pending_promotion"]
-    accumulating = [r for r in rows if r[1] == "accumulating"]
+    accumulating = [r for r in rows if r[1] == "accumulating" and r[2] >= 2]
     promoted = [r for r in rows if r[1] == "promoted"]
 
     if not pending and not accumulating:
