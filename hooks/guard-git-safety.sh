@@ -60,7 +60,7 @@ fi
 # Block commits directly on main or dev (not in a worktree)
 if echo "$COMMAND" | grep -qE 'git\s+commit'; then
   # Only block if we're on main or dev in the main worktree (not a story worktree)
-  if [[ "$PWD" != */\.claude/worktrees/* && "$PWD" != /tmp/merge-dev-* ]]; then
+  if [[ "$PWD" != */\.claude/worktrees/* && "$PWD" != */\.worktrees/* && "$PWD" != /tmp/merge-dev-* ]]; then
     CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
     if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "dev" ]]; then
       echo "BLOCKED: Cannot commit directly to $CURRENT_BRANCH. Create a feature branch first." >&2
