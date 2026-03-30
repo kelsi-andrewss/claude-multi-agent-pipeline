@@ -88,6 +88,15 @@ POSITIVE_INTENT = re.compile(
     re.IGNORECASE
 )
 
+NON_CORRECTION = re.compile(
+    r"^(logged in|done|ready|fixed|deployed|"
+    r"continue|go on|keep going|"
+    r"always|never|sure|ok|right|correct|"
+    r"you do it|no you do it|"
+    r"sorry continue|that's how we fix it\??)[.!?\s]*$",
+    re.IGNORECASE
+)
+
 def is_structural_content(msg):
     """Pre-filter: returns True if message is structural/pasted content that should
     be rejected before embedding. Catches code fences, long messages, markdown
@@ -135,14 +144,18 @@ def extract_corrections(turns):
             continue
         if is_structural_content(msg):
             continue
+        if len(msg) < 15:
+            continue
+        if NON_CORRECTION.match(msg):
+            continue
 
         if embedding_calls < MAX_EMBEDDING_CALLS_PER_PHASE:
             embedding_calls += 1
             matched = is_correction(msg, prototype_embs)
         else:
-            matched = False
+            matched = None
 
-        if matched:
+        if matched is not None:
             theme_key = msg[:30].lower().strip()
             weight = 1.0
 
@@ -154,6 +167,7 @@ def extract_corrections(turns):
                 "turn_idx": turn["turn_idx"],
                 "content": msg[:300],
                 "weight": weight,
+                "embedding": matched,
             })
 
     return corrections
@@ -263,7 +277,7 @@ CORRECTION_PROTOTYPES = [
     "why did you skip the pipeline",
     "you're not listening to me",
 ]
-PROTOTYPE_THRESHOLD = 0.55
+PROTOTYPE_THRESHOLD = 0.65
 MAX_EMBEDDING_CALLS_PER_PHASE = 5  # Applied independently in extraction and grouping phases
 _prototype_embeddings = None
 
@@ -284,16 +298,18 @@ def _get_prototype_embeddings():
 
 
 def is_correction(msg, prototype_embeddings):
-    """Returns True if msg is semantically similar to a correction prototype.
+    """Returns the embedding vector if msg is semantically similar to a correction prototype, else None.
 
     Computes cosine similarity against each prototype embedding and returns
-    True if max similarity >= PROTOTYPE_THRESHOLD.
+    the msg embedding vector if max similarity >= PROTOTYPE_THRESHOLD, else None.
     """
     msg_vec = get_embedding(msg)
     if msg_vec is None:
-        return False
+        return None
     similarities = [cosine_similarity(msg_vec, proto_vec) for proto_vec in prototype_embeddings]
-    return max(similarities) >= PROTOTYPE_THRESHOLD
+    if max(similarities) >= PROTOTYPE_THRESHOLD:
+        return msg_vec
+    return None
 
 
 def _ensure_correction_groups_table(cursor):
@@ -436,8 +452,6 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
         _ensure_correction_groups_table(cursor)
         now = int(time.time())
 
-        grouping_embedding_calls = 0
-
         for correction in all_corrections:
             theme_text = correction["content"]
             theme_key = theme_text[:300]
@@ -447,14 +461,13 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 continue
             seen_themes.add(theme_key)
 
+            # Reuse the embedding computed during extraction
+            correction_embedding = correction.get("embedding")
+
             # Try semantic matching via embedding before falling back to exact text match
             matched_group_id = None
-            correction_embedding = None
-            if grouping_embedding_calls < MAX_EMBEDDING_CALLS_PER_PHASE:
-                grouping_embedding_calls += 1
-                correction_embedding = get_embedding(theme_key)
-                if correction_embedding is not None:
-                    matched_group_id = _find_matching_group(cursor, correction_embedding, SIMILARITY_THRESHOLD)
+            if correction_embedding is not None:
+                matched_group_id = _find_matching_group(cursor, correction_embedding, SIMILARITY_THRESHOLD)
 
             if matched_group_id is not None:
                 # Semantic match found -- use that group for the update
@@ -483,7 +496,9 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                 new_count = row[1] + 1
                 old_dates = json.loads(row[2]) if row[2] else []
                 old_dates.append(today)
-                new_status = 'pending_promotion' if new_count >= PROMOTION_THRESHOLD else row[3]
+                distinct_dates = len(set(old_dates))
+                qualifies = new_count >= PROMOTION_THRESHOLD and len(theme_key) >= 20 and distinct_dates >= 2
+                new_status = 'pending_promotion' if qualifies else row[3]
                 updates = {
                     'count': new_count, 'correction_dates': json.dumps(old_dates),
                     'status': new_status, 'updated_at': now,
@@ -501,7 +516,10 @@ def process_session_corrections(transcript_path, db_file, session_id="", project
                     + (row[0],)
                 )
             else:
-                embedding_blob = embedding_to_blob(correction_embedding) if correction_embedding is not None else None
+                # Don't create orphan rows without embeddings -- they can never be deduplicated
+                if correction_embedding is None:
+                    continue
+                embedding_blob = embedding_to_blob(correction_embedding)
                 cursor.execute(
                     "INSERT INTO correction_groups (theme, status, count, correction_dates, embedding, source, created_at, updated_at) "
                     "VALUES (?, 'accumulating', 1, ?, ?, 'auto', ?, ?)",
