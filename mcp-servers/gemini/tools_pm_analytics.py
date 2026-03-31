@@ -95,6 +95,7 @@ def register(mcp):
                 tp_filter = " AND epic_id = ?"
                 tp_params.append(epic_id)
 
+            # Safe: group_expr is a hardcoded column expression from the validated switch above, not user input
             rows = conn.execute(
                 f"""SELECT {group_expr} as period, COUNT(*) as completed
                     FROM stories
@@ -131,6 +132,7 @@ def register(mcp):
                 epic_filter = " AND epic_id = ?"
                 params.append(epic_id)
 
+            # Safe: epic_filter uses ? placeholders; values are in params list
             by_state = conn.execute(
                 f"SELECT state, COUNT(*) as cnt FROM stories WHERE archived = 0{epic_filter} GROUP BY state ORDER BY cnt DESC",
                 params
@@ -175,6 +177,7 @@ def register(mcp):
             if epic_id:
                 tp_filter = " AND epic_id = ?"
                 tp_params.append(epic_id)
+            # Safe: tp_filter uses ? placeholders; values are in tp_params list
             tp_rows = conn.execute(
                 f"""SELECT strftime('%Y-W%W', completed_at) as period, COUNT(*) as completed
                     FROM stories

@@ -123,6 +123,7 @@ def register(mcp):
                 params.append(agent)
 
             where = " AND ".join(conditions) if conditions else "1=1"
+            # Safe: where clause built from ? placeholders; values in params list
             stories = conn.execute(
                 f"SELECT * FROM stories WHERE {where} ORDER BY COALESCE(order_idx, 2147483647), id", params
             ).fetchall()
@@ -201,6 +202,7 @@ def register(mcp):
             epics_out = []
             for epic in epic_rows:
                 ed = _epic_to_dict(epic)
+                # Safe: archived_filter is a hardcoded string literal, not user input
                 archived_filter = "" if include_archived else " AND archived = 0"
                 counts = conn.execute(
                     f"SELECT state, COUNT(*) as cnt FROM stories "
@@ -242,6 +244,7 @@ def register(mcp):
                 epic_filter = " AND epic_id = ?"
                 story_params.append(epic_id)
 
+            # Safe: epic_filter uses ? placeholders; values in story_params
             stories = conn.execute(
                 f"SELECT * FROM stories WHERE archived = 0{epic_filter} "
                 f"ORDER BY COALESCE(order_idx, 2147483647), id",

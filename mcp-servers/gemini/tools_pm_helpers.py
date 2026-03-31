@@ -184,6 +184,7 @@ def startup_migrate(db_path: Path | None = None) -> None:
                 ("patterns", "pattern-"),
             ]:
                 prefix_len = len(prefix)
+                assert isinstance(prefix_len, int) and prefix_len > 0  # Safe: from len() of hardcoded prefix
                 row = conn.execute(
                     f"SELECT MAX(CAST(SUBSTR(id, {prefix_len + 1}) AS INTEGER)) FROM {table}"
                 ).fetchone()
@@ -234,6 +235,7 @@ def _next_id(conn: sqlite3.Connection, table: str, prefix: str) -> str:
     ).fetchone()
     if existing:
         prefix_len = len(prefix)
+        assert isinstance(prefix_len, int) and prefix_len > 0  # Safe: prefix_len is int from len(), table validated by _validate_table_name
         actual_max = conn.execute(
             f"SELECT MAX(CAST(SUBSTR(id, {prefix_len + 1}) AS INTEGER)) FROM {table}"
         ).fetchone()[0] or 0
