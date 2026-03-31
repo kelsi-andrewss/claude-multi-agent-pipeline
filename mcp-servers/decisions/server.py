@@ -87,6 +87,15 @@ def _parse_relationships(raw: str) -> list[tuple[int, str]]:
     return result
 
 
+def _connect_run_state():
+    """Open run-state.db with standard WAL + busy_timeout pragmas."""
+    db_path = os.path.expanduser("~/.claude/.claude/run-state.db")
+    conn = sqlite3.connect(db_path, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
 def _staleness_tier(created_at: str | None) -> str:
     """Return 'fresh' (<7d), 'aging' (7-30d), 'stale' (>30d), or 'unknown'."""
     if not created_at:
@@ -272,7 +281,7 @@ def get_decision(decision_id: int) -> str:
 
     run_db = os.path.expanduser("~/.claude/.claude/run-state.db")
     if os.path.exists(run_db):
-        rconn = sqlite3.connect(run_db, timeout=5)
+        rconn = _connect_run_state()
         try:
             row = rconn.execute(
                 "SELECT staleness_score, days_since_activity, reinforcement_count "
