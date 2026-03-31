@@ -196,7 +196,7 @@ class SearchEngine:
     def _fetch_decision(self, decision_id: int) -> Decision | None:
         row = self._conn.execute(
             "SELECT id, content, reasoning, status, source, superseded_by, "
-            "created_at, updated_at FROM decisions WHERE id = ?",
+            "created_at, updated_at, domain, related_decisions FROM decisions WHERE id = ?",
             (decision_id,),
         ).fetchone()
         if row is None:
@@ -222,6 +222,8 @@ class SearchEngine:
             superseded_by=row[5],
             created_at=row[6],
             updated_at=row[7],
+            domain=row[8],
+            related_decisions=row[9],
             scopes=scopes,
         )
 

@@ -424,12 +424,13 @@ class DecisionStore:
             if not has_domain:
                 return []
 
+            escaped = domain.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             rows = conn.execute(
                 "SELECT id, content, reasoning, status, source, superseded_by, "
-                "created_at, updated_at, related_decisions FROM decisions "
-                "WHERE status = 'active' AND (domain = ? OR domain LIKE ?) "
+                "created_at, updated_at, domain, related_decisions FROM decisions "
+                "WHERE status = 'active' AND (domain = ? OR domain LIKE ? ESCAPE '\\') "
                 "ORDER BY id LIMIT ?",
-                (domain, f"%{domain}%", limit),
+                (domain, f"%{escaped}%", limit),
             ).fetchall()
 
             decisions = []
@@ -453,7 +454,8 @@ class DecisionStore:
                         superseded_by=row[5],
                         created_at=row[6],
                         updated_at=row[7],
-                        related_decisions=row[8],
+                        domain=row[8],
+                        related_decisions=row[9],
                         scopes=scopes,
                     )
                 )
