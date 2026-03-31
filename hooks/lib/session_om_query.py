@@ -39,6 +39,7 @@ def prune_and_query(om_db):
     except Exception:
         pass
 
+    # Safe: DEFAULT_DECAY is a module-level float constant, int(now) is a Unix timestamp — no user input
     decay_score = (
         f"feedback_score * EXP(-COALESCE(decay_lambda, {DEFAULT_DECAY}) "
         f"* (({int(now)} - COALESCE(last_seen_at, created_at)) / 86400.0))"
