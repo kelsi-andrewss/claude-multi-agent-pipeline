@@ -46,6 +46,9 @@ def _db_connection():
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         yield conn
+    except BaseException:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -75,15 +78,20 @@ def _content_hash(content):
     return hashlib.md5(content.lower().strip().encode()).hexdigest()[:16]
 
 
-def dedup_check(content, primary_tag):
-    """Returns (existing_id or None, embedding or None)."""
+def dedup_check(content, primary_tag, conn=None):
+    """Returns (existing_id or None, embedding or None).
+
+    When conn is provided, uses that connection (caller owns lifecycle).
+    When conn is None, opens its own connection for backward compat.
+    """
     _ensure_primary_tag_column()
     embedding = get_embedding(content)
 
     if embedding is not None:
         try:
-            with _db_connection() as conn:
-                cursor = conn.cursor()
+            _conn = conn if conn is not None else sqlite3.connect(OM_DB_PATH, timeout=10)
+            try:
+                cursor = _conn.cursor()
                 cursor.execute(
                     "SELECT id, mean_vec FROM memories WHERE primary_tag = ? AND mean_vec IS NOT NULL",
                     (primary_tag,),
@@ -95,6 +103,9 @@ def dedup_check(content, primary_tag):
                     sim = cosine_similarity(embedding, stored_vec)
                     if sim >= DEDUP_THRESHOLD:
                         return row_id, embedding
+            finally:
+                if conn is None:
+                    _conn.close()
         except sqlite3.Error:
             pass
         return None, embedding
@@ -105,8 +116,9 @@ def dedup_check(content, primary_tag):
         _ollama_fallback_warned = True
     simhash = _content_hash(content)
     try:
-        with _db_connection() as conn:
-            cursor = conn.cursor()
+        _conn = conn if conn is not None else sqlite3.connect(OM_DB_PATH, timeout=10)
+        try:
+            cursor = _conn.cursor()
             cursor.execute(
                 "SELECT id FROM memories WHERE simhash = ? AND primary_tag = ?",
                 (simhash, primary_tag),
@@ -114,6 +126,9 @@ def dedup_check(content, primary_tag):
             row = cursor.fetchone()
             if row:
                 return row[0], None
+        finally:
+            if conn is None:
+                _conn.close()
     except sqlite3.Error:
         pass
 
@@ -200,33 +215,32 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
     primary_tag = valid_tags[0]
 
     try:
-        existing_id, embedding = dedup_check(content, primary_tag)
-        if existing_id is not None:
-            now = int(time.time())
-            with _db_connection() as conn:
+        with _db_connection() as conn:
+            existing_id, embedding = dedup_check(content, primary_tag, conn=conn)
+            if existing_id is not None:
+                now = int(time.time())
                 cursor = conn.cursor()
                 cursor.execute(
                     "UPDATE memories SET content = ?, updated_at = ?, last_seen_at = ? WHERE id = ?",
                     (content, now, now, existing_id),
                 )
                 conn.commit()
-            print(f"om_write: dedup_fired — existing_id={existing_id} primary_tag={primary_tag}", file=sys.stderr)
-            return existing_id
+                print(f"om_write: dedup_fired — existing_id={existing_id} primary_tag={primary_tag}", file=sys.stderr)
+                return existing_id
 
-        now = int(time.time())
-        new_id = str(uuid.uuid4())
+            now = int(time.time())
+            new_id = str(uuid.uuid4())
 
-        if embedding is not None:
-            mean_vec = embedding_to_blob(embedding)
-            mean_dim = len(embedding)
-        else:
-            mean_vec = None
-            mean_dim = None
+            if embedding is not None:
+                mean_vec = embedding_to_blob(embedding)
+                mean_dim = len(embedding)
+            else:
+                mean_vec = None
+                mean_dim = None
 
-        simhash = _content_hash(content)
-        tags_json = json.dumps(tags)
+            simhash = _content_hash(content)
+            tags_json = json.dumps(tags)
 
-        with _db_connection() as conn:
             pruned = enforce_budget(conn, primary_tag)
             if pruned > 0:
                 print(f"om_write: budget_enforced — primary_tag={primary_tag} pruned={pruned}", file=sys.stderr)
@@ -243,8 +257,8 @@ def om_write(content, tags, user_id="proj:dotclaude", sector="procedural",
             )
             conn.commit()
 
-        print(f"om_write: write_success — id={new_id} primary_tag={primary_tag}", file=sys.stderr)
-        return new_id
+            print(f"om_write: write_success — id={new_id} primary_tag={primary_tag}", file=sys.stderr)
+            return new_id
 
     except Exception as e:
         print(f"om_write: write_error — error={e} tags={tags}", file=sys.stderr)
