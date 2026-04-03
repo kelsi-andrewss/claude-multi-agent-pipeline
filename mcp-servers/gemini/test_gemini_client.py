@@ -1,9 +1,10 @@
-"""Tests for _gemini timeout and retry behavior."""
+"""Tests for _gemini timeout/retry behavior and audit two-pass flow."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
@@ -20,7 +21,8 @@ from gemini_client import (
     GeminiCLIError,
     GeminiParseError,
 )
-from constants import TIMEOUT_MEDIUM
+from constants import TIMEOUT_MEDIUM, TIMEOUT_HEAVY
+from tools_analysis import _extract_signatures, _do_audit
 
 
 @pytest.fixture
@@ -176,3 +178,146 @@ async def test_final_exception_propagated():
             with patch("gemini_client.asyncio.sleep", new_callable=AsyncMock):
                 with pytest.raises(GeminiCLIError, match="server error"):
                     await _gemini("hi", max_retries=2)
+
+
+# --- Two-pass audit tests ---
+
+
+@pytest.mark.asyncio
+async def test_two_pass_audit_calls_gemini_twice():
+    """Two-pass audit calls _gemini exactly twice: triage then deep dive."""
+    triage_json = json.dumps({
+        "flagged_files": ["src/app.py"],
+        "dead_code_candidates": [],
+    })
+
+    gemini_calls = []
+
+    async def mock_gemini(prompt, *, model=None, timeout=TIMEOUT_MEDIUM, max_retries=3):
+        gemini_calls.append({"prompt": prompt, "timeout": timeout})
+        if len(gemini_calls) == 1:
+            return triage_json
+        return "Audit report content"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        src = root / "src"
+        src.mkdir()
+        (src / "app.py").write_text("def main():\n    pass\n")
+        (root / "AUDIT-GEMINI.md").touch()
+
+        with patch("tools_analysis._gemini", side_effect=mock_gemini):
+            with patch("tools_analysis._load_audit_context", return_value=""):
+                with patch("tools_analysis._load_audit_prompt", return_value="Audit prompt"):
+                    result = await _do_audit(project_root=str(root))
+
+    assert len(gemini_calls) == 2
+    assert "triage" in gemini_calls[0]["prompt"].lower()
+    assert gemini_calls[0]["timeout"] == TIMEOUT_MEDIUM
+    assert gemini_calls[1]["timeout"] == TIMEOUT_HEAVY
+    assert result == "Audit report content"
+
+
+@pytest.mark.asyncio
+async def test_triage_failure_falls_back_to_single_pass():
+    """When triage returns a Gemini error, falls back to single-pass with all files."""
+    gemini_calls = []
+
+    async def mock_gemini(prompt, *, model=None, timeout=TIMEOUT_MEDIUM, max_retries=3):
+        gemini_calls.append({"prompt": prompt, "timeout": timeout})
+        if len(gemini_calls) == 1:
+            raise GeminiTimeoutError("No response after 180s")
+        return "Fallback report"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "a.py").write_text("def foo():\n    pass\n")
+        (root / "b.py").write_text("def bar():\n    pass\n")
+
+        with patch("tools_analysis._gemini", side_effect=mock_gemini):
+            with patch("tools_analysis._load_audit_context", return_value=""):
+                with patch("tools_analysis._load_audit_prompt", return_value="Audit prompt"):
+                    result = await _do_audit(project_root=str(root))
+
+    assert result == "Fallback report"
+    assert len(gemini_calls) == 2
+    # Second call (deep dive) should contain both files since triage failed
+    deep_prompt = gemini_calls[1]["prompt"]
+    assert "a.py" in deep_prompt
+    assert "b.py" in deep_prompt
+
+
+@pytest.mark.asyncio
+async def test_dead_code_candidates_in_deep_dive_prompt():
+    """Dead code candidates from triage appear in the deep dive prompt."""
+    triage_json = json.dumps({
+        "flagged_files": ["mod.py"],
+        "dead_code_candidates": [
+            {"file": "mod.py", "name": "orphaned_helper", "type": "function"},
+            {"file": "mod.py", "name": "OldWidget", "type": "class"},
+        ],
+    })
+
+    gemini_calls = []
+
+    async def mock_gemini(prompt, *, model=None, timeout=TIMEOUT_MEDIUM, max_retries=3):
+        gemini_calls.append(prompt)
+        if len(gemini_calls) == 1:
+            return triage_json
+        return "Report with dead code"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "mod.py").write_text("def orphaned_helper():\n    pass\n\nclass OldWidget:\n    pass\n")
+
+        with patch("tools_analysis._gemini", side_effect=mock_gemini):
+            with patch("tools_analysis._load_audit_context", return_value=""):
+                with patch("tools_analysis._load_audit_prompt", return_value="Audit prompt"):
+                    await _do_audit(project_root=str(root))
+
+    deep_prompt = gemini_calls[1]
+    assert "Dead Code Candidates" in deep_prompt
+    assert "orphaned_helper" in deep_prompt
+    assert "OldWidget" in deep_prompt
+
+
+def test_extract_signatures_extracts_defs_and_imports():
+    """_extract_signatures returns only signature lines, not function bodies."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "sample.py").write_text(
+            "import os\n"
+            "from pathlib import Path\n"
+            "\n"
+            "SECRET = 'should_not_appear'\n"
+            "\n"
+            "def process_data(x):\n"
+            "    return x * 2\n"
+            "\n"
+            "class MyHandler:\n"
+            "    def handle(self):\n"
+            "        pass\n"
+        )
+        (root / "utils.js").write_text(
+            "export function fetchData() {\n"
+            "  return null;\n"
+            "}\n"
+            "const internal = 42;\n"
+            "export default class ApiClient {\n"
+            "  constructor() {}\n"
+            "}\n"
+        )
+
+        files = sorted(root.glob("*.*"))
+        result = _extract_signatures(files, root=root)
+
+    assert "import os" in result
+    assert "from pathlib import Path" in result
+    assert "def process_data(x):" in result
+    assert "class MyHandler:" in result
+    assert "export function fetchData()" in result
+    assert "export default class ApiClient" in result
+    # Body lines and non-signature constants must NOT appear
+    assert "should_not_appear" not in result
+    assert "return x * 2" not in result
+    assert "const internal" not in result
