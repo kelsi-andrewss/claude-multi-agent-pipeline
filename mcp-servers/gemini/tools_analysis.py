@@ -13,6 +13,8 @@ from constants import (
     NO_CODE_INSTRUCTION,
     PROJECT_ROOT,
     REDESIGN_SYSTEM_INSTRUCTION,
+    TIMEOUT_HEAVY,
+    TIMEOUT_LIGHT,
     VALID_AUDIT_SECTIONS,
     VALID_REDESIGN_SECTIONS,
 )
@@ -317,7 +319,7 @@ async def _do_audit(
 
     full_prompt = "\n\n".join(prompt_parts)
 
-    report = await _gemini(full_prompt, model=model)
+    report = await _gemini(full_prompt, model=model, timeout=TIMEOUT_HEAVY)
 
     if report.startswith("[gemini error") or report.startswith("[gemini parse error"):
         return report
@@ -358,7 +360,7 @@ async def _do_find_bug(
         if audit_context:
             hypothesis_prompt += f"\n\n## Project Context\n\n{audit_context}"
 
-        pass1_response = await _gemini(hypothesis_prompt, model=model)
+        pass1_response = await _gemini(hypothesis_prompt, model=model, timeout=TIMEOUT_HEAVY)
 
         if not pass1_response.startswith("[gemini error"):
             candidate_paths = []
@@ -406,7 +408,7 @@ async def _do_find_bug(
         prompt_parts.append(f"## Skipped Files (exceeded budget)\n\n{skipped_list}")
 
     full_prompt = "\n\n".join(prompt_parts)
-    return await _gemini(full_prompt, model=model)
+    return await _gemini(full_prompt, model=model, timeout=TIMEOUT_HEAVY)
 
 
 def register(mcp):
@@ -549,7 +551,7 @@ def register(mcp):
             f"## Codebase\n\n{code_content}"
         )
 
-        raw = await _gemini(full_prompt, model=model)
+        raw = await _gemini(full_prompt, model=model, timeout=TIMEOUT_LIGHT)
 
         if raw.startswith("[gemini error") or raw.startswith("[gemini parse error"):
             return json.dumps({"pattern": pattern, "violations": [], "files_checked": files_checked, "error": raw})
