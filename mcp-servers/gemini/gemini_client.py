@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import json
+import logging
 import os
+import random
 from pathlib import Path
 
 from constants import (
@@ -19,6 +21,9 @@ from constants import (
     AUDIT_PROMPT_PATH,
     DOCUMENTS,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiError(Exception):
@@ -37,10 +42,46 @@ class GeminiParseError(GeminiError):
     """Gemini CLI returned invalid JSON."""
 
 
-async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_instruction: str | None = None, timeout: int = TIMEOUT_MEDIUM) -> str:
-    """Call gemini CLI in headless mode and return the response text."""
+async def _gemini(
+    prompt: str,
+    *,
+    model: str | None = DEFAULT_MODEL,
+    system_instruction: str | None = None,
+    timeout: int = TIMEOUT_MEDIUM,
+    max_retries: int = 3,
+) -> str:
+    """Call gemini CLI in headless mode and return the response text.
+
+    Retries on GeminiTimeoutError and GeminiCLIError with exponential backoff.
+    GeminiParseError is never retried (bad JSON won't fix itself).
+    """
     if system_instruction:
         prompt = f"[System: {system_instruction}]\n\n{prompt}"
+
+    last_exc: GeminiError | None = None
+    for attempt in range(1 + max_retries):
+        if attempt > 0:
+            delay = 2 ** attempt + random.uniform(0, 1)
+            logger.warning(
+                "Gemini retry %d/%d after %.1fs (previous: %s)",
+                attempt, max_retries, delay, last_exc,
+            )
+            await asyncio.sleep(delay)
+
+        try:
+            return await _gemini_once(prompt, model=model, timeout=timeout)
+        except GeminiParseError:
+            raise
+        except (GeminiTimeoutError, GeminiCLIError) as exc:
+            last_exc = exc
+
+    raise last_exc  # type: ignore[misc]
+
+
+async def _gemini_once(
+    prompt: str, *, model: str | None, timeout: int
+) -> str:
+    """Single Gemini CLI invocation (no retry logic)."""
     cmd: list[str] = ["gemini"]
     if model:
         cmd.extend(["-m", model])
