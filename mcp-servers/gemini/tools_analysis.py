@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 from pathlib import Path
 
 from constants import (
@@ -13,6 +15,9 @@ from constants import (
     NO_CODE_INSTRUCTION,
     PROJECT_ROOT,
     REDESIGN_SYSTEM_INSTRUCTION,
+    TIMEOUT_HEAVY,
+    TIMEOUT_LIGHT,
+    TIMEOUT_MEDIUM,
     VALID_AUDIT_SECTIONS,
     VALID_REDESIGN_SECTIONS,
 )
@@ -22,6 +27,23 @@ from gemini_client import (
     _load_audit_context,
     _load_audit_prompt,
     _read_files_within_budget,
+)
+
+logger = logging.getLogger(__name__)
+
+MAX_SIGNATURE_BYTES = 50_000
+
+_SIGNATURE_PATTERNS = re.compile(
+    r"^(?:"
+    r"(?:from\s+\S+\s+)?import\s+"
+    r"|def\s+\w+\s*\("
+    r"|class\s+\w+"
+    r"|(?:export\s+)?(?:async\s+)?function\s+"
+    r"|export\s+(?:default\s+)?(?:class|function|const|let|var)\s+"
+    r"|(?:pub\s+)?(?:fn|struct|enum|trait|impl)\s+"
+    r"|func\s+"
+    r")",
+    re.MULTILINE,
 )
 
 
@@ -250,6 +272,44 @@ def _build_redesign_prompt(
     return prompt
 
 
+def _extract_signatures(files: list[Path], root: Path | None = None) -> str:
+    """Extract function/class/import signatures from files for lightweight triage.
+
+    Returns a compact string with one section per file containing only
+    import, def, class, and function declaration lines. Stops adding
+    files once cumulative text exceeds MAX_SIGNATURE_BYTES.
+    """
+    _root = root or PROJECT_ROOT
+    parts: list[str] = []
+    total = 0
+
+    for fpath in files:
+        try:
+            text = fpath.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        matched = [line for line in text.splitlines() if _SIGNATURE_PATTERNS.match(line)]
+        if not matched:
+            continue
+
+        try:
+            rel = fpath.relative_to(_root)
+        except ValueError:
+            rel = fpath
+
+        section = f"### {rel}\n" + "\n".join(matched)
+        section_bytes = len(section.encode("utf-8"))
+
+        if total + section_bytes > MAX_SIGNATURE_BYTES:
+            break
+
+        parts.append(section)
+        total += section_bytes
+
+    return "\n\n".join(parts)
+
+
 async def _do_audit(
     paths: list[str] | None = None,
     sections: list[str] | None = None,
@@ -258,7 +318,15 @@ async def _do_audit(
     model: str | None = None,
     project_root: str | None = None,
 ) -> str:
-    """Core audit logic, callable directly without MCP registration."""
+    """Core audit logic with two-pass triage + deep dive.
+
+    Pass 1 (triage): send file signatures to Gemini to identify which files
+    need deep analysis and flag dead code candidates.
+    Pass 2 (deep dive): read only flagged files at full content, include
+    dead code candidates for confirmation, produce the final report.
+
+    Falls back to single-pass (all files) if triage fails.
+    """
     _root = Path(project_root).resolve() if project_root else None
 
     if sections:
@@ -276,10 +344,82 @@ async def _do_audit(
     if not files:
         return "Error: no source files found to audit."
 
-    code_content, skipped = _read_files_within_budget(files, MAX_CODE_BYTES, root=_root)
-
     audit_context = _load_audit_context(root=_root)
     audit_prompt = _load_audit_prompt()
+
+    # ------------------------------------------------------------------
+    # Pass 1: Triage — send signatures for lightweight analysis
+    # ------------------------------------------------------------------
+    signatures = _extract_signatures(files, root=_root)
+    flagged_files: list[str] | None = None
+    dead_code_candidates: list[dict] = []
+
+    if signatures:
+        triage_parts = [
+            "[System: You are a senior code auditor performing triage. "
+            "Given file signatures (imports, function/class declarations), identify:\n"
+            "1. Files that need deep audit (code smells, bugs, security risks, complexity).\n"
+            "2. Functions, classes, or imports that appear to be dead code "
+            "(defined but never referenced elsewhere).\n\n"
+            "Return ONLY valid JSON with this schema:\n"
+            '{"flagged_files": ["path/to/file.py"], '
+            '"dead_code_candidates": [{"file": "path/to/file.py", '
+            '"name": "unused_func", "type": "function"}]}\n\n'
+            "Flag conservatively — when in doubt, include the file.]"
+        ]
+
+        if audit_context:
+            triage_parts.append(f"## Project Context\n\n{audit_context}")
+
+        triage_parts.append(f"## File Signatures\n\n{signatures}")
+
+        triage_prompt = "\n\n".join(triage_parts)
+
+        try:
+            triage_response = await _gemini(
+                triage_prompt, model=model, timeout=TIMEOUT_MEDIUM
+            )
+        except Exception:
+            logger.warning("Triage pass failed with exception, falling back to single-pass")
+            triage_response = ""
+
+        if triage_response and not triage_response.startswith("[gemini error"):
+            # Strip markdown code fences (Gemini often wraps JSON in ```json blocks)
+            cleaned = triage_response.strip()
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\s*```\s*$", "", cleaned)
+
+            try:
+                parsed = json.loads(cleaned)
+                flagged_files = parsed.get("flagged_files", [])
+                if not isinstance(flagged_files, list):
+                    flagged_files = None
+                dead_code_candidates = parsed.get("dead_code_candidates", [])
+                if not isinstance(dead_code_candidates, list):
+                    dead_code_candidates = []
+            except (json.JSONDecodeError, AttributeError):
+                logger.warning("Triage JSON parse failed, falling back to single-pass")
+                flagged_files = None
+                dead_code_candidates = []
+
+    # ------------------------------------------------------------------
+    # Pass 2: Deep dive — read flagged files (or all on fallback)
+    # ------------------------------------------------------------------
+    if flagged_files is not None:
+        flagged_set = set(flagged_files)
+        filtered = [
+            f for f in files
+            if str(f.relative_to(_root) if _root and f.is_relative_to(_root) else f)
+            in flagged_set
+        ]
+        if not filtered:
+            filtered = files
+    else:
+        filtered = files
+
+    code_content, skipped = _read_files_within_budget(
+        filtered, MAX_CODE_BYTES, root=_root
+    )
 
     section_instruction = ""
     if sections:
@@ -287,6 +427,9 @@ async def _do_audit(
             f"\n\nFocus ONLY on these sections: {', '.join(sections)}. "
             "Omit all other sections from the report."
         )
+    section_instruction += (
+        "\n\nAlways include Dead Code analysis regardless of section filter."
+    )
 
     summary_instruction = ""
     if summary_only:
@@ -301,6 +444,18 @@ async def _do_audit(
     )
 
     prompt_parts = [f"[System: {system_block}]"]
+
+    if dead_code_candidates:
+        candidates_text = "\n".join(
+            f"- {c.get('name', '?')} ({c.get('type', '?')}) in {c.get('file', '?')}"
+            for c in dead_code_candidates
+        )
+        prompt_parts.append(
+            f"## Dead Code Candidates (from triage)\n\n"
+            f"The following were flagged as potentially unused. "
+            f"Confirm or reject each based on the full source code below.\n\n"
+            f"{candidates_text}"
+        )
 
     if audit_context:
         prompt_parts.append(f"## Project Context\n\n{audit_context}")
@@ -317,7 +472,7 @@ async def _do_audit(
 
     full_prompt = "\n\n".join(prompt_parts)
 
-    report = await _gemini(full_prompt, model=model)
+    report = await _gemini(full_prompt, model=model, timeout=TIMEOUT_HEAVY)
 
     if report.startswith("[gemini error") or report.startswith("[gemini parse error"):
         return report
@@ -358,7 +513,7 @@ async def _do_find_bug(
         if audit_context:
             hypothesis_prompt += f"\n\n## Project Context\n\n{audit_context}"
 
-        pass1_response = await _gemini(hypothesis_prompt, model=model)
+        pass1_response = await _gemini(hypothesis_prompt, model=model, timeout=TIMEOUT_HEAVY)
 
         if not pass1_response.startswith("[gemini error"):
             candidate_paths = []
@@ -406,7 +561,7 @@ async def _do_find_bug(
         prompt_parts.append(f"## Skipped Files (exceeded budget)\n\n{skipped_list}")
 
     full_prompt = "\n\n".join(prompt_parts)
-    return await _gemini(full_prompt, model=model)
+    return await _gemini(full_prompt, model=model, timeout=TIMEOUT_HEAVY)
 
 
 def register(mcp):
@@ -549,7 +704,7 @@ def register(mcp):
             f"## Codebase\n\n{code_content}"
         )
 
-        raw = await _gemini(full_prompt, model=model)
+        raw = await _gemini(full_prompt, model=model, timeout=TIMEOUT_LIGHT)
 
         if raw.startswith("[gemini error") or raw.startswith("[gemini parse error"):
             return json.dumps({"pattern": pattern, "violations": [], "files_checked": files_checked, "error": raw})

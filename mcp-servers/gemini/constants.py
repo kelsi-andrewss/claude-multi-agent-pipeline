@@ -6,9 +6,15 @@ import os
 from pathlib import Path
 
 DEFAULT_MODEL = None  # Let gemini CLI use its own model routing
-GEMINI_TIMEOUT = 600  # seconds — large-context tools (audit, plan) need room
 
 PROJECT_ROOT = Path(os.environ.get("GEMINI_MCP_PROJECT_ROOT", str(Path.cwd())))
+
+# ---------------------------------------------------------------------------
+# Timeout tiers (seconds)
+# ---------------------------------------------------------------------------
+TIMEOUT_LIGHT = 60    # fast tools: consistency check, web search
+TIMEOUT_MEDIUM = 180  # default: plan, design, test analysis
+TIMEOUT_HEAVY = 300   # large-context: audit, find_bug
 
 NO_CODE_INSTRUCTION = (
     "IMPORTANT: You must NEVER output code in your response. "

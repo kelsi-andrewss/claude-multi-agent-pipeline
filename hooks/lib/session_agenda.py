@@ -74,9 +74,10 @@ def print_agenda(db_path, project_root):
     ).strftime("%Y-%m-%d %H:%M:%S")
     completed_rows = query_db(
         db_path,
-        f"SELECT id, title FROM stories "
-        f"WHERE state IN ('done','shipped') AND archived=0 "
-        f"AND completed_at >= '{cutoff_iso}' ORDER BY completed_at DESC LIMIT 5;",
+        "SELECT id, title FROM stories "
+        "WHERE state IN ('done','shipped') AND archived=0 "
+        "AND completed_at >= ? ORDER BY completed_at DESC LIMIT 5;",
+        (cutoff_iso,),
     )
 
     has_content = stale or active_in_progress or ready_stories or completed_rows

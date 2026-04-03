@@ -174,82 +174,82 @@ def stage_auto_distillation(db_file, project_root):
     today = datetime.now().strftime("%Y-%m-%d")
 
     conn = _connect_db(db_file)
-
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-    from hooks.lib.om_write import om_write
-    from hooks.lib.signal_processor import generate_rule, RULE_THRESHOLD, cluster_and_merge_corrections, llm_cluster_corrections
-
-    # Embedding clustering pass: merge entries with cosine >= 0.80
     try:
-        cursor = conn.cursor()
-        absorbed = cluster_and_merge_corrections(cursor)
-        if absorbed > 0:
-            conn.commit()
-            print(f"Stage 4: embedding clustering merged {absorbed} entries", file=sys.stderr)
-    except Exception as e:
-        print(f"Stage 4: embedding clustering failed (non-fatal): {e}", file=sys.stderr)
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        from hooks.lib.om_write import om_write
+        from hooks.lib.signal_processor import generate_rule, RULE_THRESHOLD, cluster_and_merge_corrections, llm_cluster_corrections
 
-    # LLM clustering pass: merge entries that express the same intent in different words
-    try:
-        cursor = conn.cursor()
-        llm_absorbed = llm_cluster_corrections(cursor)
-        if llm_absorbed > 0:
-            conn.commit()
-            print(f"Stage 4: LLM clustering merged {llm_absorbed} entries", file=sys.stderr)
-    except Exception as e:
-        print(f"Stage 4: LLM clustering failed (non-fatal): {e}", file=sys.stderr)
+        # Embedding clustering pass: merge entries with cosine >= 0.80
+        try:
+            cursor = conn.cursor()
+            absorbed = cluster_and_merge_corrections(cursor)
+            if absorbed > 0:
+                conn.commit()
+                print(f"Stage 4: embedding clustering merged {absorbed} entries", file=sys.stderr)
+        except Exception as e:
+            print(f"Stage 4: embedding clustering failed (non-fatal): {e}", file=sys.stderr)
 
-    rows = conn.execute(
-        "SELECT theme, count, correction_dates, text FROM correction_groups WHERE status='pending_promotion'"
-    ).fetchall()
+        # LLM clustering pass: merge entries that express the same intent in different words
+        try:
+            cursor = conn.cursor()
+            llm_absorbed = llm_cluster_corrections(cursor)
+            if llm_absorbed > 0:
+                conn.commit()
+                print(f"Stage 4: LLM clustering merged {llm_absorbed} entries", file=sys.stderr)
+        except Exception as e:
+            print(f"Stage 4: LLM clustering failed (non-fatal): {e}", file=sys.stderr)
 
-    if not rows:
+        rows = conn.execute(
+            "SELECT theme, count, correction_dates, text FROM correction_groups WHERE status='pending_promotion'"
+        ).fetchall()
+
+        if not rows:
+            print("Stage 4: skipped (no pending_promotion entries)", file=sys.stderr)
+            return
+
+        promoted = 0
+        for theme, count, dates, existing_text in rows:
+            if count < RULE_THRESHOLD:
+                # Not enough evidence — leave as pending_promotion, don't render
+                continue
+
+            # Parse last correction date from dates array
+            last_date = today
+            try:
+                date_list = json.loads(dates) if dates else []
+                if date_list:
+                    last_date = date_list[-1]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            # Use existing rule text if signal_processor already generated it
+            if existing_text and existing_text.startswith("RULE:"):
+                rule_core = re.sub(r'\s*\(Auto-generated from \d+ corrections\)\s*$', '', existing_text)
+                rule_core = re.sub(r'\s*\(from \d+ corrections, last: \d{4}-\d{2}-\d{2}\)\s*$', '', rule_core)
+                pref_text = f"{rule_core} (from {count} corrections, last: {last_date})"
+            else:
+                rule = generate_rule(theme)
+                pref_text = f"RULE: {rule} (from {count} corrections, last: {last_date})"
+
+            try:
+                conn.execute(
+                    "UPDATE correction_groups SET status='promoted', text=?, promoted_at=? WHERE theme=?",
+                    (pref_text, today, theme),
+                )
+                conn.commit()
+                promoted += 1
+            except Exception as e:
+                print(f"Stage 4: promotion failed for {theme[:80]}: {e}", file=sys.stderr)
+
+            try:
+                om_write(content=pref_text, tags=["behavioral-pref"], user_id="proj:dotclaude")
+            except Exception as e:
+                print(f"Stage 4: om_write failed for {theme[:80]}: {e}", file=sys.stderr)
+
+        print(f"Stage 4 complete: {promoted} entries promoted", file=sys.stderr)
+    finally:
         conn.close()
-        print("Stage 4: skipped (no pending_promotion entries)", file=sys.stderr)
-        return
-
-    promoted = 0
-    for theme, count, dates, existing_text in rows:
-        if count < RULE_THRESHOLD:
-            # Not enough evidence — leave as pending_promotion, don't render
-            continue
-
-        # Parse last correction date from dates array
-        last_date = today
-        try:
-            date_list = json.loads(dates) if dates else []
-            if date_list:
-                last_date = date_list[-1]
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        # Use existing rule text if signal_processor already generated it
-        if existing_text and existing_text.startswith("RULE:"):
-            rule_core = re.sub(r'\s*\(Auto-generated from \d+ corrections\)\s*$', '', existing_text)
-            rule_core = re.sub(r'\s*\(from \d+ corrections, last: \d{4}-\d{2}-\d{2}\)\s*$', '', rule_core)
-            pref_text = f"{rule_core} (from {count} corrections, last: {last_date})"
-        else:
-            rule = generate_rule(theme)
-            pref_text = f"RULE: {rule} (from {count} corrections, last: {last_date})"
-
-        try:
-            conn.execute(
-                "UPDATE correction_groups SET status='promoted', text=?, promoted_at=? WHERE theme=?",
-                (pref_text, today, theme),
-            )
-            conn.commit()
-            promoted += 1
-        except Exception as e:
-            print(f"Stage 4: promotion failed for {theme[:80]}: {e}", file=sys.stderr)
-
-        try:
-            om_write(content=pref_text, tags=["behavioral-pref"], user_id="proj:dotclaude")
-        except Exception as e:
-            print(f"Stage 4: om_write failed for {theme[:80]}: {e}", file=sys.stderr)
-
-    conn.close()
-    print(f"Stage 4 complete: {promoted} entries promoted", file=sys.stderr)
 
 
 # -- Stage 5: Hook generation --
@@ -260,6 +260,8 @@ def stage_hook_generation(db_file, project_root):
         return
 
     print("Stage 5: Hook generation", file=sys.stderr)
+
+    from hooks.lib.correction_schema import CORRECTION_GROUPS_DDL
 
     conn = _connect_db(db_file)
 
@@ -286,22 +288,10 @@ def stage_hook_generation(db_file, project_root):
         try:
             conn.execute("BEGIN")
             conn.execute("ALTER TABLE correction_groups RENAME TO correction_groups_old")
-            conn.execute("""CREATE TABLE correction_groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                theme TEXT NOT NULL,
-                status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')),
-                count INTEGER DEFAULT 1,
-                correction_dates TEXT DEFAULT '[]',
-                embedding BLOB,
-                promoted_at TEXT,
-                created_at INTEGER,
-                updated_at INTEGER,
-                source TEXT DEFAULT 'auto',
-                text TEXT DEFAULT ''
-            )""")
+            conn.execute(CORRECTION_GROUPS_DDL[0])
             conn.execute("INSERT INTO correction_groups SELECT * FROM correction_groups_old")
             conn.execute("DROP TABLE correction_groups_old")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)")
+            conn.execute(CORRECTION_GROUPS_DDL[1])
             conn.commit()
         except Exception as e:
             conn.rollback()

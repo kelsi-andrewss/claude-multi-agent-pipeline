@@ -138,6 +138,7 @@ def register(mcp):
                 backlog_rows = []
             backlog_stories = [dict(r) for r in backlog_rows]
 
+            # Safe: epic_filter uses ? placeholders; values in params_epic
             unassigned_rows = conn.execute(
                 f"SELECT id, title, state, epic_id FROM stories s WHERE s.agent IS NULL AND s.archived = 0{epic_filter}",
                 params_epic
@@ -302,6 +303,7 @@ def register(mcp):
                 epic_filter_sql = " AND s.epic_id = ?" if epic_id else ""
                 params_r: list = [epic_id] if epic_id else []
 
+                # Safe: epic_filter_sql uses ? placeholders; values in params_r
                 active_stories = conn.execute(
                     f"SELECT id, title, epic_id FROM stories s WHERE s.archived = 0{epic_filter_sql}",
                     params_r

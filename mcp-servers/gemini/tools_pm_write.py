@@ -471,6 +471,7 @@ def register(mcp):
                 return "No fields to update."
 
             params.append(story_id)
+            # Safe: updates[] contains hardcoded 'column = ?' literals, not user input
             conn.execute(
                 f"UPDATE stories SET {', '.join(updates)} WHERE id = ?", params
             )
@@ -572,6 +573,7 @@ def register(mcp):
                 return "No fields to update."
 
             params.append(epic_id)
+            # Safe: updates[] contains hardcoded 'column = ?' literals, not user input
             conn.execute(
                 f"UPDATE epics SET {', '.join(updates)} WHERE id = ?", params
             )
@@ -618,6 +620,7 @@ def register(mcp):
                 return "No fields to update."
 
             params.extend([story_id, task_id])
+            # Safe: updates[] contains hardcoded 'column = ?' literals, not user input
             conn.execute(
                 f"UPDATE tasks SET {', '.join(updates)} WHERE story_id = ? AND id = ?", params
             )

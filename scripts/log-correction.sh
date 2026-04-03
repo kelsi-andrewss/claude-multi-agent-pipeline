@@ -37,33 +37,25 @@ if [[ ! -f "$DB_FILE" ]]; then
   exit 1
 fi
 
-python3 - "$DB_FILE" "$THEME" "$DATE" <<'PYEOF'
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+python3 - "$DB_FILE" "$THEME" "$DATE" "$PROJECT_ROOT" <<'PYEOF'
 import json, sqlite3, sys, time
 
 db_file = sys.argv[1]
 theme = sys.argv[2]
 date = sys.argv[3]
+project_root = sys.argv[4]
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+from hooks.lib.correction_schema import CORRECTION_GROUPS_DDL
 
 conn = sqlite3.connect(db_file, timeout=5)
 cursor = conn.cursor()
 
-cursor.execute(
-    "CREATE TABLE IF NOT EXISTS correction_groups ("
-    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-    "theme TEXT NOT NULL, "
-    "status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')), "
-    "count INTEGER DEFAULT 1, "
-    "correction_dates TEXT DEFAULT '[]', "
-    "embedding BLOB, "
-    "promoted_at TEXT, "
-    "created_at INTEGER, "
-    "updated_at INTEGER, "
-    "source TEXT DEFAULT 'auto', "
-    "text TEXT DEFAULT '')"
-)
-cursor.execute(
-    "CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)"
-)
+cursor.executescript(";".join(CORRECTION_GROUPS_DDL))
 
 row = cursor.execute(
     "SELECT id, count, correction_dates, status FROM correction_groups "

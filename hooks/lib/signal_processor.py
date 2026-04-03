@@ -135,7 +135,6 @@ def extract_corrections(turns):
     for i, turn in enumerate(turns):
 
         if turn["role"] != "user":
-            prev_assistant_had_tool_use = turn.get("has_tool_use", False)
             continue
 
         msg = turn["content"]
@@ -359,23 +358,9 @@ def is_correction(msg, prototype_embeddings):
 
 
 def _ensure_correction_groups_table(cursor):
-    cursor.execute(
-        "CREATE TABLE IF NOT EXISTS correction_groups ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-        "theme TEXT NOT NULL, "
-        "status TEXT DEFAULT 'accumulating' CHECK(status IN ('accumulating','pending_promotion','promoted','dismissed')), "
-        "count INTEGER DEFAULT 1, "
-        "correction_dates TEXT DEFAULT '[]', "
-        "embedding BLOB, "
-        "promoted_at TEXT, "
-        "created_at INTEGER, "
-        "updated_at INTEGER, "
-        "source TEXT DEFAULT 'auto', "
-        "text TEXT DEFAULT '')"
-    )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_correction_groups_status ON correction_groups(status)"
-    )
+    from hooks.lib.correction_schema import CORRECTION_GROUPS_DDL
+    for stmt in CORRECTION_GROUPS_DDL:
+        cursor.execute(stmt)
 
 
 def _find_matching_group(cursor, embedding, threshold):
@@ -393,6 +378,23 @@ def _find_matching_group(cursor, embedding, threshold):
 
 
 CLUSTER_THRESHOLD = 0.80
+
+_EXPLETIVE_PREFIX = re.compile(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', re.IGNORECASE)
+
+
+def _pick_best_theme(members, current_best):
+    """Select the longest non-trivial theme from cluster members.
+
+    Strips expletive prefixes before comparing length so that
+    'omg use the ship skill' doesn't beat 'always use the ship skill for deployments'.
+    """
+    best = current_best
+    for m in members:
+        cleaned = _EXPLETIVE_PREFIX.sub('', m['theme']).strip()
+        cleaned_best = _EXPLETIVE_PREFIX.sub('', best).strip()
+        if len(cleaned) > len(cleaned_best):
+            best = m['theme']
+    return best
 
 
 def cluster_and_merge_corrections(cursor, threshold=CLUSTER_THRESHOLD):
@@ -471,12 +473,7 @@ def cluster_and_merge_corrections(cursor, threshold=CLUSTER_THRESHOLD):
         rest = members[1:]
 
         # Pick best theme for rule generation: longest non-trivial theme
-        best_theme = rep['theme']
-        for m in members:
-            cleaned = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', m['theme'], flags=re.IGNORECASE).strip()
-            cleaned_rep = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', best_theme, flags=re.IGNORECASE).strip()
-            if len(cleaned) > len(cleaned_rep):
-                best_theme = m['theme']
+        best_theme = _pick_best_theme(members, rep['theme'])
 
         # Combine dates and recompute count
         all_dates = list(rep['dates'])
@@ -639,12 +636,7 @@ def llm_cluster_corrections(cursor):
         rest = members[1:]
 
         # Pick best theme: longest non-trivial
-        best_theme = rep['theme']
-        for m in members:
-            cleaned = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', m['theme'], flags=re.IGNORECASE).strip()
-            cleaned_rep = re.sub(r'^(bro|omg|omfg|wtf|bruh|dude|yo)\b[,!?\s]*', '', best_theme, flags=re.IGNORECASE).strip()
-            if len(cleaned) > len(cleaned_rep):
-                best_theme = m['theme']
+        best_theme = _pick_best_theme(members, rep['theme'])
 
         all_dates = list(rep['dates'])
         for m in rest:
@@ -1154,6 +1146,10 @@ def main_logic(transcript_path, db_path, session_id="", corrections=None):
 
     try:
         conn = sqlite3.connect(db_path, timeout=10)
+    except Exception:
+        return
+
+    try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.row_factory = sqlite3.Row
@@ -1163,89 +1159,84 @@ def main_logic(transcript_path, db_path, session_id="", corrections=None):
             "SELECT name FROM sqlite_master WHERE type='table' AND name='decision_preferences'"
         )
         if not cursor.fetchone():
-            conn.close()
             return
-    except Exception:
-        return
 
-    now = int(time.time())
-    day_ago = now - 86400
+        now = int(time.time())
+        day_ago = now - 86400
 
-    try:
-        if session_id:
-            cursor.execute(
-                "SELECT id, decision_type, context, chosen_path, session_id "
-                "FROM decision_preferences "
-                "WHERE session_id = ? OR created_at >= ?",
-                (session_id, day_ago),
-            )
-        else:
-            cursor.execute(
-                "SELECT id, decision_type, context, chosen_path, session_id "
-                "FROM decision_preferences "
-                "WHERE created_at >= ?",
-                (day_ago,),
-            )
-        decisions = [dict(row) for row in cursor.fetchall()]
-    except Exception:
-        conn.close()
-        return
-
-    if not decisions:
-        conn.close()
-        return
-
-    turns = parse_transcript_turns(transcript_path)
-    if not turns:
-        conn.close()
-        return
-
-    find_decision_mention_turns(decisions, turns)
-
-    if corrections is None:
-        project_root = os.path.dirname(os.path.dirname(db_path))
-        corrections = process_session_corrections(transcript_path, db_path, session_id, project_root)
-
-    matched_decision_ids = set()
-
-    for correction in corrections:
-        matched_id = match_correction_to_decisions(correction, decisions, turns)
-        if matched_id:
-            matched_decision_ids.add(matched_id)
-            weight = correction["weight"]
-            try:
+        try:
+            if session_id:
                 cursor.execute(
-                    "UPDATE decision_preferences "
-                    "SET signal_score = signal_score - ?, signal_count = signal_count + 1, updated_at = ? "
-                    "WHERE id = ?",
-                    (weight, now, matched_id),
+                    "SELECT id, decision_type, context, chosen_path, session_id "
+                    "FROM decision_preferences "
+                    "WHERE session_id = ? OR created_at >= ?",
+                    (session_id, day_ago),
                 )
-                print(
-                    f"Signal: decision {matched_id} score -= {weight} "
-                    f"(correction: {correction['content'][:60]}...)",
-                    file=sys.stderr,
-                )
-            except Exception as e:
-                print(f"Signal update failed for {matched_id}: {e}", file=sys.stderr)
-
-    for dec in decisions:
-        if dec["id"] not in matched_decision_ids:
-            try:
+            else:
                 cursor.execute(
-                    "UPDATE decision_preferences "
-                    "SET signal_score = signal_score + 0.5, signal_count = signal_count + 1, updated_at = ? "
-                    "WHERE id = ?",
-                    (now, dec["id"]),
+                    "SELECT id, decision_type, context, chosen_path, session_id "
+                    "FROM decision_preferences "
+                    "WHERE created_at >= ?",
+                    (day_ago,),
                 )
-                print(
-                    f"Signal: decision {dec['id']} score += 0.5 (implicit approval)",
-                    file=sys.stderr,
-                )
-            except Exception as e:
-                print(f"Signal update failed for {dec['id']}: {e}", file=sys.stderr)
+            decisions = [dict(row) for row in cursor.fetchall()]
+        except Exception:
+            return
 
-    conn.commit()
-    conn.close()
+        if not decisions:
+            return
+
+        turns = parse_transcript_turns(transcript_path)
+        if not turns:
+            return
+
+        find_decision_mention_turns(decisions, turns)
+
+        if corrections is None:
+            project_root = os.path.dirname(os.path.dirname(db_path))
+            corrections = process_session_corrections(transcript_path, db_path, session_id, project_root)
+
+        matched_decision_ids = set()
+
+        for correction in corrections:
+            matched_id = match_correction_to_decisions(correction, decisions, turns)
+            if matched_id:
+                matched_decision_ids.add(matched_id)
+                weight = correction["weight"]
+                try:
+                    cursor.execute(
+                        "UPDATE decision_preferences "
+                        "SET signal_score = signal_score - ?, signal_count = signal_count + 1, updated_at = ? "
+                        "WHERE id = ?",
+                        (weight, now, matched_id),
+                    )
+                    print(
+                        f"Signal: decision {matched_id} score -= {weight} "
+                        f"(correction: {correction['content'][:60]}...)",
+                        file=sys.stderr,
+                    )
+                except Exception as e:
+                    print(f"Signal update failed for {matched_id}: {e}", file=sys.stderr)
+
+        for dec in decisions:
+            if dec["id"] not in matched_decision_ids:
+                try:
+                    cursor.execute(
+                        "UPDATE decision_preferences "
+                        "SET signal_score = signal_score + 0.5, signal_count = signal_count + 1, updated_at = ? "
+                        "WHERE id = ?",
+                        (now, dec["id"]),
+                    )
+                    print(
+                        f"Signal: decision {dec['id']} score += 0.5 (implicit approval)",
+                        file=sys.stderr,
+                    )
+                except Exception as e:
+                    print(f"Signal update failed for {dec['id']}: {e}", file=sys.stderr)
+
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def main():

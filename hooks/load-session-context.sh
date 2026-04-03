@@ -117,12 +117,8 @@ if [[ "$PWD" == "$HOME/.claude" || "$PWD" == "$HOME/.claude/"* ]]; then
   if [[ -f "$DB_FILE" ]]; then
     python3 -m hooks.lib.session_agenda "$DB_FILE" "$HOME/.claude"
 
-  # Correction patterns — from correction_groups DB table
-  if [[ -f "$DB_FILE" ]]; then
+    # Correction patterns — from correction_groups DB table
     python3 -m hooks.lib.session_agenda --corrections "$DB_FILE"
-  fi
-
-
   fi
 fi
 
