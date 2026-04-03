@@ -12,7 +12,7 @@ from constants import (
     DEFAULT_IGNORE_DIRS,
     DEFAULT_IGNORE_EXTENSIONS,
     DEFAULT_MODEL,
-    GEMINI_TIMEOUT,
+    TIMEOUT_MEDIUM,
     SOURCE_EXTENSIONS,
     MAX_CONTEXT_BYTES,
     PROJECT_ROOT,
@@ -37,7 +37,7 @@ class GeminiParseError(GeminiError):
     """Gemini CLI returned invalid JSON."""
 
 
-async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_instruction: str | None = None) -> str:
+async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_instruction: str | None = None, timeout: int = TIMEOUT_MEDIUM) -> str:
     """Call gemini CLI in headless mode and return the response text."""
     if system_instruction:
         prompt = f"[System: {system_instruction}]\n\n{prompt}"
@@ -54,7 +54,7 @@ async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_inst
     )
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input=prompt.encode()), timeout=GEMINI_TIMEOUT
+            proc.communicate(input=prompt.encode()), timeout=timeout
         )
     except asyncio.TimeoutError:
         try:
@@ -63,7 +63,7 @@ async def _gemini(prompt: str, *, model: str | None = DEFAULT_MODEL, system_inst
         except (ProcessLookupError, asyncio.TimeoutError):
             proc.kill()
             await proc.wait()
-        raise GeminiTimeoutError(f"No response after {GEMINI_TIMEOUT}s")
+        raise GeminiTimeoutError(f"No response after {timeout}s")
     if proc.returncode != 0:
         err = stderr.decode().strip()
         raise GeminiCLIError(f"Exit {proc.returncode}: {err}")
